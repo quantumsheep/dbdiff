@@ -16,8 +16,6 @@ jobs:
             suffix: linux-arm64
           - runner: windows-2025
             suffix: windows-amd64.exe
-          - runner: windows-11-arm
-            suffix: windows-arm64.exe
           - runner: macos-15-intel
             suffix: macos-amd64
           - runner: macos-26
