@@ -492,4 +492,62 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 		expectDiff(t, driver, `DROP INDEX "idx_users_name";
 CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
 	})
+
+	t.Run("Triggers", func(t *testing.T) {
+		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
+		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+
+		mustExecSQL(t, sourceDatabase, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+			CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
+			CREATE TRIGGER users_delete AFTER DELETE ON users BEGIN SELECT 3; END;
+		`)
+
+		mustExecSQL(t, targetDatabase, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 999; END;
+			CREATE TRIGGER users_delete AFTER DELETE ON users BEGIN SELECT 3; END;
+			CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN SELECT 4; END;
+		`)
+
+		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
+			SourceDatabasePath: sourceDatabasePath,
+			TargetDatabasePath: targetDatabasePath,
+		})
+		require.NoError(t, err)
+		defer driver.Close()
+
+		expected := `CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+DROP TRIGGER "users_update";
+CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
+DROP TRIGGER "users_audit";`
+
+		expectDiff(t, driver, expected)
+	})
+
+	t.Run("CreateTableWithTriggers", func(t *testing.T) {
+		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
+		targetDatabasePath, _ := tempSQLiteDatabase(t, "target.sqlite")
+
+		mustExecSQL(t, sourceDatabase, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+		`)
+
+		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
+			SourceDatabasePath: sourceDatabasePath,
+			TargetDatabasePath: targetDatabasePath,
+		})
+		require.NoError(t, err)
+		defer driver.Close()
+
+		expected := `CREATE TABLE "users" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT
+);
+CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;`
+
+		expectDiff(t, driver, expected)
+	})
 }

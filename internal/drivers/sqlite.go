@@ -106,6 +106,30 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			}
 		}
 
+		// Triggers comparison
+		for _, sourceTrigger := range sourceTable.Triggers {
+			targetTrigger, found := targetTable.TriggerByName(sourceTrigger.Name)
+			if !found {
+				// New trigger
+				fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
+				continue
+			}
+
+			if sourceTrigger.SQL != targetTrigger.SQL {
+				// Modified trigger: drop and recreate
+				fmt.Fprintf(&diff, "DROP TRIGGER \"%s\";\n", targetTrigger.Name)
+				fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
+			}
+		}
+
+		for _, targetTrigger := range targetTable.Triggers {
+			_, found := sourceTable.TriggerByName(targetTrigger.Name)
+			if !found {
+				// Removed trigger
+				fmt.Fprintf(&diff, "DROP TRIGGER \"%s\";\n", targetTrigger.Name)
+			}
+		}
+
 		addedColumns := []string{}
 		modifiedColumns := []string{}
 		removedColumns := []string{}
@@ -248,9 +272,10 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 }
 
 type SQLiteTable struct {
-	Name    string
-	Columns []*SQLiteColumn
-	Indexes []*SQLiteIndex
+	Name     string
+	Columns  []*SQLiteColumn
+	Indexes  []*SQLiteIndex
+	Triggers []*SQLiteTrigger
 }
 
 func (t *SQLiteTable) Copy() *SQLiteTable {
@@ -271,6 +296,15 @@ func (t *SQLiteTable) IndexByName(name string) (*SQLiteIndex, bool) {
 	for _, index := range t.Indexes {
 		if index.Name == name {
 			return index, true
+		}
+	}
+	return nil, false
+}
+
+func (t *SQLiteTable) TriggerByName(name string) (*SQLiteTrigger, bool) {
+	for _, trigger := range t.Triggers {
+		if trigger.Name == name {
+			return trigger, true
 		}
 	}
 	return nil, false
@@ -306,6 +340,15 @@ func (t *SQLiteTable) String() string {
 
 	if len(createIndexes) > 0 {
 		createTable += "\n" + strings.Join(createIndexes, "\n")
+	}
+
+	var createTriggers []string
+	for _, trigger := range t.Triggers {
+		createTriggers = append(createTriggers, trigger.SQL+";")
+	}
+
+	if len(createTriggers) > 0 {
+		createTable += "\n" + strings.Join(createTriggers, "\n")
 	}
 
 	return createTable
@@ -387,6 +430,11 @@ func (i *SQLiteIndex) String() string {
 	return createIndex
 }
 
+type SQLiteTrigger struct {
+	Name string
+	SQL  string
+}
+
 func (d *SQLiteDriver) getTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
 	if err != nil {
@@ -411,10 +459,16 @@ func (d *SQLiteDriver) getTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 			return nil, err
 		}
 
+		triggers, err := d.getTableTriggers(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
 		tables = append(tables, &SQLiteTable{
-			Name:    tableName,
-			Columns: columns,
-			Indexes: indexes,
+			Name:     tableName,
+			Columns:  columns,
+			Indexes:  indexes,
+			Triggers: triggers,
 		})
 	}
 
@@ -510,4 +564,25 @@ func (d *SQLiteDriver) getIndexColumns(ctx context.Context, db *sql.DB, indexNam
 	}
 
 	return columns, nil
+}
+
+func (d *SQLiteDriver) getTableTriggers(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteTrigger, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", tableName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var triggers []*SQLiteTrigger
+	for rows.Next() {
+		var name, sqlContent string
+		if err := rows.Scan(&name, &sqlContent); err != nil {
+			return nil, err
+		}
+		triggers = append(triggers, &SQLiteTrigger{
+			Name: name,
+			SQL:  sqlContent,
+		})
+	}
+	return triggers, nil
 }

@@ -22,8 +22,8 @@ This will output the differences between the two databases in SQL format.
 
 ## Supported Databases
 
-| Name       | Tables | Indexes | Data |
-|------------|--------|---------|------|
-| SQLite     | ✅     | ✅      | ❌   |
-| PostgreSQL | ❌     | ❌      | ❌   |
-| MySQL      | ❌     | ❌      | ❌   |
+| Name       | Tables | Indexes | Triggers | Data |
+|------------|--------|---------|----------|------|
+| SQLite     | ✅      | ✅       | ✅        | ❌    |
+| PostgreSQL | ❌      | ❌       | ❌        | ❌    |
+| MySQL      | ❌      | ❌       | ❌        | ❌    |
