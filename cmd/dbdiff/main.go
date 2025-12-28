@@ -43,12 +43,12 @@ func main() {
 }
 
 func action(ctx context.Context, cmd *cli.Command) error {
-	sourceDatabaseURL := cmd.Args().Get(0)
+	sourceDatabaseURL := cmd.StringArg("source")
 	if sourceDatabaseURL == "" {
 		return fmt.Errorf("source database URL is required")
 	}
 
-	targetDatabaseURL := cmd.Args().Get(1)
+	targetDatabaseURL := cmd.StringArg("target")
 	if targetDatabaseURL == "" {
 		return fmt.Errorf("target database URL is required")
 	}
