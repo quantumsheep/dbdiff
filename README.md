@@ -4,6 +4,12 @@ A tool for comparing database schemas and data. It supports multiple database en
 
 ## Installation
 
+### From Releases
+
+You can download precompiled binaries from the [releases](https://github.com/quantumsheep/dbdiff/releases) assets.
+
+### Manually
+
 You can install dbdiff using Go:
 
 ```bash
