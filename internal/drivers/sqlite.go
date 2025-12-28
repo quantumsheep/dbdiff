@@ -109,7 +109,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 		addedColumns := []string{}
 		modifiedColumns := []string{}
 		removedColumns := []string{}
-		renamedColumns := make(map[string]string)
+		renamedColumns := make(map[string]string) // oldName -> newName
 
 		for _, sourceColumn := range sourceTable.Columns {
 			targetColumn, found := targetTable.ColumnByName(sourceColumn.Name)
@@ -157,27 +157,62 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			tempTable := sourceTable.Copy()
 			tempTable.Name = "_" + sourceTable.Name + "_temp"
 
-			fmt.Fprintf(&diff, "%s\n", tempTable.String())
+			// Create temp table (table only; indexes recreated after rename)
+			fmt.Fprintf(&diff, "%s\n", tempTable.CreateTableOnlyString())
 
-			// Copy data from old table to new table
-			fmt.Fprintf(&diff, "INSERT INTO _%s_temp SELECT ", sourceTable.Name)
-			var columnNames []string
-			for _, column := range targetTable.Columns {
-				newName, isRenamed := renamedColumns[column.Name]
-				if isRenamed {
-					columnNames = append(columnNames, newName)
+			// Reverse rename map: newName -> oldName
+			newToOld := make(map[string]string, len(renamedColumns))
+			for oldName, newName := range renamedColumns {
+				newToOld[newName] = oldName
+			}
+
+			// Build INSERT column list (new schema) and SELECT expressions (from old schema)
+			var insertColumns []string
+			var selectColumns []string
+
+			for _, newCol := range sourceTable.Columns {
+				insertColumns = append(insertColumns, newCol.Name)
+
+				// If the column existed before (same name), copy from old table
+				if _, ok := targetTable.ColumnByName(newCol.Name); ok {
+					selectColumns = append(selectColumns, newCol.Name)
 					continue
 				}
 
-				columnNames = append(columnNames, column.Name)
+				// If it was renamed, copy from old name
+				if oldName, ok := newToOld[newCol.Name]; ok {
+					selectColumns = append(selectColumns, oldName)
+					continue
+				}
+
+				// Otherwise it is a new column: use DEFAULT if present, else NULL
+				if newCol.Default.Valid {
+					selectColumns = append(selectColumns, newCol.Default.String)
+				} else {
+					selectColumns = append(selectColumns, "NULL")
+				}
 			}
-			fmt.Fprintf(&diff, "%s FROM %s;\n", strings.Join(columnNames, ", "), sourceTable.Name)
+
+			// Copy data from old table to new temp table with explicit mapping
+			fmt.Fprintf(
+				&diff,
+				"INSERT INTO %s (%s) SELECT %s FROM %s;\n",
+				tempTable.Name,
+				strings.Join(insertColumns, ", "),
+				strings.Join(selectColumns, ", "),
+				sourceTable.Name,
+			)
 
 			// Drop old table
 			fmt.Fprintf(&diff, "DROP TABLE %s;\n", sourceTable.Name)
 
 			// Rename new table to old table's name
-			fmt.Fprintf(&diff, "ALTER TABLE _%s_temp RENAME TO %s;\n", sourceTable.Name, sourceTable.Name)
+			fmt.Fprintf(&diff, "ALTER TABLE %s RENAME TO %s;\n", tempTable.Name, sourceTable.Name)
+
+			// Recreate indexes (on final table name)
+			for _, idx := range sourceTable.Indexes {
+				fmt.Fprintf(&diff, "%s\n", idx.String())
+			}
 		} else {
 			for oldName, newName := range renamedColumns {
 				fmt.Fprintf(&diff, "ALTER TABLE %s RENAME COLUMN %s TO %s;\n", sourceTable.Name, oldName, newName)
@@ -239,6 +274,19 @@ func (t *SQLiteTable) IndexByName(name string) (*SQLiteIndex, bool) {
 		}
 	}
 	return nil, false
+}
+
+// CreateTableOnlyString returns the CREATE TABLE statement without indexes.
+// (Used for the table-rebuild path so indexes can be recreated after rename.)
+func (t *SQLiteTable) CreateTableOnlyString() string {
+	var columnLines []string
+	for _, column := range t.Columns {
+		line := "\t" + column.String()
+		columnLines = append(columnLines, line)
+	}
+
+	createTableColumns := strings.Join(columnLines, ",\n")
+	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", t.Name, createTableColumns)
 }
 
 func (t *SQLiteTable) String() string {

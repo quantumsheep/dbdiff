@@ -286,7 +286,7 @@ ALTER TABLE users DROP COLUMN age;`)
 	id INTEGER PRIMARY KEY,
 	name TEXT NOT NULL
 );
-INSERT INTO _users_temp SELECT id, name FROM users;
+INSERT INTO _users_temp (id, name) SELECT id, name FROM users;
 DROP TABLE users;
 ALTER TABLE _users_temp RENAME TO users;`)
 
@@ -348,7 +348,7 @@ ALTER TABLE _users_temp RENAME TO users;`)
 	id INTEGER PRIMARY KEY,
 	name TEXT
 );
-INSERT INTO _users_temp SELECT id, name FROM users;
+INSERT INTO _users_temp (id, name) SELECT id, name FROM users;
 DROP TABLE users;
 ALTER TABLE _users_temp RENAME TO users;`)
 
