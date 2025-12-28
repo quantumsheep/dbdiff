@@ -93,7 +93,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 
 			if !sourceIndex.Equal(targetIndex) {
 				// Modified index: drop and recreate
-				fmt.Fprintf(&diff, "DROP INDEX %s;\n", targetIndex.Name)
+				fmt.Fprintf(&diff, "DROP INDEX \"%s\";\n", targetIndex.Name)
 				fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
 			}
 		}
@@ -102,7 +102,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			_, found := sourceTable.IndexByName(targetIndex.Name)
 			if !found {
 				// Removed index
-				fmt.Fprintf(&diff, "DROP INDEX %s;\n", targetIndex.Name)
+				fmt.Fprintf(&diff, "DROP INDEX \"%s\";\n", targetIndex.Name)
 			}
 		}
 
@@ -171,17 +171,17 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			var selectColumns []string
 
 			for _, newCol := range sourceTable.Columns {
-				insertColumns = append(insertColumns, newCol.Name)
+				insertColumns = append(insertColumns, fmt.Sprintf("\"%s\"", newCol.Name))
 
 				// If the column existed before (same name), copy from old table
 				if _, ok := targetTable.ColumnByName(newCol.Name); ok {
-					selectColumns = append(selectColumns, newCol.Name)
+					selectColumns = append(selectColumns, fmt.Sprintf("\"%s\"", newCol.Name))
 					continue
 				}
 
 				// If it was renamed, copy from old name
 				if oldName, ok := newToOld[newCol.Name]; ok {
-					selectColumns = append(selectColumns, oldName)
+					selectColumns = append(selectColumns, fmt.Sprintf("\"%s\"", oldName))
 					continue
 				}
 
@@ -196,7 +196,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			// Copy data from old table to new temp table with explicit mapping
 			fmt.Fprintf(
 				&diff,
-				"INSERT INTO %s (%s) SELECT %s FROM %s;\n",
+				"INSERT INTO \"%s\" (%s) SELECT %s FROM \"%s\";\n",
 				tempTable.Name,
 				strings.Join(insertColumns, ", "),
 				strings.Join(selectColumns, ", "),
@@ -204,10 +204,10 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			)
 
 			// Drop old table
-			fmt.Fprintf(&diff, "DROP TABLE %s;\n", sourceTable.Name)
+			fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", sourceTable.Name)
 
 			// Rename new table to old table's name
-			fmt.Fprintf(&diff, "ALTER TABLE %s RENAME TO %s;\n", tempTable.Name, sourceTable.Name)
+			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" RENAME TO \"%s\";\n", tempTable.Name, sourceTable.Name)
 
 			// Recreate indexes (on final table name)
 			for _, idx := range sourceTable.Indexes {
@@ -215,7 +215,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			}
 		} else {
 			for oldName, newName := range renamedColumns {
-				fmt.Fprintf(&diff, "ALTER TABLE %s RENAME COLUMN %s TO %s;\n", sourceTable.Name, oldName, newName)
+				fmt.Fprintf(&diff, "ALTER TABLE \"%s\" RENAME COLUMN \"%s\" TO \"%s\";\n", sourceTable.Name, oldName, newName)
 			}
 
 			for _, columnName := range addedColumns {
@@ -224,11 +224,11 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 					return "", fmt.Errorf("internal error: added column %s not found in table %s", columnName, sourceTable.Name)
 				}
 
-				fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", sourceTable.Name, column.String())
+				fmt.Fprintf(&diff, "ALTER TABLE \"%s\" ADD COLUMN %s;\n", sourceTable.Name, column.String())
 			}
 
 			for _, columnName := range removedColumns {
-				fmt.Fprintf(&diff, "ALTER TABLE %s DROP COLUMN %s;\n", sourceTable.Name, columnName)
+				fmt.Fprintf(&diff, "ALTER TABLE \"%s\" DROP COLUMN \"%s\";\n", sourceTable.Name, columnName)
 			}
 		}
 	}
@@ -240,7 +240,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 		})
 
 		if !found {
-			fmt.Fprintf(&diff, "DROP TABLE %s;\n", table2.Name)
+			fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", table2.Name)
 		}
 	}
 
@@ -286,7 +286,7 @@ func (t *SQLiteTable) CreateTableOnlyString() string {
 	}
 
 	createTableColumns := strings.Join(columnLines, ",\n")
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", t.Name, createTableColumns)
+	return fmt.Sprintf("CREATE TABLE \"%s\" (\n%s\n);", t.Name, createTableColumns)
 }
 
 func (t *SQLiteTable) String() string {
@@ -297,7 +297,7 @@ func (t *SQLiteTable) String() string {
 	}
 
 	createTableColumns := strings.Join(columnLines, ",\n")
-	createTable := fmt.Sprintf("CREATE TABLE %s (\n%s\n);", t.Name, createTableColumns)
+	createTable := fmt.Sprintf("CREATE TABLE \"%s\" (\n%s\n);", t.Name, createTableColumns)
 
 	var createIndexes []string
 	for _, index := range t.Indexes {
@@ -332,7 +332,7 @@ func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
 }
 
 func (c *SQLiteColumn) String() string {
-	value := fmt.Sprintf("%s %s", c.Name, c.Type)
+	value := fmt.Sprintf("\"%s\" %s", c.Name, c.Type)
 	if c.NotNull {
 		value += " NOT NULL"
 	}
@@ -377,9 +377,12 @@ func (i *SQLiteIndex) String() string {
 		createIndex += "UNIQUE "
 	}
 
-	columns := strings.Join(i.Columns, ", ")
+	quotedColumns := lo.Map(i.Columns, func(c string, _ int) string {
+		return fmt.Sprintf("\"%s\"", c)
+	})
+	columns := strings.Join(quotedColumns, ", ")
 
-	createIndex += fmt.Sprintf("INDEX %s ON %s (%s);", i.Name, i.Table, columns)
+	createIndex += fmt.Sprintf("INDEX \"%s\" ON \"%s\" (%s);", i.Name, i.Table, columns)
 
 	return createIndex
 }

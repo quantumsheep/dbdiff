@@ -76,9 +76,9 @@ func TestSQLiteDriver(t *testing.T) {
 		require.NoError(t, err)
 		defer driver.Close()
 
-		expectDiff(t, driver, `CREATE TABLE users (
-	id INTEGER PRIMARY KEY,
-	name TEXT NOT NULL
+		expectDiff(t, driver, `CREATE TABLE "users" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT NOT NULL
 );`)
 	})
 
@@ -110,7 +110,7 @@ func TestSQLiteDriver(t *testing.T) {
 		require.NoError(t, err)
 		defer driver.Close()
 
-		diff := expectDiff(t, driver, `ALTER TABLE users ADD COLUMN email TEXT;`)
+		diff := expectDiff(t, driver, `ALTER TABLE "users" ADD COLUMN "email" TEXT;`)
 
 		// Check that data is preserved after applying the diff
 		mustExecSQL(t, targetDatabase, diff)
@@ -165,7 +165,7 @@ func TestSQLiteDriver(t *testing.T) {
 		require.NoError(t, err)
 		defer driver.Close()
 
-		expectDiff(t, driver, `ALTER TABLE users DROP COLUMN email;`)
+		expectDiff(t, driver, `ALTER TABLE "users" DROP COLUMN "email";`)
 	})
 
 	t.Run("RenameColumn", func(t *testing.T) {
@@ -195,7 +195,7 @@ func TestSQLiteDriver(t *testing.T) {
 		require.NoError(t, err)
 		defer driver.Close()
 
-		diff := expectDiff(t, driver, `ALTER TABLE users RENAME COLUMN name TO full_name;`)
+		diff := expectDiff(t, driver, `ALTER TABLE "users" RENAME COLUMN "name" TO "full_name";`)
 
 		// Check that data is preserved after applying the diff
 		mustExecSQL(t, targetDatabase, diff)
@@ -251,8 +251,8 @@ func TestSQLiteDriver(t *testing.T) {
 		require.NoError(t, err)
 		defer driver.Close()
 
-		expectDiff(t, driver, `ALTER TABLE users ADD COLUMN age INTEGER;
-ALTER TABLE users DROP COLUMN age;`)
+		expectDiff(t, driver, `ALTER TABLE "users" ADD COLUMN "age" INTEGER;
+ALTER TABLE "users" DROP COLUMN "age";`)
 	})
 
 	t.Run("ModifyColumnSetNotNull", func(t *testing.T) {
@@ -282,13 +282,13 @@ ALTER TABLE users DROP COLUMN age;`)
 		require.NoError(t, err)
 		defer driver.Close()
 
-		diff := expectDiff(t, driver, `CREATE TABLE _users_temp (
-	id INTEGER PRIMARY KEY,
-	name TEXT NOT NULL
+		diff := expectDiff(t, driver, `CREATE TABLE "_users_temp" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT NOT NULL
 );
-INSERT INTO _users_temp (id, name) SELECT id, name FROM users;
-DROP TABLE users;
-ALTER TABLE _users_temp RENAME TO users;`)
+INSERT INTO "_users_temp" ("id", "name") SELECT "id", "name" FROM "users";
+DROP TABLE "users";
+ALTER TABLE "_users_temp" RENAME TO "users";`)
 
 		// Check that data is preserved after applying the diff
 		mustExecSQL(t, targetDatabase, diff)
@@ -344,13 +344,13 @@ ALTER TABLE _users_temp RENAME TO users;`)
 		require.NoError(t, err)
 		defer driver.Close()
 
-		diff := expectDiff(t, driver, `CREATE TABLE _users_temp (
-	id INTEGER PRIMARY KEY,
-	name TEXT
+		diff := expectDiff(t, driver, `CREATE TABLE "_users_temp" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT
 );
-INSERT INTO _users_temp (id, name) SELECT id, name FROM users;
-DROP TABLE users;
-ALTER TABLE _users_temp RENAME TO users;`)
+INSERT INTO "_users_temp" ("id", "name") SELECT "id", "name" FROM "users";
+DROP TABLE "users";
+ALTER TABLE "_users_temp" RENAME TO "users";`)
 
 		// Check that data is preserved after applying the diff
 		mustExecSQL(t, targetDatabase, diff)
@@ -397,7 +397,7 @@ ALTER TABLE _users_temp RENAME TO users;`)
 		require.NoError(t, err)
 		defer driver.Close()
 
-		expectDiff(t, driver, `DROP TABLE users;`)
+		expectDiff(t, driver, `DROP TABLE "users";`)
 	})
 
 	t.Run("CreateIndexes", func(t *testing.T) {
@@ -426,7 +426,7 @@ ALTER TABLE _users_temp RENAME TO users;`)
 		require.NoError(t, err)
 		defer driver.Close()
 
-		expectDiff(t, driver, `CREATE UNIQUE INDEX idx_users_name ON users (name);`)
+		expectDiff(t, driver, `CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name");`)
 	})
 
 	t.Run("DropIndexes", func(t *testing.T) {
@@ -455,7 +455,7 @@ ALTER TABLE _users_temp RENAME TO users;`)
 		require.NoError(t, err)
 		defer driver.Close()
 
-		expectDiff(t, driver, `DROP INDEX idx_users_name;`)
+		expectDiff(t, driver, `DROP INDEX "idx_users_name";`)
 	})
 
 	t.Run("ModifyIndexes", func(t *testing.T) {
@@ -489,7 +489,7 @@ ALTER TABLE _users_temp RENAME TO users;`)
 		require.NoError(t, err)
 		defer driver.Close()
 
-		expectDiff(t, driver, `DROP INDEX idx_users_name;
-CREATE UNIQUE INDEX idx_users_name ON users (name, email);`)
+		expectDiff(t, driver, `DROP INDEX "idx_users_name";
+CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
 	})
 }
