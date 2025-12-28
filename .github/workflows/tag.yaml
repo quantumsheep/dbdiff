@@ -34,7 +34,7 @@ jobs:
           go-version: 1.25
 
       - name: Build
-        run: CGO_ENABLED=1 go build -v -o ./bin/dbdiff-${{ matrix.platform.suffix }} ./cmd/dbdiff
+        run: go build -v -o ./bin/dbdiff-${{ matrix.platform.suffix }} ./cmd/dbdiff
 
       - name: Create Artifact
         uses: actions/upload-artifact@v6
