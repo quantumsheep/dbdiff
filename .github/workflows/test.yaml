@@ -4,7 +4,22 @@ on: [push]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-24.04
+            suffix: linux-amd64
+          - runner: ubuntu-24.04-arm
+            suffix: linux-arm64
+          - runner: windows-2025
+            suffix: windows-amd64.exe
+          - runner: windows-11-arm
+            suffix: windows-arm64.exe
+          - runner: macos-15-intel
+            suffix: macos-amd64
+          - runner: macos-26
+            suffix: macos-arm64
+    runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@v5
 
@@ -14,10 +29,25 @@ jobs:
           go-version: 1.25
 
       - name: Build
-        run: go build -v ./...
+        run: CGO_ENABLED=1 go build -v -o ./bin/dbdiff-${{ matrix.platform.suffix }} ./cmd/dbdiff
 
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-24.04
+            suffix: linux-amd64
+          - runner: ubuntu-24.04-arm
+            suffix: linux-arm64
+          - runner: windows-2025
+            suffix: windows-amd64.exe
+          - runner: windows-11-arm
+            suffix: windows-arm64.exe
+          - runner: macos-15-intel
+            suffix: macos-amd64
+          - runner: macos-26
+            suffix: macos-arm64
+    runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@v5
 
