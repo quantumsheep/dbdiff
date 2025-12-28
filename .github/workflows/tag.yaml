@@ -7,7 +7,22 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-24.04
+            suffix: linux-amd64
+          - runner: ubuntu-24.04-arm
+            suffix: linux-arm64
+          - runner: windows-2025
+            suffix: windows-amd64.exe
+          - runner: windows-11-arm
+            suffix: windows-arm64.exe
+          - runner: macos-15-intel
+            suffix: macos-amd64
+          - runner: macos-26
+            suffix: macos-arm64
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       contents: write
     steps:
@@ -19,9 +34,27 @@ jobs:
           go-version: 1.25
 
       - name: Build
-        run: go build -v -o ./bin/dbdiff ./cmd/dbdiff
+        run: CGO_ENABLED=1 go build -v -o ./bin/dbdiff-${{ matrix.platform.suffix }} ./cmd/dbdiff
 
-      - name: Create GitHub Release
+      - name: Create Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: dbdiff-${{ matrix.platform.suffix }}
+          path: ./bin/dbdiff-${{ matrix.platform.suffix }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: ./bin
+          pattern: dbdiff-*
+
+      - name: Create Release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: ./bin/dbdiff
+          artifacts: ./bin/dbdiff-*
