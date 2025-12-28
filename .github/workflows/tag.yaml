@@ -55,6 +55,7 @@ jobs:
         with:
           path: ./bin
           pattern: dbdiff-*
+          merge-multiple: true
 
       - name: Create Release
         uses: ncipollo/release-action@v1
