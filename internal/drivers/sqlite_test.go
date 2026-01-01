@@ -581,4 +581,48 @@ DROP VIEW "old_view";`
 
 		expectDiff(t, driver, expected)
 	})
+
+	t.Run("ForeignKeys", func(t *testing.T) {
+		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
+		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+
+		mustExecSQL(t, sourceDatabase, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TABLE posts (
+				id INTEGER PRIMARY KEY,
+				user_id INTEGER,
+				title TEXT,
+				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+			);
+		`)
+
+		mustExecSQL(t, targetDatabase, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TABLE posts (
+				id INTEGER PRIMARY KEY,
+				user_id INTEGER,
+				title TEXT
+			);
+		`)
+
+		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
+			SourceDatabasePath: sourceDatabasePath,
+			TargetDatabasePath: targetDatabasePath,
+		})
+		require.NoError(t, err)
+		defer driver.Close()
+
+		// Since adding a FK requires table recreation
+		expected := `CREATE TABLE "_posts_temp" (
+	"id" INTEGER PRIMARY KEY,
+	"user_id" INTEGER,
+	"title" TEXT,
+	FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE
+);
+INSERT INTO "_posts_temp" ("id", "user_id", "title") SELECT "id", "user_id", "title" FROM "posts";
+DROP TABLE "posts";
+ALTER TABLE "_posts_temp" RENAME TO "posts";`
+
+		expectDiff(t, driver, expected)
+	})
 }

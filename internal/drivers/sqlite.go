@@ -176,8 +176,23 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			}
 		}
 
-		// Modified columns need to be handled via table recreation
-		if len(modifiedColumns) > 0 {
+		// Check if foreign keys changed
+		foreignKeysChanged := false
+		if len(sourceTable.ForeignKeys) != len(targetTable.ForeignKeys) {
+			foreignKeysChanged = true
+		} else {
+			for i, sourceForeignKey := range sourceTable.ForeignKeys {
+				targetForeignKey := targetTable.ForeignKeys[i]
+
+				if !sourceForeignKey.Equal(targetForeignKey) {
+					foreignKeysChanged = true
+					break
+				}
+			}
+		}
+
+		// Modified columns or Foreign Keys need to be handled via table recreation
+		if len(modifiedColumns) > 0 || foreignKeysChanged {
 			tempTable := sourceTable.Copy()
 			tempTable.Name = "_" + sourceTable.Name + "_temp"
 
@@ -312,10 +327,11 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 }
 
 type SQLiteTable struct {
-	Name     string
-	Columns  []*SQLiteColumn
-	Indexes  []*SQLiteIndex
-	Triggers []*SQLiteTrigger
+	Name        string
+	Columns     []*SQLiteColumn
+	Indexes     []*SQLiteIndex
+	Triggers    []*SQLiteTrigger
+	ForeignKeys []*SQLiteForeignKey
 }
 
 func (t *SQLiteTable) Copy() *SQLiteTable {
@@ -359,6 +375,11 @@ func (t *SQLiteTable) CreateTableOnlyString() string {
 		columnLines = append(columnLines, line)
 	}
 
+	for _, fk := range t.ForeignKeys {
+		line := "\t" + fk.String()
+		columnLines = append(columnLines, line)
+	}
+
 	createTableColumns := strings.Join(columnLines, ",\n")
 	return fmt.Sprintf("CREATE TABLE \"%s\" (\n%s\n);", t.Name, createTableColumns)
 }
@@ -367,6 +388,11 @@ func (t *SQLiteTable) String() string {
 	var columnLines []string
 	for _, column := range t.Columns {
 		line := "\t" + column.String()
+		columnLines = append(columnLines, line)
+	}
+
+	for _, fk := range t.ForeignKeys {
+		line := "\t" + fk.String()
 		columnLines = append(columnLines, line)
 	}
 
@@ -504,11 +530,17 @@ func (d *SQLiteDriver) getTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 			return nil, err
 		}
 
+		foreignKeys, err := d.getTableForeignKeys(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
 		tables = append(tables, &SQLiteTable{
-			Name:     tableName,
-			Columns:  columns,
-			Indexes:  indexes,
-			Triggers: triggers,
+			Name:        tableName,
+			Columns:     columns,
+			Indexes:     indexes,
+			Triggers:    triggers,
+			ForeignKeys: foreignKeys,
 		})
 	}
 
@@ -651,4 +683,88 @@ func (d *SQLiteDriver) getViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 		})
 	}
 	return views, nil
+}
+
+type SQLiteForeignKey struct {
+	Table    string
+	From     []string
+	To       []string
+	OnUpdate string
+	OnDelete string
+}
+
+func (fk *SQLiteForeignKey) String() string {
+	fromColumnsQuoted := lo.Map(fk.From, func(c string, _ int) string {
+		return fmt.Sprintf("\"%s\"", c)
+	})
+	toColumnsQuoted := lo.Map(fk.To, func(c string, _ int) string {
+		return fmt.Sprintf("\"%s\"", c)
+	})
+
+	fromColumns := strings.Join(fromColumnsQuoted, ", ")
+	toColumns := strings.Join(toColumnsQuoted, ", ")
+
+	s := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES \"%s\" (%s)", fromColumns, fk.Table, toColumns)
+	if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "" {
+		s += fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate)
+	}
+	if fk.OnDelete != "NO ACTION" && fk.OnDelete != "" {
+		s += fmt.Sprintf(" ON DELETE %s", fk.OnDelete)
+	}
+	return s
+}
+
+func (fk *SQLiteForeignKey) Equal(other *SQLiteForeignKey) bool {
+	if fk.Table != other.Table || fk.OnUpdate != other.OnUpdate || fk.OnDelete != other.OnDelete {
+		return false
+	}
+	if len(fk.From) != len(other.From) || len(fk.To) != len(other.To) {
+		return false
+	}
+	for i := range fk.From {
+		if fk.From[i] != other.From[i] {
+			return false
+		}
+	}
+	for i := range fk.To {
+		if fk.To[i] != other.To[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (d *SQLiteDriver) getTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteForeignKey, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+tableName+");")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	foreignKeys := make(map[int]*SQLiteForeignKey)
+
+	for rows.Next() {
+		var id, seq int
+		var table, from, to, onUpdate, onDelete, match string
+		if err := rows.Scan(&id, &seq, &table, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+			return nil, err
+		}
+
+		foreignKey, exists := foreignKeys[id]
+		if !exists {
+			foreignKey = &SQLiteForeignKey{
+				Table:    table,
+				From:     []string{},
+				To:       []string{},
+				OnUpdate: onUpdate,
+				OnDelete: onDelete,
+			}
+			foreignKeys[id] = foreignKey
+		}
+
+		foreignKey.From = append(foreignKey.From, from)
+		foreignKey.To = append(foreignKey.To, to)
+	}
+
+	return lo.Values(foreignKeys), nil
 }
