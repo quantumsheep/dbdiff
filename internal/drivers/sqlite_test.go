@@ -550,4 +550,35 @@ CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;`
 
 		expectDiff(t, driver, expected)
 	})
+
+	t.Run("Views", func(t *testing.T) {
+		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
+		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+
+		mustExecSQL(t, sourceDatabase, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT name FROM users;
+			CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin';
+		`)
+
+		mustExecSQL(t, targetDatabase, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE VIEW old_view AS SELECT id FROM users;
+		`)
+
+		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
+			SourceDatabasePath: sourceDatabasePath,
+			TargetDatabasePath: targetDatabasePath,
+		})
+		require.NoError(t, err)
+		defer driver.Close()
+
+		expected := `CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin';
+DROP VIEW "users_view";
+CREATE VIEW users_view AS SELECT name FROM users;
+DROP VIEW "old_view";`
+
+		expectDiff(t, driver, expected)
+	})
 }

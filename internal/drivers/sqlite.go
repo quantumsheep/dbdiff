@@ -268,6 +268,46 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 		}
 	}
 
+	// Views comparison
+	sourceViews, err := d.getViews(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	targetViews, err := d.getViews(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	for _, sourceView := range sourceViews {
+		targetView, found := lo.Find(targetViews, func(v *SQLiteView) bool {
+			return v.Name == sourceView.Name
+		})
+
+		if !found {
+			// New view
+			fmt.Fprintf(&diff, "%s;\n", sourceView.SQL)
+			continue
+		}
+
+		if sourceView.SQL != targetView.SQL {
+			// Modified view
+			fmt.Fprintf(&diff, "DROP VIEW \"%s\";\n", targetView.Name)
+			fmt.Fprintf(&diff, "%s;\n", sourceView.SQL)
+		}
+	}
+
+	for _, targetView := range targetViews {
+		_, found := lo.Find(sourceViews, func(v *SQLiteView) bool {
+			return v.Name == targetView.Name
+		})
+
+		if !found {
+			// Removed view
+			fmt.Fprintf(&diff, "DROP VIEW \"%s\";\n", targetView.Name)
+		}
+	}
+
 	return strings.TrimSpace(diff.String()), nil
 }
 
@@ -585,4 +625,30 @@ func (d *SQLiteDriver) getTableTriggers(ctx context.Context, db *sql.DB, tableNa
 		})
 	}
 	return triggers, nil
+}
+
+type SQLiteView struct {
+	Name string
+	SQL  string
+}
+
+func (d *SQLiteDriver) getViews(ctx context.Context, db *sql.DB) ([]*SQLiteView, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var views []*SQLiteView
+	for rows.Next() {
+		var name, sqlContent string
+		if err := rows.Scan(&name, &sqlContent); err != nil {
+			return nil, err
+		}
+		views = append(views, &SQLiteView{
+			Name: name,
+			SQL:  sqlContent,
+		})
+	}
+	return views, nil
 }
