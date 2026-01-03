@@ -20,8 +20,6 @@ type SQLiteDriver struct {
 	TargetDatabaseConnection *sql.DB
 }
 
-var _ Driver = (*SQLiteDriver)(nil)
-
 func NewSQLiteDriver(config *SQLLiteDriverConfig) (*SQLiteDriver, error) {
 	sourceDatabaseConnection, err := sql.Open("sqlite3", config.SourceDatabasePath)
 	if err != nil {
@@ -197,7 +195,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			tempTable.Name = "_" + sourceTable.Name + "_temp"
 
 			// Create temp table (table only; indexes recreated after rename)
-			fmt.Fprintf(&diff, "%s\n", tempTable.CreateTableOnlyString())
+			fmt.Fprintf(&diff, "%s\n", tempTable.StringCreateTable())
 
 			// Reverse rename map: newName -> oldName
 			newToOld := make(map[string]string, len(renamedColumns))
@@ -324,181 +322,6 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 	}
 
 	return strings.TrimSpace(diff.String()), nil
-}
-
-type SQLiteTable struct {
-	Name        string
-	Columns     []*SQLiteColumn
-	Indexes     []*SQLiteIndex
-	Triggers    []*SQLiteTrigger
-	ForeignKeys []*SQLiteForeignKey
-}
-
-func (t *SQLiteTable) Copy() *SQLiteTable {
-	new := *t
-	return &new
-}
-
-func (t *SQLiteTable) ColumnByName(name string) (*SQLiteColumn, bool) {
-	for _, column := range t.Columns {
-		if column.Name == name {
-			return column, true
-		}
-	}
-	return nil, false
-}
-
-func (t *SQLiteTable) IndexByName(name string) (*SQLiteIndex, bool) {
-	for _, index := range t.Indexes {
-		if index.Name == name {
-			return index, true
-		}
-	}
-	return nil, false
-}
-
-func (t *SQLiteTable) TriggerByName(name string) (*SQLiteTrigger, bool) {
-	for _, trigger := range t.Triggers {
-		if trigger.Name == name {
-			return trigger, true
-		}
-	}
-	return nil, false
-}
-
-// CreateTableOnlyString returns the CREATE TABLE statement without indexes.
-// (Used for the table-rebuild path so indexes can be recreated after rename.)
-func (t *SQLiteTable) CreateTableOnlyString() string {
-	var columnLines []string
-	for _, column := range t.Columns {
-		line := "\t" + column.String()
-		columnLines = append(columnLines, line)
-	}
-
-	for _, fk := range t.ForeignKeys {
-		line := "\t" + fk.String()
-		columnLines = append(columnLines, line)
-	}
-
-	createTableColumns := strings.Join(columnLines, ",\n")
-	return fmt.Sprintf("CREATE TABLE \"%s\" (\n%s\n);", t.Name, createTableColumns)
-}
-
-func (t *SQLiteTable) String() string {
-	var columnLines []string
-	for _, column := range t.Columns {
-		line := "\t" + column.String()
-		columnLines = append(columnLines, line)
-	}
-
-	for _, fk := range t.ForeignKeys {
-		line := "\t" + fk.String()
-		columnLines = append(columnLines, line)
-	}
-
-	createTableColumns := strings.Join(columnLines, ",\n")
-	createTable := fmt.Sprintf("CREATE TABLE \"%s\" (\n%s\n);", t.Name, createTableColumns)
-
-	var createIndexes []string
-	for _, index := range t.Indexes {
-		createIndexes = append(createIndexes, index.String())
-	}
-
-	if len(createIndexes) > 0 {
-		createTable += "\n" + strings.Join(createIndexes, "\n")
-	}
-
-	var createTriggers []string
-	for _, trigger := range t.Triggers {
-		createTriggers = append(createTriggers, trigger.SQL+";")
-	}
-
-	if len(createTriggers) > 0 {
-		createTable += "\n" + strings.Join(createTriggers, "\n")
-	}
-
-	return createTable
-}
-
-type SQLiteColumn struct {
-	Name       string
-	Type       string
-	NotNull    bool
-	PrimaryKey bool
-	Default    sql.NullString
-}
-
-func (c *SQLiteColumn) Copy() *SQLiteColumn {
-	new := *c
-	return &new
-}
-
-func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
-	copy := c.Copy()
-	copy.Name = other.Name
-
-	return *copy == *other
-}
-
-func (c *SQLiteColumn) String() string {
-	value := fmt.Sprintf("\"%s\" %s", c.Name, c.Type)
-	if c.NotNull {
-		value += " NOT NULL"
-	}
-	if c.PrimaryKey {
-		value += " PRIMARY KEY"
-	}
-	if c.Default.Valid {
-		value += fmt.Sprintf(" DEFAULT %s", c.Default.String)
-	}
-
-	return value
-}
-
-type SQLiteIndex struct {
-	Table   string
-	Name    string
-	Columns []string
-	Unique  bool
-}
-
-func (i *SQLiteIndex) Equal(other *SQLiteIndex) bool {
-	if i.Name != other.Name || i.Table != other.Table || i.Unique != other.Unique {
-		return false
-	}
-
-	if len(i.Columns) != len(other.Columns) {
-		return false
-	}
-
-	for idx, col := range i.Columns {
-		if col != other.Columns[idx] {
-			return false
-		}
-	}
-
-	return true
-}
-
-func (i *SQLiteIndex) String() string {
-	createIndex := "CREATE "
-	if i.Unique {
-		createIndex += "UNIQUE "
-	}
-
-	quotedColumns := lo.Map(i.Columns, func(c string, _ int) string {
-		return fmt.Sprintf("\"%s\"", c)
-	})
-	columns := strings.Join(quotedColumns, ", ")
-
-	createIndex += fmt.Sprintf("INDEX \"%s\" ON \"%s\" (%s);", i.Name, i.Table, columns)
-
-	return createIndex
-}
-
-type SQLiteTrigger struct {
-	Name string
-	SQL  string
 }
 
 func (d *SQLiteDriver) getTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
@@ -659,11 +482,6 @@ func (d *SQLiteDriver) getTableTriggers(ctx context.Context, db *sql.DB, tableNa
 	return triggers, nil
 }
 
-type SQLiteView struct {
-	Name string
-	SQL  string
-}
-
 func (d *SQLiteDriver) getViews(ctx context.Context, db *sql.DB) ([]*SQLiteView, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if err != nil {
@@ -683,55 +501,6 @@ func (d *SQLiteDriver) getViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 		})
 	}
 	return views, nil
-}
-
-type SQLiteForeignKey struct {
-	Table    string
-	From     []string
-	To       []string
-	OnUpdate string
-	OnDelete string
-}
-
-func (fk *SQLiteForeignKey) String() string {
-	fromColumnsQuoted := lo.Map(fk.From, func(c string, _ int) string {
-		return fmt.Sprintf("\"%s\"", c)
-	})
-	toColumnsQuoted := lo.Map(fk.To, func(c string, _ int) string {
-		return fmt.Sprintf("\"%s\"", c)
-	})
-
-	fromColumns := strings.Join(fromColumnsQuoted, ", ")
-	toColumns := strings.Join(toColumnsQuoted, ", ")
-
-	s := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES \"%s\" (%s)", fromColumns, fk.Table, toColumns)
-	if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "" {
-		s += fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate)
-	}
-	if fk.OnDelete != "NO ACTION" && fk.OnDelete != "" {
-		s += fmt.Sprintf(" ON DELETE %s", fk.OnDelete)
-	}
-	return s
-}
-
-func (fk *SQLiteForeignKey) Equal(other *SQLiteForeignKey) bool {
-	if fk.Table != other.Table || fk.OnUpdate != other.OnUpdate || fk.OnDelete != other.OnDelete {
-		return false
-	}
-	if len(fk.From) != len(other.From) || len(fk.To) != len(other.To) {
-		return false
-	}
-	for i := range fk.From {
-		if fk.From[i] != other.From[i] {
-			return false
-		}
-	}
-	for i := range fk.To {
-		if fk.To[i] != other.To[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func (d *SQLiteDriver) getTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteForeignKey, error) {

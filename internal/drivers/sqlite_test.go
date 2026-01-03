@@ -1,7 +1,7 @@
 package drivers
 
 import (
-	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -9,84 +9,122 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func tempSQLiteDatabase(tb testing.TB, name string) (string, *sql.DB) {
-	tb.Helper()
+type TestingSQLiteDriver struct {
+	*SQLiteDriver
 
-	path := filepath.Join(tb.TempDir(), name)
-
-	db, err := sql.Open("sqlite3", path)
-	if err != nil {
-		tb.Fatalf("failed to create temp sqlite database: %v", err)
-	}
-
-	tb.Cleanup(func() {
-		require.NoError(tb, db.Close())
-	})
-
-	return path, db
+	tb testing.TB
 }
 
-func mustExecSQL(tb testing.TB, db *sql.DB, sqlStatements string) {
-	tb.Helper()
-
-	_, err := db.Exec(sqlStatements)
-	require.NoError(tb, err)
+func (d *TestingSQLiteDriver) Close() error {
+	d.tb.Helper()
+	return d.SQLiteDriver.Close()
 }
 
-func expectDiff(tb testing.TB, driver *SQLiteDriver, expectedDiff string) string {
-	tb.Helper()
+func (d *TestingSQLiteDriver) ExecOnSource(sqlStatements string) {
+	d.tb.Helper()
 
-	diff, err := driver.Diff(tb.Context())
-	require.NoError(tb, err)
-	require.Equal(tb, expectedDiff, diff)
+	_, err := d.SourceDatabaseConnection.Exec(sqlStatements)
+	require.NoError(d.tb, err)
+}
+
+func (d *TestingSQLiteDriver) ExecOnTarget(sqlStatements string) {
+	d.tb.Helper()
+
+	_, err := d.TargetDatabaseConnection.Exec(sqlStatements)
+	require.NoError(d.tb, err)
+}
+
+func (d *TestingSQLiteDriver) RequireDiff(expectedDiff string) string {
+	d.tb.Helper()
+
+	diff, err := d.Diff(d.tb.Context())
+	require.NoError(d.tb, err)
+	require.Equal(d.tb, expectedDiff, diff)
 
 	return diff
 }
 
+func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules string) []map[string]any {
+	d.tb.Helper()
+
+	columns, err := d.getTableColumns(d.tb.Context(), d.TargetDatabaseConnection, table)
+	require.NoError(d.tb, err)
+
+	rows, err := d.TargetDatabaseConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))
+	require.NoError(d.tb, err)
+
+	var results []map[string]any
+	for rows.Next() {
+		columnValues := make([]any, len(columns))
+
+		columnPointers := make([]any, len(columns))
+		for i := range columnPointers {
+			columnPointers[i] = &columnValues[i]
+		}
+
+		err := rows.Scan(columnPointers...)
+		require.NoError(d.tb, err)
+
+		row := make(map[string]any)
+		for i, col := range columns {
+			row[col.Name] = columnValues[i]
+		}
+
+		results = append(results, row)
+	}
+	require.NoError(d.tb, rows.Err())
+
+	return results
+}
+
+func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
+	tb.Helper()
+
+	sourceDatabasePath := filepath.Join(tb.TempDir(), "source.sqlite")
+	targetDatabasePath := filepath.Join(tb.TempDir(), "target.sqlite")
+
+	driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
+		SourceDatabasePath: sourceDatabasePath,
+		TargetDatabasePath: targetDatabasePath,
+	})
+	require.NoError(tb, err)
+	tb.Cleanup(func() {
+		require.NoError(tb, driver.Close())
+	})
+
+	return &TestingSQLiteDriver{
+		SQLiteDriver: driver,
+		tb:           tb,
+	}
+}
+
 func TestSQLiteDriver(t *testing.T) {
 	t.Run("NoChanges", func(t *testing.T) {
-		sourceDatabasePath, _ := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, _ := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, ``)
+		driver.RequireDiff(``)
 	})
 
 	t.Run("CreateTables", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, _ := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, `CREATE TABLE "users" (
+		driver.RequireDiff(`CREATE TABLE "users" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT NOT NULL
 );`)
 	})
 
 	t.Run("AddColumn", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -94,7 +132,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -103,54 +141,29 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		diff := expectDiff(t, driver, `ALTER TABLE "users" ADD COLUMN "email" TEXT;`)
+		diff := driver.RequireDiff(`ALTER TABLE "users" ADD COLUMN "email" TEXT;`)
 
 		// Check that data is preserved after applying the diff
-		mustExecSQL(t, targetDatabase, diff)
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
-		rows, err := targetDatabase.Query(`SELECT id, name FROM users ORDER BY id;`)
-		require.NoError(t, err)
-		defer rows.Close()
-
-		type Result struct {
-			ID   int
-			Name string
-		}
-
-		var results []Result
-		for rows.Next() {
-			var r Result
-			err := rows.Scan(&r.ID, &r.Name)
-			require.NoError(t, err)
-			results = append(results, r)
-		}
-		require.NoError(t, rows.Err())
-
-		require.Equal(t, []Result{
-			{ID: 1, Name: "Alice"},
-			{ID: 2, Name: "Bob"},
-		}, results)
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "email": nil},
+			{"id": int64(2), "name": "Bob", "email": nil},
+		}, rows)
 	})
 
 	t.Run("RemoveColumn", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -158,28 +171,20 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, `ALTER TABLE "users" DROP COLUMN "email";`)
+		driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "email";`)
 	})
 
 	t.Run("RenameColumn", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				full_name TEXT NOT NULL
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -188,47 +193,22 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		diff := expectDiff(t, driver, `ALTER TABLE "users" RENAME COLUMN "name" TO "full_name";`)
+		diff := driver.RequireDiff(`ALTER TABLE "users" RENAME COLUMN "name" TO "full_name";`)
 
 		// Check that data is preserved after applying the diff
-		mustExecSQL(t, targetDatabase, diff)
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
-		rows, err := targetDatabase.Query(`SELECT id, full_name FROM users ORDER BY id;`)
-		require.NoError(t, err)
-		defer rows.Close()
-
-		type Row struct {
-			ID       int
-			FullName string
-		}
-
-		var results []Row
-		for rows.Next() {
-			var r Row
-			err := rows.Scan(&r.ID, &r.FullName)
-			require.NoError(t, err)
-			results = append(results, r)
-		}
-		require.NoError(t, rows.Err())
-
-		require.Equal(t, []Row{
-			{ID: 1, FullName: "Alice"},
-			{ID: 2, FullName: "Bob"},
-		}, results)
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "full_name": "Alice"},
+			{"id": int64(2), "full_name": "Bob"},
+		}, rows)
 	})
 
 	t.Run("ModifyColumnType", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -236,7 +216,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -244,29 +224,21 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, `ALTER TABLE "users" ADD COLUMN "age" INTEGER;
+		driver.RequireDiff(`ALTER TABLE "users" ADD COLUMN "age" INTEGER;
 ALTER TABLE "users" DROP COLUMN "age";`)
 	})
 
 	t.Run("ModifyColumnSetNotNull", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT
@@ -275,14 +247,7 @@ ALTER TABLE "users" DROP COLUMN "age";`)
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		diff := expectDiff(t, driver, `CREATE TABLE "_users_temp" (
+		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT NOT NULL
 );
@@ -291,44 +256,26 @@ DROP TABLE "users";
 ALTER TABLE "_users_temp" RENAME TO "users";`)
 
 		// Check that data is preserved after applying the diff
-		mustExecSQL(t, targetDatabase, diff)
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
-		rows, err := targetDatabase.Query(`SELECT id, name FROM users ORDER BY id;`)
-		require.NoError(t, err)
-		defer rows.Close()
-
-		type Row struct {
-			ID   int
-			Name string
-		}
-
-		var results []Row
-		for rows.Next() {
-			var r Row
-			err := rows.Scan(&r.ID, &r.Name)
-			require.NoError(t, err)
-			results = append(results, r)
-		}
-		require.NoError(t, rows.Err())
-
-		require.Equal(t, []Row{
-			{ID: 1, Name: "Alice"},
-			{ID: 2, Name: "Bob"},
-		}, results)
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Bob"},
+		}, rows)
 	})
 
 	t.Run("ModifyColumnDropNotNull", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -337,14 +284,7 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		diff := expectDiff(t, driver, `CREATE TABLE "_users_temp" (
+		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT
 );
@@ -353,58 +293,33 @@ DROP TABLE "users";
 ALTER TABLE "_users_temp" RENAME TO "users";`)
 
 		// Check that data is preserved after applying the diff
-		mustExecSQL(t, targetDatabase, diff)
+		driver.ExecOnTarget(diff)
 
-		rows, err := targetDatabase.Query(`SELECT id, name FROM users ORDER BY id;`)
-		require.NoError(t, err)
-		defer rows.Close()
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
-		type Row struct {
-			ID   int
-			Name sql.NullString
-		}
-
-		var results []Row
-		for rows.Next() {
-			var r Row
-			err := rows.Scan(&r.ID, &r.Name)
-			require.NoError(t, err)
-			results = append(results, r)
-		}
-		require.NoError(t, rows.Err())
-
-		require.Equal(t, []Row{
-			{ID: 1, Name: sql.NullString{String: "Alice", Valid: true}},
-			{ID: 2, Name: sql.NullString{String: "Bob", Valid: true}},
-		}, results)
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Bob"},
+		}, rows)
 	})
 
 	t.Run("DropTables", func(t *testing.T) {
-		sourceDatabasePath, _ := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, `DROP TABLE "users";`)
+		driver.RequireDiff(`DROP TABLE "users";`)
 	})
 
 	t.Run("CreateIndexes", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -412,35 +327,27 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, `CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name");`)
+		driver.RequireDiff(`CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name");`)
 	})
 
 	t.Run("DropIndexes", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -448,21 +355,13 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, `DROP INDEX "idx_users_name";`)
+		driver.RequireDiff(`DROP INDEX "idx_users_name";`)
 	})
 
 	t.Run("ModifyIndexes", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -471,7 +370,7 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			CREATE UNIQUE INDEX idx_users_name ON users (name, email);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -482,65 +381,42 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
-		expectDiff(t, driver, `DROP INDEX "idx_users_name";
+		driver.RequireDiff(`DROP INDEX "idx_users_name";
 CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
 	})
 
 	t.Run("Triggers", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 			CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
 			CREATE TRIGGER users_delete AFTER DELETE ON users BEGIN SELECT 3; END;
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 999; END;
 			CREATE TRIGGER users_delete AFTER DELETE ON users BEGIN SELECT 3; END;
 			CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN SELECT 4; END;
 		`)
 
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
-
 		expected := `CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 DROP TRIGGER "users_update";
 CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
 DROP TRIGGER "users_audit";`
 
-		expectDiff(t, driver, expected)
+		driver.RequireDiff(expected)
 	})
 
 	t.Run("CreateTableWithTriggers", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, _ := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 		`)
-
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
 
 		expected := `CREATE TABLE "users" (
 	"id" INTEGER PRIMARY KEY,
@@ -548,45 +424,36 @@ DROP TRIGGER "users_audit";`
 );
 CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;`
 
-		expectDiff(t, driver, expected)
+		driver.RequireDiff(expected)
 	})
 
 	t.Run("Views", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT name FROM users;
 			CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin';
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT id, name FROM users;
 			CREATE VIEW old_view AS SELECT id FROM users;
 		`)
-
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
 
 		expected := `CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin';
 DROP VIEW "users_view";
 CREATE VIEW users_view AS SELECT name FROM users;
 DROP VIEW "old_view";`
 
-		expectDiff(t, driver, expected)
+		driver.RequireDiff(expected)
 	})
 
 	t.Run("ForeignKeys", func(t *testing.T) {
-		sourceDatabasePath, sourceDatabase := tempSQLiteDatabase(t, "source.sqlite")
-		targetDatabasePath, targetDatabase := tempSQLiteDatabase(t, "target.sqlite")
+		driver := NewTestSQLiteDriver(t)
 
-		mustExecSQL(t, sourceDatabase, `
+		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE TABLE posts (
 				id INTEGER PRIMARY KEY,
@@ -596,7 +463,7 @@ DROP VIEW "old_view";`
 			);
 		`)
 
-		mustExecSQL(t, targetDatabase, `
+		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE TABLE posts (
 				id INTEGER PRIMARY KEY,
@@ -604,13 +471,6 @@ DROP VIEW "old_view";`
 				title TEXT
 			);
 		`)
-
-		driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-			SourceDatabasePath: sourceDatabasePath,
-			TargetDatabasePath: targetDatabasePath,
-		})
-		require.NoError(t, err)
-		defer driver.Close()
 
 		// Since adding a FK requires table recreation
 		expected := `CREATE TABLE "_posts_temp" (
@@ -623,6 +483,6 @@ INSERT INTO "_posts_temp" ("id", "user_id", "title") SELECT "id", "user_id", "ti
 DROP TABLE "posts";
 ALTER TABLE "_posts_temp" RENAME TO "posts";`
 
-		expectDiff(t, driver, expected)
+		driver.RequireDiff(expected)
 	})
 }
