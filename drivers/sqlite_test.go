@@ -47,7 +47,7 @@ func (d *TestingSQLiteDriver) RequireDiff(expectedDiff string) string {
 func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 
-	columns, err := d.getTableColumns(d.tb.Context(), d.TargetDatabaseConnection, table)
+	columns, err := d.GetTableColumns(d.tb.Context(), d.TargetDatabaseConnection, table)
 	require.NoError(d.tb, err)
 
 	rows, err := d.TargetDatabaseConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))

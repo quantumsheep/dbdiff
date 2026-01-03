@@ -79,12 +79,12 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 	var diff strings.Builder
 
-	sourceTables, err := d.getTables(ctx, d.SourceDatabaseConnection)
+	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
 	if err != nil {
 		return "", err
 	}
 
-	targetTables, err := d.getTables(ctx, d.TargetDatabaseConnection)
+	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return "", err
 	}
@@ -141,12 +141,12 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 	var diff strings.Builder
 
-	sourceViews, err := d.getViews(ctx, d.SourceDatabaseConnection)
+	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
 	if err != nil {
 		return "", err
 	}
 
-	targetViews, err := d.getViews(ctx, d.TargetDatabaseConnection)
+	targetViews, err := d.GetViews(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return "", err
 	}
@@ -181,7 +181,7 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 	return strings.TrimSpace(diff.String()), nil
 }
 
-func (d *SQLiteDriver) getTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
+func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
 	if err != nil {
 		return nil, err
@@ -195,22 +195,22 @@ func (d *SQLiteDriver) getTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 			return nil, err
 		}
 
-		columns, err := d.getTableColumns(ctx, db, tableName)
+		columns, err := d.GetTableColumns(ctx, db, tableName)
 		if err != nil {
 			return nil, err
 		}
 
-		indexes, err := d.getTableIndexes(ctx, db, tableName)
+		indexes, err := d.GetTableIndexes(ctx, db, tableName)
 		if err != nil {
 			return nil, err
 		}
 
-		triggers, err := d.getTableTriggers(ctx, db, tableName)
+		triggers, err := d.GetTableTriggers(ctx, db, tableName)
 		if err != nil {
 			return nil, err
 		}
 
-		foreignKeys, err := d.getTableForeignKeys(ctx, db, tableName)
+		foreignKeys, err := d.GetTableForeignKeys(ctx, db, tableName)
 		if err != nil {
 			return nil, err
 		}
@@ -227,7 +227,7 @@ func (d *SQLiteDriver) getTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 	return tables, nil
 }
 
-func (d *SQLiteDriver) getTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {
+func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+tableName+");")
 	if err != nil {
 		return nil, err
@@ -259,7 +259,7 @@ func (d *SQLiteDriver) getTableColumns(ctx context.Context, db *sql.DB, tableNam
 	return columns, nil
 }
 
-func (d *SQLiteDriver) getTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteIndex, error) {
+func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteIndex, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+tableName+");")
 	if err != nil {
 		return nil, err
@@ -279,7 +279,7 @@ func (d *SQLiteDriver) getTableIndexes(ctx context.Context, db *sql.DB, tableNam
 			return nil, err
 		}
 
-		columns, err := d.getIndexColumns(ctx, db, name)
+		columns, err := d.GetIndexColumns(ctx, db, name)
 		if err != nil {
 			return nil, err
 		}
@@ -295,7 +295,7 @@ func (d *SQLiteDriver) getTableIndexes(ctx context.Context, db *sql.DB, tableNam
 	return indexes, nil
 }
 
-func (d *SQLiteDriver) getIndexColumns(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
+func (d *SQLiteDriver) GetIndexColumns(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+indexName+");")
 	if err != nil {
 		return nil, err
@@ -318,7 +318,7 @@ func (d *SQLiteDriver) getIndexColumns(ctx context.Context, db *sql.DB, indexNam
 	return columns, nil
 }
 
-func (d *SQLiteDriver) getTableTriggers(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteTrigger, error) {
+func (d *SQLiteDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteTrigger, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", tableName)
 	if err != nil {
 		return nil, err
@@ -339,7 +339,7 @@ func (d *SQLiteDriver) getTableTriggers(ctx context.Context, db *sql.DB, tableNa
 	return triggers, nil
 }
 
-func (d *SQLiteDriver) getViews(ctx context.Context, db *sql.DB) ([]*SQLiteView, error) {
+func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%' ORDER BY name")
 	if err != nil {
 		return nil, err
@@ -360,7 +360,7 @@ func (d *SQLiteDriver) getViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 	return views, nil
 }
 
-func (d *SQLiteDriver) getTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteForeignKey, error) {
+func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteForeignKey, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+tableName+");")
 	if err != nil {
 		return nil, err
