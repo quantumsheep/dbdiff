@@ -58,6 +58,27 @@ func (d *SQLiteDriver) Close() error {
 func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 	var diff strings.Builder
 
+	var subDiff string
+	var err error
+
+	subDiff, err = d.DiffTables(ctx)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(&diff, subDiff)
+
+	subDiff, err = d.DiffViews(ctx)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(&diff, subDiff)
+
+	return strings.TrimSpace(diff.String()), nil
+}
+
+func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
+	var diff strings.Builder
+
 	sourceTables, err := d.getTables(ctx, d.SourceDatabaseConnection)
 	if err != nil {
 		return "", err
@@ -74,214 +95,52 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			return t.Name == sourceTable.Name
 		})
 
-		// Table not found in database 2
+		// Table not found in target database
 		if !found {
 			fmt.Fprintf(&diff, "%s\n", sourceTable.String())
 			continue
 		}
 
-		// Indexes comparison
-		for _, sourceIndex := range sourceTable.Indexes {
-			targetIndex, found := targetTable.IndexByName(sourceIndex.Name)
-			if !found {
-				// New index
-				fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
-				continue
-			}
+		var subDiff string
 
-			if !sourceIndex.Equal(targetIndex) {
-				// Modified index: drop and recreate
-				fmt.Fprintf(&diff, "DROP INDEX \"%s\";\n", targetIndex.Name)
-				fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
-			}
+		subDiff, err = sourceTable.DiffTable(targetTable)
+		if err != nil {
+			return "", err
 		}
+		fmt.Fprintln(&diff, subDiff)
 
-		for _, targetIndex := range targetTable.Indexes {
-			_, found := sourceTable.IndexByName(targetIndex.Name)
-			if !found {
-				// Removed index
-				fmt.Fprintf(&diff, "DROP INDEX \"%s\";\n", targetIndex.Name)
-			}
+		subDiff, err = sourceTable.DiffIndexes(targetTable)
+		if err != nil {
+			return "", err
 		}
+		fmt.Fprintln(&diff, subDiff)
 
-		// Triggers comparison
-		for _, sourceTrigger := range sourceTable.Triggers {
-			targetTrigger, found := targetTable.TriggerByName(sourceTrigger.Name)
-			if !found {
-				// New trigger
-				fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
-				continue
-			}
-
-			if sourceTrigger.SQL != targetTrigger.SQL {
-				// Modified trigger: drop and recreate
-				fmt.Fprintf(&diff, "DROP TRIGGER \"%s\";\n", targetTrigger.Name)
-				fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
-			}
+		subDiff, err = sourceTable.DiffTriggers(targetTable)
+		if err != nil {
+			return "", err
 		}
+		fmt.Fprintln(&diff, subDiff)
 
-		for _, targetTrigger := range targetTable.Triggers {
-			_, found := sourceTable.TriggerByName(targetTrigger.Name)
-			if !found {
-				// Removed trigger
-				fmt.Fprintf(&diff, "DROP TRIGGER \"%s\";\n", targetTrigger.Name)
-			}
-		}
-
-		addedColumns := []string{}
-		modifiedColumns := []string{}
-		removedColumns := []string{}
-		renamedColumns := make(map[string]string) // oldName -> newName
-
-		for _, sourceColumn := range sourceTable.Columns {
-			targetColumn, found := targetTable.ColumnByName(sourceColumn.Name)
-
-			// New column
-			if !found {
-				// Maybe it's a renamed column?
-				renamedColumn, found := lo.Find(targetTable.Columns, func(c *SQLiteColumn) bool {
-					_, existsInSourceTable := sourceTable.ColumnByName(c.Name)
-					return !existsInSourceTable && c.HasEqualAttributes(sourceColumn)
-				})
-				if found {
-					renamedColumns[renamedColumn.Name] = sourceColumn.Name
-					continue
-				}
-
-				addedColumns = append(addedColumns, sourceColumn.Name)
-				continue
-			}
-
-			if *sourceColumn == *targetColumn {
-				continue
-			}
-
-			// Some modifications should be handled via columns addition/removal
-			if sourceColumn.Type != targetColumn.Type {
-				addedColumns = append(addedColumns, sourceColumn.Name)
-				removedColumns = append(removedColumns, targetColumn.Name)
-				continue
-			}
-
-			modifiedColumns = append(modifiedColumns, sourceColumn.Name)
-		}
-
-		// Removed columns
-		for _, column2 := range targetTable.Columns {
-			_, found := sourceTable.ColumnByName(column2.Name)
-			if !found && !lo.Contains(lo.Keys(renamedColumns), column2.Name) {
-				removedColumns = append(removedColumns, column2.Name)
-			}
-		}
-
-		// Check if foreign keys changed
-		foreignKeysChanged := false
-		if len(sourceTable.ForeignKeys) != len(targetTable.ForeignKeys) {
-			foreignKeysChanged = true
-		} else {
-			for i, sourceForeignKey := range sourceTable.ForeignKeys {
-				targetForeignKey := targetTable.ForeignKeys[i]
-
-				if !sourceForeignKey.Equal(targetForeignKey) {
-					foreignKeysChanged = true
-					break
-				}
-			}
-		}
-
-		// Modified columns or Foreign Keys need to be handled via table recreation
-		if len(modifiedColumns) > 0 || foreignKeysChanged {
-			tempTable := sourceTable.Copy()
-			tempTable.Name = "_" + sourceTable.Name + "_temp"
-
-			// Create temp table (table only; indexes recreated after rename)
-			fmt.Fprintf(&diff, "%s\n", tempTable.StringCreateTable())
-
-			// Reverse rename map: newName -> oldName
-			newToOld := make(map[string]string, len(renamedColumns))
-			for oldName, newName := range renamedColumns {
-				newToOld[newName] = oldName
-			}
-
-			// Build INSERT column list (new schema) and SELECT expressions (from old schema)
-			var insertColumns []string
-			var selectColumns []string
-
-			for _, newCol := range sourceTable.Columns {
-				insertColumns = append(insertColumns, fmt.Sprintf("\"%s\"", newCol.Name))
-
-				// If the column existed before (same name), copy from old table
-				if _, ok := targetTable.ColumnByName(newCol.Name); ok {
-					selectColumns = append(selectColumns, fmt.Sprintf("\"%s\"", newCol.Name))
-					continue
-				}
-
-				// If it was renamed, copy from old name
-				if oldName, ok := newToOld[newCol.Name]; ok {
-					selectColumns = append(selectColumns, fmt.Sprintf("\"%s\"", oldName))
-					continue
-				}
-
-				// Otherwise it is a new column: use DEFAULT if present, else NULL
-				if newCol.Default.Valid {
-					selectColumns = append(selectColumns, newCol.Default.String)
-				} else {
-					selectColumns = append(selectColumns, "NULL")
-				}
-			}
-
-			// Copy data from old table to new temp table with explicit mapping
-			fmt.Fprintf(
-				&diff,
-				"INSERT INTO \"%s\" (%s) SELECT %s FROM \"%s\";\n",
-				tempTable.Name,
-				strings.Join(insertColumns, ", "),
-				strings.Join(selectColumns, ", "),
-				sourceTable.Name,
-			)
-
-			// Drop old table
-			fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", sourceTable.Name)
-
-			// Rename new table to old table's name
-			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" RENAME TO \"%s\";\n", tempTable.Name, sourceTable.Name)
-
-			// Recreate indexes (on final table name)
-			for _, idx := range sourceTable.Indexes {
-				fmt.Fprintf(&diff, "%s\n", idx.String())
-			}
-		} else {
-			for oldName, newName := range renamedColumns {
-				fmt.Fprintf(&diff, "ALTER TABLE \"%s\" RENAME COLUMN \"%s\" TO \"%s\";\n", sourceTable.Name, oldName, newName)
-			}
-
-			for _, columnName := range addedColumns {
-				column, ok := sourceTable.ColumnByName(columnName)
-				if !ok {
-					return "", fmt.Errorf("internal error: added column %s not found in table %s", columnName, sourceTable.Name)
-				}
-
-				fmt.Fprintf(&diff, "ALTER TABLE \"%s\" ADD COLUMN %s;\n", sourceTable.Name, column.String())
-			}
-
-			for _, columnName := range removedColumns {
-				fmt.Fprintf(&diff, "ALTER TABLE \"%s\" DROP COLUMN \"%s\";\n", sourceTable.Name, columnName)
-			}
-		}
 	}
 
 	// Removed tables
-	for _, table2 := range targetTables {
+	for _, targetTable := range targetTables {
 		_, found := lo.Find(sourceTables, func(t *SQLiteTable) bool {
-			return t.Name == table2.Name
+			return t.Name == targetTable.Name
 		})
 
+		// Table not found in source database
 		if !found {
-			fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", table2.Name)
+			fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", targetTable.Name)
 		}
 	}
 
-	// Views comparison
+	return strings.TrimSpace(diff.String()), nil
+}
+
+func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
+	var diff strings.Builder
+
 	sourceViews, err := d.getViews(ctx, d.SourceDatabaseConnection)
 	if err != nil {
 		return "", err
@@ -296,25 +155,23 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 		targetView, found := lo.Find(targetViews, func(v *SQLiteView) bool {
 			return v.Name == sourceView.Name
 		})
-
 		if !found {
 			// New view
 			fmt.Fprintf(&diff, "%s;\n", sourceView.SQL)
 			continue
 		}
 
-		if sourceView.SQL != targetView.SQL {
-			// Modified view
-			fmt.Fprintf(&diff, "DROP VIEW \"%s\";\n", targetView.Name)
-			fmt.Fprintf(&diff, "%s;\n", sourceView.SQL)
+		subDiff, err := sourceView.Diff(targetView)
+		if err != nil {
+			return "", err
 		}
+		fmt.Fprintln(&diff, subDiff)
 	}
 
 	for _, targetView := range targetViews {
 		_, found := lo.Find(sourceViews, func(v *SQLiteView) bool {
 			return v.Name == targetView.Name
 		})
-
 		if !found {
 			// Removed view
 			fmt.Fprintf(&diff, "DROP VIEW \"%s\";\n", targetView.Name)
