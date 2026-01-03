@@ -6,7 +6,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	"github.com/quantumsheep/dbdiff/drivers"
 	"github.com/urfave/cli/v3"
 )
 
