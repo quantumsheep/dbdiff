@@ -245,6 +245,10 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" RENAME COLUMN \"%s\" TO \"%s\";\n", t.Name, oldName, newName)
 		}
 
+		for _, columnName := range columnsDiff.Removed {
+			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" DROP COLUMN \"%s\";\n", t.Name, columnName)
+		}
+
 		for _, columnName := range columnsDiff.Added {
 			column, ok := t.ColumnByName(columnName)
 			if !ok {
@@ -254,9 +258,6 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" ADD COLUMN %s;\n", t.Name, column.String())
 		}
 
-		for _, columnName := range columnsDiff.Removed {
-			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" DROP COLUMN \"%s\";\n", t.Name, columnName)
-		}
 	}
 
 	return strings.TrimSpace(diff.String()), nil
