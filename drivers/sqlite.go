@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -367,7 +369,7 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 	}
 	defer rows.Close()
 
-	foreignKeys := make(map[int]*SQLiteForeignKey)
+	foreignKeysMap := make(map[int]*SQLiteForeignKey)
 
 	for rows.Next() {
 		var id, seq int
@@ -376,7 +378,7 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 			return nil, err
 		}
 
-		foreignKey, exists := foreignKeys[id]
+		foreignKey, exists := foreignKeysMap[id]
 		if !exists {
 			foreignKey = &SQLiteForeignKey{
 				Table:    table,
@@ -385,12 +387,41 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 				OnUpdate: onUpdate,
 				OnDelete: onDelete,
 			}
-			foreignKeys[id] = foreignKey
+			foreignKeysMap[id] = foreignKey
 		}
 
 		foreignKey.From = append(foreignKey.From, from)
 		foreignKey.To = append(foreignKey.To, to)
 	}
 
-	return lo.Values(foreignKeys), nil
+	foreignKeysSet := lo.Values(foreignKeysMap)
+
+	sort.SliceStable(foreignKeysSet, func(i, j int) bool {
+		a := foreignKeysSet[i]
+		b := foreignKeysSet[j]
+
+		if a.Table != b.Table {
+			return a.Table < b.Table
+		}
+
+		if !slices.Equal(a.From, b.From) {
+			return strings.Join(a.From, ",") < strings.Join(b.From, ",")
+		}
+
+		if !slices.Equal(a.To, b.To) {
+			return strings.Join(a.To, ",") < strings.Join(b.To, ",")
+		}
+
+		if a.OnUpdate != b.OnUpdate {
+			return a.OnUpdate < b.OnUpdate
+		}
+
+		if a.OnDelete != b.OnDelete {
+			return a.OnDelete < b.OnDelete
+		}
+
+		return false
+	})
+
+	return foreignKeysSet, nil
 }
