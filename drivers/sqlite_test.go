@@ -115,10 +115,12 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		driver.RequireDiff(`CREATE TABLE "users" (
+		diff := driver.RequireDiff(`CREATE TABLE "users" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT NOT NULL
 );`)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("AddColumn", func(t *testing.T) {
@@ -169,9 +171,20 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				email TEXT
 			);
+
+			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
 		`)
 
-		driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "email";`)
+
+		// Check that data is preserved after applying the diff
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Bob"},
+		}, rows)
 	})
 
 	t.Run("RenameColumn", func(t *testing.T) {
@@ -222,10 +235,27 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				age TEXT
 			);
+
+			INSERT INTO users (id, name, age) VALUES (1, 'Alice', '30'), (2, 'Bob', '25');
 		`)
 
-		driver.RequireDiff(`ALTER TABLE "users" ADD COLUMN "age" INTEGER;
-ALTER TABLE "users" DROP COLUMN "age";`)
+		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT NOT NULL,
+	"age" INTEGER
+);
+INSERT INTO "_users_temp" ("id", "name", "age") SELECT "id", "name", "age" FROM "users";
+DROP TABLE "users";
+ALTER TABLE "_users_temp" RENAME TO "users";`)
+
+		// Check that data is preserved after applying the diff
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "age": int64(30)},
+			{"id": int64(2), "name": "Bob", "age": int64(25)},
+		}, rows)
 	})
 
 	t.Run("ModifyColumnSetNotNull", func(t *testing.T) {
@@ -334,7 +364,9 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			);
 		`)
 
-		driver.RequireDiff(`CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name");`)
+		diff := driver.RequireDiff(`CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name");`)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("DropIndexes", func(t *testing.T) {
@@ -355,7 +387,9 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
 
-		driver.RequireDiff(`DROP INDEX "idx_users_name";`)
+		diff := driver.RequireDiff(`DROP INDEX "idx_users_name";`)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("ModifyIndexes", func(t *testing.T) {
@@ -381,8 +415,10 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
 		`)
 
-		driver.RequireDiff(`DROP INDEX "idx_users_name";
+		diff := driver.RequireDiff(`DROP INDEX "idx_users_name";
 CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("Triggers", func(t *testing.T) {
@@ -407,7 +443,9 @@ DROP TRIGGER "users_update";
 CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
 DROP TRIGGER "users_audit";`
 
-		driver.RequireDiff(expected)
+		diff := driver.RequireDiff(expected)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("CreateTableWithTriggers", func(t *testing.T) {
@@ -424,7 +462,9 @@ DROP TRIGGER "users_audit";`
 );
 CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;`
 
-		driver.RequireDiff(expected)
+		diff := driver.RequireDiff(expected)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("Views", func(t *testing.T) {
@@ -447,7 +487,9 @@ DROP VIEW "users_view";
 CREATE VIEW users_view AS SELECT name FROM users;
 DROP VIEW "old_view";`
 
-		driver.RequireDiff(expected)
+		diff := driver.RequireDiff(expected)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("ForeignKeys", func(t *testing.T) {
@@ -470,6 +512,8 @@ DROP VIEW "old_view";`
 				user_id INTEGER,
 				title TEXT
 			);
+
+			INSERT INTO posts (id, user_id, title) VALUES (1, 1, 'First Post'), (2, 1, 'Second Post');
 		`)
 
 		// Since adding a FK requires table recreation
@@ -483,6 +527,15 @@ INSERT INTO "_posts_temp" ("id", "user_id", "title") SELECT "id", "user_id", "ti
 DROP TABLE "posts";
 ALTER TABLE "_posts_temp" RENAME TO "posts";`
 
-		driver.RequireDiff(expected)
+		diff := driver.RequireDiff(expected)
+
+		// Check that data is preserved after applying the diff
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("posts", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "user_id": int64(1), "title": "First Post"},
+			{"id": int64(2), "user_id": int64(1), "title": "Second Post"},
+		}, rows)
 	})
 }

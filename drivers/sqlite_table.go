@@ -136,10 +136,15 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 			continue
 		}
 
-		// Some modifications should be handled via columns addition/removal
 		if sourceColumn.Type != targetColumn.Type {
-			diff.Added = append(diff.Added, sourceColumn.Name)
+			// Type change to compatible type should be done in table recreation
+			if sourceColumn.IsTypeChangeCompatible(targetColumn) {
+				diff.Modified = append(diff.Modified, sourceColumn.Name)
+				continue
+			}
+
 			diff.Removed = append(diff.Removed, targetColumn.Name)
+			diff.Added = append(diff.Added, sourceColumn.Name)
 			continue
 		}
 
@@ -158,10 +163,11 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 	if len(t.ForeignKeys) != len(other.ForeignKeys) {
 		diff.ForeignKeysChanged = true
 	} else {
-		for i, sourceForeignKey := range t.ForeignKeys {
-			targetForeignKey := other.ForeignKeys[i]
-
-			if !sourceForeignKey.Equal(targetForeignKey) {
+		for _, sourceForeignKey := range t.ForeignKeys {
+			found := lo.SomeBy(other.ForeignKeys, func(fk *SQLiteForeignKey) bool {
+				return fk.Equal(sourceForeignKey)
+			})
+			if !found {
 				diff.ForeignKeysChanged = true
 				break
 			}
