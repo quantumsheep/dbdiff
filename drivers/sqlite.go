@@ -197,36 +197,45 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 			return nil, err
 		}
 
-		columns, err := d.GetTableColumns(ctx, db, tableName)
+		table, err := d.GetTable(ctx, db, tableName)
 		if err != nil {
 			return nil, err
 		}
 
-		indexes, err := d.GetTableIndexes(ctx, db, tableName)
-		if err != nil {
-			return nil, err
-		}
-
-		triggers, err := d.GetTableTriggers(ctx, db, tableName)
-		if err != nil {
-			return nil, err
-		}
-
-		foreignKeys, err := d.GetTableForeignKeys(ctx, db, tableName)
-		if err != nil {
-			return nil, err
-		}
-
-		tables = append(tables, &SQLiteTable{
-			Name:        tableName,
-			Columns:     columns,
-			Indexes:     indexes,
-			Triggers:    triggers,
-			ForeignKeys: foreignKeys,
-		})
+		tables = append(tables, table)
 	}
 
 	return tables, nil
+}
+
+func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*SQLiteTable, error) {
+	columns, err := d.GetTableColumns(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	indexes, err := d.GetTableIndexes(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	triggers, err := d.GetTableTriggers(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	foreignKeys, err := d.GetTableForeignKeys(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SQLiteTable{
+		Name:        tableName,
+		Columns:     columns,
+		Indexes:     indexes,
+		Triggers:    triggers,
+		ForeignKeys: foreignKeys,
+	}, nil
 }
 
 func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {

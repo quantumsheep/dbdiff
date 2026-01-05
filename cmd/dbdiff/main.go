@@ -19,9 +19,9 @@ func main() {
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "driver",
-				Usage: "Database driver to use. Supported drivers: sqlite3",
+				Usage: "Database driver to use. Supported drivers: sqlite3, postgres",
 				Validator: func(s string) error {
-					if slices.Contains([]string{"sqlite3"}, s) {
+					if slices.Contains([]string{"sqlite3", "postgres"}, s) {
 						return nil
 					}
 					return fmt.Errorf("unsupported driver: %s", s)
@@ -69,6 +69,14 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create sqlite3 driver: %w", err)
+		}
+	case "postgres":
+		driver, err = drivers.NewPostgresDriver(&drivers.PostgresDriverConfig{
+			SourceConnectionString: sourceDatabaseURL,
+			TargetConnectionString: targetDatabaseURL,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create postgres driver: %w", err)
 		}
 	default:
 		return fmt.Errorf("unsupported driver: %s", cmd.String("driver"))
