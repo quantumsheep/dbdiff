@@ -26,6 +26,13 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	conn, err := sql.Open("pgx", dsn)
 	require.NoError(tb, err)
 
+	defer func() {
+		require.NoError(tb, conn.Close())
+	}()
+
+	err = conn.PingContext(tb.Context())
+	require.NoError(tb, err)
+
 	// Create unique schemas
 	id := time.Now().UnixNano()
 	sourceSchema := fmt.Sprintf("source_%d", id)
