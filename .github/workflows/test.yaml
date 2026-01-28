@@ -41,12 +41,6 @@ jobs:
             suffix: linux-amd64
           - runner: ubuntu-24.04-arm
             suffix: linux-arm64
-          - runner: windows-2025
-            suffix: windows-amd64.exe
-          - runner: macos-15-intel
-            suffix: macos-amd64
-          - runner: macos-26
-            suffix: macos-arm64
     runs-on: ${{ matrix.platform.runner }}
     services:
       postgres:
