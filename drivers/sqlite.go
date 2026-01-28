@@ -23,12 +23,15 @@ type SQLiteDriver struct {
 }
 
 func NewSQLiteDriver(config *SQLLiteDriverConfig) (*SQLiteDriver, error) {
-	sourceDatabaseConnection, err := sql.Open("sqlite3", config.SourceDatabasePath)
+	sourceDatabasePath := strings.TrimPrefix(config.SourceDatabasePath, "sqlite://")
+	targetDatabasePath := strings.TrimPrefix(config.TargetDatabasePath, "sqlite://")
+
+	sourceDatabaseConnection, err := sql.Open("sqlite3", sourceDatabasePath)
 	if err != nil {
 		return nil, err
 	}
 
-	targetDatabaseConnection, err := sql.Open("sqlite3", config.TargetDatabasePath)
+	targetDatabaseConnection, err := sql.Open("sqlite3", targetDatabasePath)
 	if err != nil {
 		return nil, err
 	}
