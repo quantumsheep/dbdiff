@@ -31,11 +31,9 @@ jobs:
         with:
           go-version: 1.25
 
-      - name: Enable CGO
-        if: runner.os != 'Windows'
-        run: export CGO_ENABLED=1
-
       - name: Build
+        env:
+          CGO_ENABLED: ${{ runner.os == 'Windows' && '' || '1' }}
         run: go build -v -o ./bin/dbdiff-${{ matrix.platform.suffix }} ./cmd/dbdiff
 
       - name: Create Artifact

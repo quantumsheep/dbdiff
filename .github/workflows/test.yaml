@@ -26,12 +26,32 @@ jobs:
         with:
           go-version: 1.25
 
-      - name: Enable CGO
-        if: runner.os != 'Windows'
-        run: export CGO_ENABLED=1
-
       - name: Build
+        env:
+          CGO_ENABLED: ${{ runner.os == 'Windows' && '' || '1' }}
         run: go build -v -o ./bin/dbdiff-${{ matrix.platform.suffix }} ./cmd/dbdiff
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Go 1.25
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25
+
+      - name: Check The Format
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt reports these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
 
   test:
     strategy:
@@ -65,4 +85,9 @@ jobs:
           go-version: 1.25
 
       - name: Run Tests
-        run: go test -v ./...
+        env:
+          CGO_ENABLED: 1
+        run: go test -v -coverprofile=coverage.out ./...
+
+      - name: Show The Coverage
+        run: go tool cover -func=coverage.out
