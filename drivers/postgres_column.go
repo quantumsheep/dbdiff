@@ -6,10 +6,10 @@ import (
 )
 
 type PostgresColumn struct {
-	Name       string
-	Type       string
-	NotNull    bool
-	Default    sql.NullString
+	Name    string
+	Type    string
+	NotNull bool
+	Default sql.NullString
 }
 
 func (c *PostgresColumn) Copy() *PostgresColumn {
@@ -25,7 +25,7 @@ func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 }
 
 func (c *PostgresColumn) String() string {
-	value := fmt.Sprintf("\"%s\" %s", c.Name, c.Type)
+	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
 	if c.NotNull {
 		value += " NOT NULL"
 	}

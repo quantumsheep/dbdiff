@@ -58,11 +58,207 @@ func (d *PostgresDriver) Close() error {
 func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 	var diff strings.Builder
 
-	subDiff, err := d.DiffTables(ctx)
+	var subDiff string
+	var err error
+
+	// A table can use an extension, a type, a sequence, or a function, so these come
+	// first.
+	subDiff, err = d.DiffExtensions(ctx)
 	if err != nil {
 		return "", err
 	}
 	fmt.Fprintln(&diff, subDiff)
+
+	subDiff, err = d.DiffTypes(ctx)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(&diff, subDiff)
+
+	subDiff, err = d.DiffSequences(ctx)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(&diff, subDiff)
+
+	subDiff, err = d.DiffFunctions(ctx)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(&diff, subDiff)
+
+	subDiff, err = d.DiffTables(ctx)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(&diff, subDiff)
+
+	subDiff, err = d.DiffViews(ctx)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(&diff, subDiff)
+
+	return strings.TrimSpace(diff.String()), nil
+}
+
+func (d *PostgresDriver) DiffExtensions(ctx context.Context) (string, error) {
+	var diff strings.Builder
+
+	sourceExtensions, err := d.GetExtensions(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	targetExtensions, err := d.GetExtensions(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	for _, sourceExtension := range sourceExtensions {
+		targetExtension, found := lo.Find(targetExtensions, func(e *PostgresExtension) bool {
+			return e.Name == sourceExtension.Name
+		})
+
+		if !found {
+			fmt.Fprintf(&diff, "%s\n", sourceExtension.String())
+			continue
+		}
+
+		if sourceExtension.Version != targetExtension.Version {
+			fmt.Fprintf(&diff, "%s\n", sourceExtension.StringUpdate())
+		}
+	}
+
+	for _, targetExtension := range targetExtensions {
+		_, found := lo.Find(sourceExtensions, func(e *PostgresExtension) bool {
+			return e.Name == targetExtension.Name
+		})
+
+		if !found {
+			fmt.Fprintf(&diff, "%s\n", targetExtension.StringDrop())
+		}
+	}
+
+	return strings.TrimSpace(diff.String()), nil
+}
+
+func (d *PostgresDriver) DiffTypes(ctx context.Context) (string, error) {
+	var diff strings.Builder
+
+	sourceTypes, err := d.GetTypes(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	targetTypes, err := d.GetTypes(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	for _, sourceType := range sourceTypes {
+		targetType, found := lo.Find(targetTypes, func(t *PostgresType) bool {
+			return t.Name == sourceType.Name
+		})
+
+		if !found {
+			fmt.Fprintf(&diff, "%s\n", sourceType.String())
+			continue
+		}
+
+		if subDiff := sourceType.Diff(targetType); subDiff != "" {
+			fmt.Fprintf(&diff, "%s\n", subDiff)
+		}
+	}
+
+	for _, targetType := range targetTypes {
+		_, found := lo.Find(sourceTypes, func(t *PostgresType) bool {
+			return t.Name == targetType.Name
+		})
+
+		if !found {
+			fmt.Fprintf(&diff, "DROP TYPE %s;\n", quoteIdentifier(targetType.Name))
+		}
+	}
+
+	return strings.TrimSpace(diff.String()), nil
+}
+
+func (d *PostgresDriver) DiffSequences(ctx context.Context) (string, error) {
+	var diff strings.Builder
+
+	sourceSequences, err := d.GetSequences(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	targetSequences, err := d.GetSequences(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	for _, sourceSequence := range sourceSequences {
+		targetSequence, found := lo.Find(targetSequences, func(s *PostgresSequence) bool {
+			return s.Name == sourceSequence.Name
+		})
+
+		if !found {
+			fmt.Fprintf(&diff, "%s\n", sourceSequence.String())
+			continue
+		}
+
+		if subDiff := sourceSequence.Diff(targetSequence); subDiff != "" {
+			fmt.Fprintf(&diff, "%s\n", subDiff)
+		}
+	}
+
+	for _, targetSequence := range targetSequences {
+		_, found := lo.Find(sourceSequences, func(s *PostgresSequence) bool {
+			return s.Name == targetSequence.Name
+		})
+
+		if !found {
+			fmt.Fprintf(&diff, "DROP SEQUENCE %s;\n", quoteIdentifier(targetSequence.Name))
+		}
+	}
+
+	return strings.TrimSpace(diff.String()), nil
+}
+
+func (d *PostgresDriver) DiffFunctions(ctx context.Context) (string, error) {
+	var diff strings.Builder
+
+	sourceFunctions, err := d.GetFunctions(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	targetFunctions, err := d.GetFunctions(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return "", err
+	}
+
+	// The definition of PostgreSQL starts with CREATE OR REPLACE FUNCTION, so a new
+	// function and a modified function take the same statement.
+	for _, sourceFunction := range sourceFunctions {
+		targetFunction, found := lo.Find(targetFunctions, func(f *PostgresFunction) bool {
+			return f.Signature() == sourceFunction.Signature()
+		})
+
+		if !found || sourceFunction.Def != targetFunction.Def {
+			fmt.Fprintf(&diff, "%s\n", sourceFunction.String())
+		}
+	}
+
+	for _, targetFunction := range targetFunctions {
+		_, found := lo.Find(sourceFunctions, func(f *PostgresFunction) bool {
+			return f.Signature() == targetFunction.Signature()
+		})
+
+		if !found {
+			fmt.Fprintf(&diff, "%s\n", targetFunction.StringDrop())
+		}
+	}
 
 	return strings.TrimSpace(diff.String()), nil
 }
@@ -107,15 +303,9 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (string, error) {
 
 		// Table not found in source database
 		if !found {
-			fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", targetTable.Name)
+			fmt.Fprintf(&diff, "DROP TABLE %s;\n", quoteIdentifier(targetTable.Name))
 		}
 	}
-
-	subDiff, err := d.DiffViews(ctx)
-	if err != nil {
-		return "", err
-	}
-	fmt.Fprintln(&diff, subDiff)
 
 	return strings.TrimSpace(diff.String()), nil
 }
@@ -145,7 +335,7 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (string, error) {
 		}
 
 		if sourceView.Def != targetView.Def {
-			fmt.Fprintf(&diff, "DROP VIEW \"%s\";\n", targetView.Name)
+			fmt.Fprintf(&diff, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
 			fmt.Fprintf(&diff, "%s\n", sourceView.String())
 		}
 	}
@@ -157,11 +347,174 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (string, error) {
 		})
 
 		if !found {
-			fmt.Fprintf(&diff, "DROP VIEW \"%s\";\n", targetView.Name)
+			fmt.Fprintf(&diff, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
 		}
 	}
 
 	return strings.TrimSpace(diff.String()), nil
+}
+
+func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*PostgresExtension, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT extname, extversion
+		FROM pg_extension
+		WHERE extnamespace = current_schema()::regnamespace
+		ORDER BY extname
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var extensions []*PostgresExtension
+	for rows.Next() {
+		extension := &PostgresExtension{}
+
+		err := rows.Scan(&extension.Name, &extension.Version)
+		if err != nil {
+			return nil, err
+		}
+
+		extensions = append(extensions, extension)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return extensions, nil
+}
+
+func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresType, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT t.typname, e.enumlabel
+		FROM pg_type t
+		JOIN pg_enum e ON e.enumtypid = t.oid
+		WHERE t.typnamespace = current_schema()::regnamespace
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e'
+		)
+		ORDER BY t.typname, e.enumsortorder
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var types []*PostgresType
+	for rows.Next() {
+		var typeName, value string
+		if err := rows.Scan(&typeName, &value); err != nil {
+			return nil, err
+		}
+
+		lastType, _ := lo.Last(types)
+		if lastType == nil || lastType.Name != typeName {
+			lastType = &PostgresType{Name: typeName}
+			types = append(types, lastType)
+		}
+
+		lastType.Values = append(lastType.Values, value)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return types, nil
+}
+
+func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*PostgresSequence, error) {
+	// A serial column and an identity column own their sequence. The table creates it,
+	// so the diff of the sequences leaves it out.
+	rows, err := db.QueryContext(ctx, `
+		SELECT s.sequencename, s.data_type::text, s.start_value, s.min_value, s.max_value, s.increment_by, s.cycle
+		FROM pg_sequences s
+		JOIN pg_class c ON c.relname = s.sequencename
+			AND c.relkind = 'S'
+			AND c.relnamespace = current_schema()::regnamespace
+		WHERE s.schemaname = current_schema()
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype IN ('a', 'e', 'i')
+		)
+		ORDER BY s.sequencename
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sequences []*PostgresSequence
+	for rows.Next() {
+		sequence := &PostgresSequence{}
+
+		err := rows.Scan(
+			&sequence.Name,
+			&sequence.DataType,
+			&sequence.Start,
+			&sequence.Min,
+			&sequence.Max,
+			&sequence.Increment,
+			&sequence.Cycle,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		sequences = append(sequences, sequence)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return sequences, nil
+}
+
+func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*PostgresFunction, error) {
+	// The definition holds the name of the schema. The diff compares two schemas, so the
+	// query removes that prefix from the header.
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			p.proname,
+			pg_get_function_identity_arguments(p.oid),
+			regexp_replace(
+				pg_get_functiondef(p.oid),
+				'^CREATE OR REPLACE FUNCTION ' || quote_ident(current_schema()) || '\.',
+				'CREATE OR REPLACE FUNCTION '
+			)
+		FROM pg_proc p
+		WHERE p.pronamespace = current_schema()::regnamespace
+		AND p.prokind IN ('f', 'p')
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
+		)
+		ORDER BY p.proname, pg_get_function_identity_arguments(p.oid)
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var functions []*PostgresFunction
+	for rows.Next() {
+		function := &PostgresFunction{}
+
+		err := rows.Scan(&function.Name, &function.Arguments, &function.Def)
+		if err != nil {
+			return nil, err
+		}
+
+		function.Def = strings.TrimSpace(function.Def)
+
+		functions = append(functions, function)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return functions, nil
 }
 
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {
@@ -186,6 +539,11 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 
 		views = append(views, view)
 	}
+
+	if err := viewRows.Err(); err != nil {
+		return nil, err
+	}
+
 	return views, nil
 }
 
@@ -214,6 +572,10 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		}
 
 		tables = append(tables, table)
+	}
+
+	if err := tableRows.Err(); err != nil {
+		return nil, err
 	}
 
 	return tables, nil
@@ -250,12 +612,16 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		table.Columns = append(table.Columns, column)
 	}
 
+	if err := columnRows.Err(); err != nil {
+		return nil, err
+	}
+
 	// Get constraints
 	constraintRows, err := db.QueryContext(ctx, `
 			SELECT conname, contype, pg_get_constraintdef(oid)
 			FROM pg_constraint
 			WHERE conrelid = $1::regclass
-		`, tableName)
+		`, quoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
 	}
@@ -272,15 +638,19 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		table.Constraints = append(table.Constraints, constraint)
 	}
 
+	if err := constraintRows.Err(); err != nil {
+		return nil, err
+	}
+
 	// Get indexes
 	indexRows, err := db.QueryContext(ctx, `
 			SELECT indexname, indexdef
 			FROM pg_indexes
 			WHERE schemaname = current_schema() AND tablename = $1
 			AND indexname NOT IN (
-				SELECT conname FROM pg_constraint WHERE conrelid = $1::regclass
+				SELECT conname FROM pg_constraint WHERE conrelid = $2::regclass
 			)
-		`, tableName)
+		`, tableName, quoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
 	}
@@ -297,12 +667,16 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		table.Indexes = append(table.Indexes, index)
 	}
 
+	if err := indexRows.Err(); err != nil {
+		return nil, err
+	}
+
 	// Get triggers
 	triggerRows, err := db.QueryContext(ctx, `
 			SELECT tgname, pg_get_triggerdef(oid)
 			FROM pg_trigger
 			WHERE tgrelid = $1::regclass AND tgisinternal = false
-		`, tableName)
+		`, quoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +691,10 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		}
 
 		table.Triggers = append(table.Triggers, trigger)
+	}
+
+	if err := triggerRows.Err(); err != nil {
+		return nil, err
 	}
 
 	return table, nil

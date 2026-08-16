@@ -6,5 +6,5 @@ type PostgresView struct {
 }
 
 func (v *PostgresView) String() string {
-	return "CREATE VIEW \"" + v.Name + "\" AS " + v.Def
+	return "CREATE VIEW " + quoteIdentifier(v.Name) + " AS " + v.Def
 }

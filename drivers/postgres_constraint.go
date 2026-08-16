@@ -9,5 +9,5 @@ type PostgresConstraint struct {
 }
 
 func (c *PostgresConstraint) String() string {
-	return fmt.Sprintf("CONSTRAINT \"%s\" %s", c.Name, c.Def)
+	return fmt.Sprintf("CONSTRAINT %s %s", quoteIdentifier(c.Name), c.Def)
 }

@@ -26,10 +26,6 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	conn, err := sql.Open("pgx", dsn)
 	require.NoError(tb, err)
 
-	defer func() {
-		require.NoError(tb, conn.Close())
-	}()
-
 	err = conn.PingContext(tb.Context())
 	require.NoError(tb, err)
 
@@ -43,10 +39,16 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", targetSchema))
 	require.NoError(tb, err)
 
+	// The connection stays open for this cleanup. A closed connection drops no schema,
+	// and the test database keeps every schema of every run.
 	tb.Cleanup(func() {
-		conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", sourceSchema))
-		conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", targetSchema))
-		conn.Close()
+		_, err := conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", sourceSchema))
+		require.NoError(tb, err)
+
+		_, err = conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", targetSchema))
+		require.NoError(tb, err)
+
+		require.NoError(tb, conn.Close())
 	})
 
 	sourceDSN := fmt.Sprintf("%s&search_path=%s", dsn, sourceSchema)
@@ -59,7 +61,7 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	require.NoError(tb, err)
 
 	tb.Cleanup(func() {
-		driver.Close()
+		require.NoError(tb, driver.Close())
 	})
 
 	return &TestingPostgresDriver{
@@ -235,5 +237,169 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.RequireDiff(`CREATE VIEW "user_ids" AS  SELECT id
    FROM users;`)
+	})
+
+	t.Run("CreateSequence", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
+
+		diff := driver.RequireDiff(`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 NO CYCLE;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropSequence", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
+
+		diff := driver.RequireDiff(`DROP SEQUENCE "counter";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterSequence", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
+		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
+
+		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("SequenceOfSerialColumnIsIgnored", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id SERIAL);`)
+
+		// The table creates its own sequence. The diff holds the table only.
+		driver.RequireDiff(`CREATE TABLE "users" (
+	"id" integer NOT NULL DEFAULT nextval('users_id_seq'::regclass)
+);`)
+	})
+
+	t.Run("CreateEnumType", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
+
+		diff := driver.RequireDiff(`CREATE TYPE "mood" AS ENUM ('sad', 'ok');`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AddEnumValue", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');`)
+		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
+
+		diff := driver.RequireDiff(`ALTER TYPE "mood" ADD VALUE 'happy';`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("RemoveEnumValue", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad');`)
+		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
+
+		// PostgreSQL removes no value from an enum. The type needs a recreation.
+		diff := driver.RequireDiff(`DROP TYPE "mood";
+CREATE TYPE "mood" AS ENUM ('sad');`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropEnumType", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad');`)
+
+		diff := driver.RequireDiff(`DROP TYPE "mood";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateFunction", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE FUNCTION increment(a integer) RETURNS integer AS $$
+			BEGIN
+				RETURN a + 1;
+			END;
+			$$ LANGUAGE plpgsql;
+		`)
+
+		diff := driver.RequireDiff(`CREATE OR REPLACE FUNCTION increment(a integer)
+ RETURNS integer
+ LANGUAGE plpgsql
+AS $function$
+			BEGIN
+				RETURN a + 1;
+			END;
+			$function$;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("ReplaceFunction", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 2; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
+
+		diff := driver.RequireDiff(`CREATE OR REPLACE FUNCTION increment(a integer)
+ RETURNS integer
+ LANGUAGE plpgsql
+AS $function$ BEGIN RETURN a + 2; END; $function$;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropFunction", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
+
+		diff := driver.RequireDiff(`DROP FUNCTION "increment"(a integer);`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateExtension", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE EXTENSION pg_trgm;`)
+
+		// One database holds one extension one time, so the test applies no diff here.
+		driver.RequireDiff(`CREATE EXTENSION "pg_trgm";`)
+	})
+
+	t.Run("DropExtension", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`CREATE EXTENSION pg_trgm;`)
+
+		diff := driver.RequireDiff(`DROP EXTENSION "pg_trgm";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("TableNameThatNeedsQuotes", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE "order ""list""" (id INT NOT NULL);`)
+
+		diff := driver.RequireDiff(`CREATE TABLE "order ""list""" (
+	"id" integer NOT NULL
+);`)
+
+		driver.ExecOnTarget(diff)
 	})
 }
