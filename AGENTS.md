@@ -8,7 +8,8 @@ the SQL statements that make the target schema equal to the source schema.
 The command takes two arguments. The first argument is the source. The second argument is
 the target. The source holds the wanted state. The output changes the target.
 
-dbdiff supports SQLite and PostgreSQL. It compares schemas only. It does not compare data.
+dbdiff supports SQLite and PostgreSQL. It compares schemas. The `--data` flag adds the
+comparison of the rows, and the default value of that flag is off.
 
 ## The rules that matter most
 
@@ -68,7 +69,7 @@ The `drivers` package uses one file per schema object per engine:
 
 ```
 drivers/
-├── driver.go                  The Driver interface
+├── driver.go                  The Driver interface and SectionDiff
 ├── identifier.go              quoteIdentifier and quoteIdentifiers
 ├── sqlite.go                  The SQLite driver: connections, queries, top-level diff
 ├── sqlite_table.go            SQLiteTable and its diff
@@ -77,6 +78,7 @@ drivers/
 ├── sqlite_trigger.go          SQLiteTrigger
 ├── sqlite_view.go             SQLiteView
 ├── sqlite_foreign_key.go      SQLiteForeignKey
+├── sqlite_data.go             The row comparison of SQLite
 ├── sqlite_test.go             The SQLite test harness and the tests
 ├── postgres.go                The PostgreSQL driver
 ├── postgres_table.go          PostgresTable and its diff
@@ -87,8 +89,14 @@ drivers/
 ├── postgres_view.go           PostgresView
 ├── postgres_sequence.go       PostgresSequence
 ├── postgres_type.go           PostgresType, an enum type
+├── postgres_domain.go         PostgresDomain
+├── postgres_composite_type.go PostgresCompositeType
 ├── postgres_function.go       PostgresFunction
+├── postgres_aggregate.go      PostgresAggregate
+├── postgres_operator.go       PostgresOperator
 ├── postgres_extension.go      PostgresExtension
+├── postgres_cast.go           The automatic cast lookup and the USING clause
+├── postgres_data.go           The row comparison of PostgreSQL
 └── postgres_test.go           The PostgreSQL test harness and the tests
 ```
 
@@ -173,7 +181,7 @@ The SQLite driver reads the schema with `PRAGMA` statements and with `sqlite_mas
 | ------------- | --------------------------------------------------------- |
 | Tables        | `SELECT name FROM sqlite_master WHERE type='table'`        |
 | Columns       | `PRAGMA table_info(<table>)`                               |
-| Indexes       | `PRAGMA index_list(<table>)`, `PRAGMA index_info(<index>)` |
+| Indexes       | `PRAGMA index_list(<table>)`, `PRAGMA index_info(<index>)`, and the `sql` column of `sqlite_master` |
 | Foreign keys  | `PRAGMA foreign_key_list(<table>)`                         |
 | Triggers      | `SELECT name, sql FROM sqlite_master WHERE type='trigger'` |
 | Views         | `SELECT name, sql FROM sqlite_master WHERE type='view'`    |
@@ -206,11 +214,23 @@ statement.
 `GetTableForeignKeys` sorts the foreign keys with `sort.SliceStable`, because SQLite gives
 no stable order. Keep that sort. Without it the output changes between two runs.
 
+`SQLiteIndex` holds a `Keys` field and a `Where` field. A key is the SQL text of one key
+part, so an expression key keeps its text. `PRAGMA index_info` gives a NULL name for an
+expression, and `parseIndexDefinition` reads the text of that key from the `sql` column of
+`sqlite_master`. An index that a `UNIQUE` constraint or a `PRIMARY KEY` builds holds no
+`sql` row, and every key of that index comes from the PRAGMA name.
+
 ## PostgreSQL driver
 
 The PostgreSQL driver connects through `pgx/v5/stdlib` with the driver name `pgx`. It
-reads the schema of `current_schema()` only. The search path of the connection string
-selects the schema.
+reads one schema. The `--schema` flag names that schema, and an empty value keeps the
+schema of the search path of the connection string. `openPostgresConnection` writes the
+name into the `search_path` runtime parameter with `pgx.ParseConfig`, so every query keeps
+`current_schema()` and needs no change.
+
+`Diff` calls `VerifySchema` for each side first. PostgreSQL accepts a search path that
+names no schema, and it then reads an empty schema. Without that check the diff prints a
+`DROP` statement for every object of the target.
 
 | Data        | Source                                                   |
 | ----------- | -------------------------------------------------------- |
@@ -222,12 +242,42 @@ selects the schema.
 | Triggers    | `pg_trigger` with `pg_get_triggerdef(oid)`               |
 | Sequences   | `pg_sequences`, without the sequence that a column owns  |
 | Enum types  | `pg_type` with `pg_enum`, in the order of `enumsortorder` |
+| Domains     | `pg_type` with `typtype = 'd'`, and the checks of `pg_constraint` |
+| Composite types | `pg_type` with `typtype = 'c'`, in the order of `attnum` |
 | Functions   | `pg_proc` with `pg_get_functiondef(oid)`                 |
+| Aggregates  | `pg_aggregate` with `pg_proc`                            |
+| Operators   | `pg_operator`                                            |
 | Extensions  | `pg_extension`                                           |
 
-`Diff` prints six sections in this order: extensions, enum types, sequences, functions,
-tables, views. A table can use each of the first four, so these come first. Keep that
-order when you add a section.
+`Diff` prints ten sections in this order: extensions, enum types, domains, composite
+types, sequences, functions, aggregates, operators, tables, views. A table can use each of
+the first five, and an aggregate and an operator use a function. Keep that order when you
+add a section.
+
+Each `Diff<Object>s` function returns a `SectionDiff`. That type holds an `EarlyRemovals`
+field, an `Additions` field, and a `Removals` field. The source loop writes into
+`Additions`, and the target loop writes into `Removals`. A modification that needs a `DROP`
+statement and a `CREATE` statement stays in `Additions`, because it is one modification of
+one object.
+
+`Diff` prints the three parts in this order:
+
+1. Every `EarlyRemovals`, in the REVERSE section order.
+2. Every `Additions`, in the section order.
+3. Every `Removals`, in the REVERSE section order.
+
+PostgreSQL refuses a `DROP` statement while another object uses the object, so the
+dependency must go away first. A new section needs no other work to get that order.
+
+`EarlyRemovals` covers the object that blocks an addition of another section. `DiffViews`
+writes every `DROP VIEW` statement into that field, because a view reads a column of a
+table, and PostgreSQL refuses a change of that column while the view exists. A view that
+changes gets its `DROP VIEW` in `EarlyRemovals` and its `CREATE VIEW` in `Additions`, so
+the two statements wrap the table changes.
+
+A type change of a column keeps the text of `view_definition` equal, so the definition
+alone detects no change. `GetViews` reads the columns that each view uses from `pg_depend`
+and `pg_rewrite`, and `PostgresView.HasEqualColumns` compares them.
 
 Three rules keep the output free of noise:
 
@@ -243,13 +293,17 @@ several functions with one name, so the name alone identifies nothing.
 
 `PostgresSequence.Diff` returns one `ALTER SEQUENCE` statement with every attribute that
 changes. Separate statements fail, because a new minimum above the current value is
-invalid.
+invalid. `GetSequences` reads `last_value`, and `Diff` adds a `RESTART WITH` clause when
+the current value falls outside the new range. Add that clause in no other case, because a
+restart changes data.
 
 `PostgresType.Diff` prints `ALTER TYPE ... ADD VALUE` when the target values are the first
 values of the source. Every other change prints `DROP TYPE` and `CREATE TYPE`.
 
 PostgreSQL supports `ALTER TABLE ALTER COLUMN`. The driver prints one statement per change
-of a type, of a `NOT NULL` flag, or of a default value. A modified constraint, index, or
+of a type, of a `NOT NULL` flag, or of a default value. A type change gets a `USING`
+clause when PostgreSQL holds no automatic cast between the two types. `HasAutomaticCast`
+in `postgres_cast.go` asks the database, because the rules of `pg_cast` are long. A modified constraint, index, or
 trigger becomes a `DROP` statement and a `CREATE` statement.
 
 An index and a trigger keep the definition text that PostgreSQL returns. `String()` adds
@@ -258,6 +312,27 @@ the semicolon.
 A query that casts a name to `regclass` takes the name from `quoteIdentifier`. A query
 that compares a name to a text column takes the raw name. `GetTable` passes both forms to
 the index query.
+
+## Data comparison
+
+The `--data` flag sets the `CompareData` field of the driver config. The field is false by
+default, and the schema output stays the same in every case. `DiffData` lives in
+`sqlite_data.go` and in `postgres_data.go`. Each engine holds its own copy, like every
+other part of the diff.
+
+`Diff` prints the data section after the whole schema section, because a new row needs its
+table and its column.
+
+- The comparison covers a table that the source and the target both hold. The schema
+  section already creates or drops the other tables.
+- The comparison needs the primary key of the table. A table with no primary key gets a
+  comment line, and no row statement. A table with a different primary key in the target
+  gets the same treatment.
+- The output holds an `INSERT` statement for a key of the source only, an `UPDATE`
+  statement for a key that both sides hold with a different row, and a `DELETE` statement
+  for a key of the target only.
+- `formatSQLiteValue` and `formatPostgresValue` make an SQL literal of each value first.
+  The comparison then works on the literal, so `NULL` never equals the text `'NULL'`.
 
 ---
 
@@ -484,25 +559,20 @@ rule here during a session, repeat that rule in the spawn prompt.
 This section records the state of the repo on 2026-08-16. It is not a rule set. Correct an
 item when your task touches it.
 
-- Neither driver compares data. The `Data` column of the `README.md` table is `❌` for
-  every engine.
-- The diff prints no dependency order for a removal. A `DROP TYPE` statement comes before
-  the `DROP TABLE` statement of the table that uses the type, and PostgreSQL refuses it.
-- A modified function takes `CREATE OR REPLACE FUNCTION`. PostgreSQL refuses that
-  statement when the return type changes. The diff prints no `DROP FUNCTION` statement
-  before it.
-- One database holds one extension one time. The test of `CREATE EXTENSION` compares the
-  diff, and it applies no diff, because the source schema and the target schema share the
-  database.
-- `ALTER SEQUENCE` fails when the new minimum is above the current value. The driver
-  prints no `RESTART` clause, because a restart changes data.
-- The PostgreSQL driver compares no aggregate, no operator, no domain, and no composite
-  type. `GetTypes` reads an enum type only.
-- The SQLite driver reads no partial index and no index that an expression builds.
-  `SQLiteIndex` holds a column list only.
-- The PostgreSQL driver reads the schema of `current_schema()` only. A connection string
-  without a search path reads the `public` schema.
-- A type change of PostgreSQL prints `ALTER COLUMN ... TYPE` without a `USING` clause.
-  PostgreSQL refuses the statement when it holds no automatic cast.
-- The row-iteration errors of `rows.Err()` reach the caller, but no test covers that path.
-  A test needs a connection that fails in the middle of a read.
+- The data comparison prints no row of a table that the source only holds. The schema
+  section creates that table, and the table stays empty.
+- An `ALTER TABLE ... DROP COLUMN` statement of PostgreSQL drops the primary key
+  constraint of that column too. The `DROP CONSTRAINT` statement of the same diff then
+  fails, because the constraint is gone.
+- The PostgreSQL driver compares one schema at a time. The `--schema` flag selects it. The
+  driver compares no object of a second schema, and it prints no `CREATE SCHEMA`
+  statement.
+- `SQLiteColumn` holds no `Unique` field, and `PRAGMA table_info` gives no `UNIQUE` flag
+  for a column. A table recreation writes the new table without the `UNIQUE` constraint of
+  the column, so the recreation loses that constraint without a message.
+- `GetTableColumns` of SQLite marks a column as `PrimaryKey` when the `pk` value of
+  `PRAGMA table_info` is 1. SQLite numbers the columns of a composite primary key 1, 2, 3
+  in the key order, so the driver reads the first column of such a key only.
+- `GetViews` has no `ORDER BY` clause, so the order of the views is not stable. A schema
+  with a view that reads a second view can print the two `DROP VIEW` statements in the
+  wrong order.

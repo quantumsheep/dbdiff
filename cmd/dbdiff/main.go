@@ -32,6 +32,14 @@ func main() {
 					return fmt.Errorf("unsupported driver: %s", s)
 				},
 			},
+			&cli.StringFlag{
+				Name:  "schema",
+				Usage: "Name of the schema to compare. The postgres driver accepts this flag. The default is the schema of the search path",
+			},
+			&cli.BoolFlag{
+				Name:  "data",
+				Usage: "Compare the rows of each table that the source and the target both hold. The comparison needs a primary key",
+			},
 		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
@@ -71,11 +79,20 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		driverFlag = "sqlite3"
 	}
 
+	schemaFlag := cmd.String("schema")
+
+	compareData := cmd.Bool("data")
+
 	switch driverFlag {
 	case "sqlite3":
+		if schemaFlag != "" {
+			return fmt.Errorf("the --schema flag applies to the postgres driver only")
+		}
+
 		driver, err = drivers.NewSQLiteDriver(&drivers.SQLLiteDriverConfig{
 			SourceDatabasePath: sourceDatabaseURL,
 			TargetDatabasePath: targetDatabaseURL,
+			CompareData:        compareData,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create sqlite3 driver: %w", err)
@@ -84,6 +101,9 @@ func action(ctx context.Context, cmd *cli.Command) error {
 		driver, err = drivers.NewPostgresDriver(&drivers.PostgresDriverConfig{
 			SourceConnectionString: sourceDatabaseURL,
 			TargetConnectionString: targetDatabaseURL,
+			SourceSchema:           schemaFlag,
+			TargetSchema:           schemaFlag,
+			CompareData:            compareData,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create postgres driver: %w", err)

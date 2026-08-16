@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,6 +63,20 @@ func runDbdiff(tb testing.TB, binaryPath string, args ...string) commandResult {
 	}
 }
 
+func writeSQLiteDatabase(tb testing.TB, path string, sqlStatements string) {
+	tb.Helper()
+
+	database, err := sql.Open("sqlite3", path)
+	require.NoError(tb, err)
+
+	defer func() {
+		require.NoError(tb, database.Close())
+	}()
+
+	_, err = database.Exec(sqlStatements)
+	require.NoError(tb, err)
+}
+
 func TestDbdiffCommand(t *testing.T) {
 	binaryPath := buildDbdiff(t)
 
@@ -80,6 +96,17 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Equal(t, 1, strings.Count(result.Stderr, "unsupported driver: mysql"))
 	})
 
+	t.Run("SchemaFlagWithSQLiteDriver", func(t *testing.T) {
+		directory := t.TempDir()
+		sourcePath := filepath.Join(directory, "source.sqlite")
+		targetPath := filepath.Join(directory, "target.sqlite")
+
+		result := runDbdiff(t, binaryPath, "--schema", "public", sourcePath, targetPath)
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "the --schema flag applies to the postgres driver only")
+	})
+
 	t.Run("DiffTwoDatabases", func(t *testing.T) {
 		directory := t.TempDir()
 		sourcePath := filepath.Join(directory, "source.sqlite")
@@ -89,5 +116,29 @@ func TestDbdiffCommand(t *testing.T) {
 
 		require.Equal(t, 0, result.ExitCode)
 		require.Empty(t, result.Stderr)
+	})
+
+	t.Run("DataFlag", func(t *testing.T) {
+		directory := t.TempDir()
+		sourcePath := filepath.Join(directory, "source.sqlite")
+		targetPath := filepath.Join(directory, "target.sqlite")
+
+		schema := `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`
+
+		writeSQLiteDatabase(t, sourcePath, schema+`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
+		writeSQLiteDatabase(t, targetPath, schema+`INSERT INTO users (id, name) VALUES (1, 'Bob');`)
+
+		// The flag is off, so the output holds no row statement.
+		result := runDbdiff(t, binaryPath, sourcePath, targetPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, "\n", result.Stdout)
+
+		result = runDbdiff(t, binaryPath, "--data", sourcePath, targetPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, "UPDATE \"users\" SET \"name\" = 'Alice' WHERE \"id\" = 1;\n", result.Stdout)
 	})
 }

@@ -3,9 +3,10 @@ package drivers
 import "fmt"
 
 type PostgresFunction struct {
-	Name      string
-	Arguments string
-	Def       string
+	Name       string
+	Arguments  string
+	ReturnType string
+	Def        string
 }
 
 // Signature identifies the function. PostgreSQL accepts several functions with one name

@@ -1,6 +1,9 @@
 package drivers
 
 import (
+	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -99,6 +102,100 @@ func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 		SQLiteDriver: driver,
 		tb:           tb,
 	}
+}
+
+// errRowIteration is the error that failingRows returns after it exhausts its rows. A
+// read method must return this error through rows.Err.
+var errRowIteration = errors.New("row iteration failed")
+
+// failingRows is a driver.Rows value that yields a fixed set of rows, then fails. It
+// simulates a connection that breaks in the middle of a read.
+type failingRows struct {
+	columns  []string
+	rows     [][]driver.Value
+	position int
+}
+
+func (r *failingRows) Columns() []string {
+	return r.columns
+}
+
+func (r *failingRows) Close() error {
+	return nil
+}
+
+func (r *failingRows) Next(dest []driver.Value) error {
+	if r.position >= len(r.rows) {
+		return errRowIteration
+	}
+
+	copy(dest, r.rows[r.position])
+	r.position++
+
+	return nil
+}
+
+// failingStmt is a driver.Stmt value. Its Query method returns a failingRows value for
+// every query, no matter the query text.
+type failingStmt struct {
+	columns []string
+	rows    [][]driver.Value
+}
+
+func (s *failingStmt) Close() error {
+	return nil
+}
+
+func (s *failingStmt) NumInput() int {
+	return -1
+}
+
+func (s *failingStmt) Exec(args []driver.Value) (driver.Result, error) {
+	return nil, errors.New("failingStmt does not support Exec")
+}
+
+func (s *failingStmt) Query(args []driver.Value) (driver.Rows, error) {
+	return &failingRows{columns: s.columns, rows: s.rows}, nil
+}
+
+// failingConn is a driver.Conn value. It prepares a failingStmt value for every query.
+type failingConn struct {
+	columns []string
+	rows    [][]driver.Value
+}
+
+func (c *failingConn) Prepare(query string) (driver.Stmt, error) {
+	return &failingStmt{columns: c.columns, rows: c.rows}, nil
+}
+
+func (c *failingConn) Close() error {
+	return nil
+}
+
+func (c *failingConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("failingConn does not support Begin")
+}
+
+// failingDriver is a driver.Driver value. It opens a connection that fails in the
+// middle of a read, after it yields the given rows.
+type failingDriver struct {
+	columns []string
+	rows    [][]driver.Value
+}
+
+func (d *failingDriver) Open(name string) (driver.Conn, error) {
+	return &failingConn{columns: d.columns, rows: d.rows}, nil
+}
+
+// init registers failingDriver one time. A second call to sql.Register with the same
+// name panics, and go test can load this package one time only per process.
+func init() {
+	sql.Register("sqlite3_failing_rows", &failingDriver{
+		columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+		rows: [][]driver.Value{
+			{int64(0), "id", "INTEGER", int64(0), nil, int64(1)},
+		},
+	})
 }
 
 func TestSQLiteDriver(t *testing.T) {
@@ -504,6 +601,258 @@ CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreatePartialIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				active INTEGER NOT NULL
+			);
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				active INTEGER NOT NULL
+			);
+		`)
+
+		diff := driver.RequireDiff(`CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("ModifyPartialIndexCondition", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				active INTEGER NOT NULL
+			);
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				active INTEGER NOT NULL
+			);
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 0;
+		`)
+
+		diff := driver.RequireDiff(`DROP INDEX "idx_users_active";
+CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateExpressionIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+			CREATE UNIQUE INDEX idx_users_name ON users (lower(name), id);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+		`)
+
+		diff := driver.RequireDiff(`CREATE UNIQUE INDEX "idx_users_name" ON "users" (lower(name), "id");`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("ModifyExpressionIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+			CREATE INDEX idx_users_name ON users (lower(name));
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+			CREATE INDEX idx_users_name ON users (upper(name));
+		`)
+
+		diff := driver.RequireDiff(`DROP INDEX "idx_users_name";
+CREATE INDEX "idx_users_name" ON "users" (lower(name));`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("RecreateTableWithPartialIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				active INTEGER NOT NULL
+			);
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT,
+				active INTEGER NOT NULL
+			);
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
+
+			INSERT INTO users (id, name, active) VALUES (1, 'Alice', 1), (2, 'Bob', 0);
+		`)
+
+		// The recreation of the table drops the index. The last statement builds it again.
+		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT NOT NULL,
+	"active" INTEGER NOT NULL
+);
+INSERT INTO "_users_temp" ("id", "name", "active") SELECT "id", "name", "active" FROM "users";
+DROP TABLE "users";
+ALTER TABLE "_users_temp" RENAME TO "users";
+CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "active": int64(1)},
+			{"id": int64(2), "name": "Bob", "active": int64(0)},
+		}, rows)
+	})
+
+	t.Run("ImplicitUniqueIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT UNIQUE,
+				name TEXT
+			);
+			CREATE INDEX idx_users_name ON users (name);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT UNIQUE,
+				name TEXT
+			);
+		`)
+
+		// The UNIQUE constraint builds an index. That index stays out of the diff.
+		diff := driver.RequireDiff(`CREATE INDEX "idx_users_name" ON "users" ("name");`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("RecreateTableWithUniqueColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT UNIQUE,
+				age INTEGER
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT UNIQUE,
+				age TEXT
+			);
+
+			INSERT INTO users (id, email, age) VALUES (1, 'alice@example.com', '30'), (2, 'bob@example.com', '25');
+		`)
+
+		// The UNIQUE constraint builds an index of the origin "u". The recreation of the
+		// table must not print a CREATE INDEX statement for that index. SQLite refuses a
+		// CREATE INDEX statement with the name of such an index.
+		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
+	"id" INTEGER PRIMARY KEY,
+	"email" TEXT,
+	"age" INTEGER
+);
+INSERT INTO "_users_temp" ("id", "email", "age") SELECT "id", "email", "age" FROM "users";
+DROP TABLE "users";
+ALTER TABLE "_users_temp" RENAME TO "users";`)
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": "alice@example.com", "age": int64(30)},
+			{"id": int64(2), "email": "bob@example.com", "age": int64(25)},
+		}, rows)
+	})
+
+	t.Run("RecreateTableWithPrimaryKeyAndIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				email TEXT PRIMARY KEY,
+				age INTEGER
+			);
+			CREATE INDEX idx_users_age ON users (age);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				email TEXT PRIMARY KEY,
+				age TEXT
+			);
+			CREATE INDEX idx_users_age ON users (age);
+
+			INSERT INTO users (email, age) VALUES ('alice@example.com', '30'), ('bob@example.com', '25');
+		`)
+
+		// The PRIMARY KEY builds an index of the origin "pk". The recreation of the table
+		// must print the explicit index only, and no index of the PRIMARY KEY.
+		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
+	"email" TEXT PRIMARY KEY,
+	"age" INTEGER
+);
+INSERT INTO "_users_temp" ("email", "age") SELECT "email", "age" FROM "users";
+DROP TABLE "users";
+ALTER TABLE "_users_temp" RENAME TO "users";
+CREATE INDEX "idx_users_age" ON "users" ("age");`)
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY email")
+
+		require.Equal(t, []map[string]any{
+			{"email": "alice@example.com", "age": int64(30)},
+			{"email": "bob@example.com", "age": int64(25)},
+		}, rows)
+	})
+
 	t.Run("Triggers", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -620,5 +969,148 @@ ALTER TABLE "_posts_temp" RENAME TO "posts";`
 			{"id": int64(1), "user_id": int64(1), "title": "First Post"},
 			{"id": int64(2), "user_id": int64(1), "title": "Second Post"},
 		}, rows)
+	})
+
+	t.Run("CompareRows", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Robert'), (3, 'Carol');`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');`)
+
+		expected := `INSERT INTO "users" ("id", "name") VALUES (3, 'Carol');
+UPDATE "users" SET "name" = 'Robert' WHERE "id" = 2;
+DELETE FROM "users" WHERE "id" = 4;`
+
+		diff := driver.RequireDiff(expected)
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Robert"},
+			{"id": int64(3), "name": "Carol"},
+		}, rows)
+	})
+
+	t.Run("CompareRowsOfATableWithoutAPrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE logs (message TEXT);`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO logs (message) VALUES ('start');`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO logs (message) VALUES ('stop');`)
+
+		diff := driver.RequireDiff(`-- The table "logs" holds no primary key, so dbdiff compares no row of it.`)
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("logs", "")
+
+		require.Equal(t, []map[string]any{
+			{"message": "stop"},
+		}, rows)
+	})
+
+	t.Run("CompareRowsWithAQuoteAndWithNull", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT);`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO notes (id, body) VALUES (1, 'it''s a note'), (2, NULL), (3, NULL);`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO notes (id, body) VALUES (1, 'plain'), (2, 'not empty');`)
+
+		expected := `INSERT INTO "notes" ("id", "body") VALUES (3, NULL);
+UPDATE "notes" SET "body" = 'it''s a note' WHERE "id" = 1;
+UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
+
+		diff := driver.RequireDiff(expected)
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("notes", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "body": "it's a note"},
+			{"id": int64(2), "body": nil},
+			{"id": int64(3), "body": nil},
+		}, rows)
+	})
+
+	t.Run("CompareRowsOfATableWithAnotherPrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnSource(`CREATE TABLE items (code INTEGER PRIMARY KEY, label TEXT);`)
+		driver.ExecOnSource(`INSERT INTO items (code, label) VALUES (1, 'first');`)
+
+		driver.ExecOnTarget(`CREATE TABLE items (identifier INTEGER PRIMARY KEY, label TEXT);`)
+		driver.ExecOnTarget(`INSERT INTO items (identifier, label) VALUES (1, 'old');`)
+
+		// The target holds no column with the name of the key, so the driver reads no key
+		// of a target row.
+		expected := `ALTER TABLE "items" RENAME COLUMN "identifier" TO "code";
+-- The table "items" holds another primary key in the target, so dbdiff compares no row of it.`
+
+		diff := driver.RequireDiff(expected)
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("items", "ORDER BY code")
+
+		require.Equal(t, []map[string]any{
+			{"code": int64(1), "label": "old"},
+		}, rows)
+	})
+
+	t.Run("CompareNoRowWithoutTheDataFlag", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		schema := `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (2, 'Bob');`)
+
+		diff := driver.RequireDiff("")
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(2), "name": "Bob"},
+		}, rows)
+	})
+
+	t.Run("RowIterationError", func(t *testing.T) {
+		db, err := sql.Open("sqlite3_failing_rows", "")
+		require.NoError(t, err)
+
+		defer db.Close()
+
+		driver := &SQLiteDriver{}
+
+		// failingDriver yields one row, then fails on the second call to Next. The
+		// read method must return that failure through rows.Err.
+		_, err = driver.GetTableColumns(t.Context(), db, "users")
+		require.ErrorIs(t, err, errRowIteration)
 	})
 }

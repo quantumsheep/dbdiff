@@ -32,14 +32,32 @@ The `--driver` flag selects the database engine. The default value is `sqlite3`:
 dbdiff --driver postgres postgres://user:password@localhost:5432/source postgres://user:password@localhost:5432/target
 ```
 
+The `--schema` flag names the schema that the postgres driver reads. The driver reads that schema in the source database and in the target database. If you give no value, the driver reads the schema of the search path:
+
+```bash
+dbdiff --driver postgres --schema app postgres://user:password@localhost:5432/source postgres://user:password@localhost:5432/target
+```
+
+The sqlite3 driver holds no schema. A `--schema` value with that driver gives an error.
+
+The `--data` flag adds the comparison of the rows. The default value is off, so the output holds the schema only:
+
+```bash
+dbdiff --data source.sqlite target.sqlite
+```
+
+The data section comes after the schema section, because a new row needs its table and its column. It covers each table that the source and the target both hold, and it uses the primary key of the table. A table with no primary key gets a comment line, and no row statement.
+
 ## Supported Databases
 
-| Name       | Tables | Indexes | Constraints | Triggers | Views | Sequences | Enum types | Functions | Extensions | Data |
-|------------|--------|---------|-------------|----------|-------|-----------|------------|-----------|------------|------|
-| SQLite     | ✅      | ✅       | ✅ (foreign keys) | ✅        | ✅     | ➖         | ➖          | ➖         | ➖          | ❌    |
-| PostgreSQL | ✅      | ✅       | ✅           | ✅        | ✅     | ✅         | ✅          | ✅         | ✅          | ❌    |
-| MySQL      | ❌      | ❌       | ❌           | ❌        | ❌     | ❌         | ❌          | ❌         | ❌          | ❌    |
+| Name       | Tables | Indexes | Constraints | Triggers | Views | Sequences | Enum types | Domains | Composite types | Functions | Aggregates | Operators | Extensions | Data |
+|------------|--------|---------|-------------|----------|-------|-----------|------------|---------|-----------------|-----------|------------|-----------|------------|------|
+| SQLite     | ✅      | ✅       | ✅ (foreign keys) | ✅        | ✅     | ➖         | ➖          | ➖       | ➖               | ➖         | ➖          | ➖         | ➖          | ✅    |
+| PostgreSQL | ✅      | ✅       | ✅           | ✅        | ✅     | ✅         | ✅          | ✅       | ✅               | ✅         | ✅          | ✅         | ✅          | ✅    |
+| MySQL      | ❌      | ❌       | ❌           | ❌        | ❌     | ❌         | ❌          | ❌       | ❌               | ❌         | ❌          | ❌         | ❌          | ❌    |
 
 ✅ supported, ❌ not supported, ➖ the engine holds no such object. A table covers its columns.
 
-The PostgreSQL driver compares one schema. The search path of the connection string selects it, and the default schema is `public`.
+The SQLite driver compares a partial index and an index that an expression builds.
+
+The PostgreSQL driver compares one schema. The `--schema` flag selects it. Without that flag, the search path of the connection string selects it, and the default schema is `public`.

@@ -23,7 +23,7 @@ func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
 	return nil, false
 }
 
-func (t *PostgresTable) DiffTable(other *PostgresTable) (string, error) {
+func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) (string, error) {
 	var diff strings.Builder
 
 	// Added or modified columns
@@ -37,8 +37,12 @@ func (t *PostgresTable) DiffTable(other *PostgresTable) (string, error) {
 		if !sourceColumn.HasEqualAttributes(targetColumn) {
 			// Type change
 			if sourceColumn.Type != targetColumn.Type {
-				// Using USING clause might be needed for some conversions, but keeping it simple as requested.
-				fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s TYPE %s;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name), sourceColumn.Type)
+				usingClause, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
+				if err != nil {
+					return "", err
+				}
+
+				fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s TYPE %s%s;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name), sourceColumn.Type, usingClause)
 			}
 
 			// Not Null change

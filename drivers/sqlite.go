@@ -15,11 +15,16 @@ import (
 type SQLLiteDriverConfig struct {
 	SourceDatabasePath string
 	TargetDatabasePath string
+
+	// CompareData turns the comparison of the rows on. The default value is false, so the
+	// diff holds the schema only.
+	CompareData bool
 }
 
 type SQLiteDriver struct {
 	SourceDatabaseConnection *sql.DB
 	TargetDatabaseConnection *sql.DB
+	CompareData              bool
 }
 
 func NewSQLiteDriver(config *SQLLiteDriverConfig) (*SQLiteDriver, error) {
@@ -39,6 +44,7 @@ func NewSQLiteDriver(config *SQLLiteDriverConfig) (*SQLiteDriver, error) {
 	driver := &SQLiteDriver{
 		SourceDatabaseConnection: sourceDatabaseConnection,
 		TargetDatabaseConnection: targetDatabaseConnection,
+		CompareData:              config.CompareData,
 	}
 
 	return driver, nil
@@ -61,24 +67,29 @@ func (d *SQLiteDriver) Close() error {
 }
 
 func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
+	sections := []func(ctx context.Context) (string, error){
+		d.DiffTables,
+		d.DiffViews,
+	}
+
+	// A new row needs its table and its column, so the data section comes after the whole
+	// schema section.
+	if d.CompareData {
+		sections = append(sections, d.DiffData)
+	}
+
 	var diff strings.Builder
 
-	var subDiff string
-	var err error
+	for _, section := range sections {
+		subDiff, err := section(ctx)
+		if err != nil {
+			return "", err
+		}
 
-	subDiff, err = d.DiffTables(ctx)
-	if err != nil {
-		return "", err
+		if subDiff != "" {
+			fmt.Fprintln(&diff, subDiff)
+		}
 	}
-
-	fmt.Fprintln(&diff, subDiff)
-
-	subDiff, err = d.DiffViews(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	fmt.Fprintln(&diff, subDiff)
 
 	return strings.TrimSpace(diff.String()), nil
 }
@@ -297,6 +308,11 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 }
 
 func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteIndex, error) {
+	definitions, err := d.GetIndexDefinitions(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+quoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
@@ -318,16 +334,27 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 			return nil, err
 		}
 
-		columns, err := d.GetIndexColumns(ctx, db, name)
+		// The origin "c" marks an index that a CREATE INDEX statement built. The origin
+		// "u" marks the index of a UNIQUE constraint, and the origin "pk" marks the index
+		// of a PRIMARY KEY. The column definition already prints those two constraints, so
+		// this function skips their index.
+		if origin != "c" {
+			continue
+		}
+
+		definitionKeys, condition := parseIndexDefinition(definitions[name])
+
+		keys, err := d.GetIndexKeys(ctx, db, name, definitionKeys)
 		if err != nil {
 			return nil, err
 		}
 
 		indexes = append(indexes, &SQLiteIndex{
-			Table:   tableName,
-			Name:    name,
-			Unique:  isUnique == 1,
-			Columns: columns,
+			Table:  tableName,
+			Name:   name,
+			Unique: isUnique == 1,
+			Keys:   keys,
+			Where:  condition,
 		})
 	}
 
@@ -339,27 +366,27 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 	return indexes, nil
 }
 
-func (d *SQLiteDriver) GetIndexColumns(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
+// GetIndexDefinitions returns the text of each index of a table. An index that a UNIQUE
+// constraint or a PRIMARY KEY builds has no text, and the map holds no entry for it.
+func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tableName string) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
 	if err != nil {
 		return nil, err
 	}
 
 	defer rows.Close()
 
-	var columns []string
+	definitions := make(map[string]string)
 
 	for rows.Next() {
-		var seqno int
-		var cid int
-		var name string
+		var name, definition string
 
-		err := rows.Scan(&seqno, &cid, &name)
+		err := rows.Scan(&name, &definition)
 		if err != nil {
 			return nil, err
 		}
 
-		columns = append(columns, name)
+		definitions[name] = definition
 	}
 
 	err = rows.Err()
@@ -367,7 +394,50 @@ func (d *SQLiteDriver) GetIndexColumns(ctx context.Context, db *sql.DB, indexNam
 		return nil, err
 	}
 
-	return columns, nil
+	return definitions, nil
+}
+
+// GetIndexKeys returns the SQL text of each key part of an index. PRAGMA index_info gives
+// no name for a key that an expression builds. For that key the function takes the text of
+// the definition.
+func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName string, definitionKeys []string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var keys []string
+
+	for rows.Next() {
+		var seqno int
+		var cid int
+		var name sql.NullString
+
+		err := rows.Scan(&seqno, &cid, &name)
+		if err != nil {
+			return nil, err
+		}
+
+		if name.Valid {
+			keys = append(keys, quoteIdentifier(name.String))
+			continue
+		}
+
+		if seqno < 0 || seqno >= len(definitionKeys) {
+			return nil, fmt.Errorf("the definition of the index %s holds no key at the position %d", indexName, seqno)
+		}
+
+		keys = append(keys, definitionKeys[seqno])
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return keys, nil
 }
 
 func (d *SQLiteDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteTrigger, error) {
