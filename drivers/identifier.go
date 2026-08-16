@@ -16,8 +16,10 @@ func quoteLiteral(value string) string {
 
 func quoteIdentifiers(names []string) []string {
 	quoted := make([]string, len(names))
+
 	for i, name := range names {
 		quoted[i] = quoteIdentifier(name)
 	}
+
 	return quoted
 }

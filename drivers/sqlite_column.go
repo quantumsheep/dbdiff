@@ -27,12 +27,15 @@ func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
 
 func (c *SQLiteColumn) String() string {
 	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
+
 	if c.NotNull {
 		value += " NOT NULL"
 	}
+
 	if c.PrimaryKey {
 		value += " PRIMARY KEY"
 	}
+
 	if c.Default.Valid {
 		value += fmt.Sprintf(" DEFAULT %s", c.Default.String)
 	}

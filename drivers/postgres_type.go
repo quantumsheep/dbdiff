@@ -13,6 +13,7 @@ type PostgresType struct {
 
 func (t *PostgresType) String() string {
 	quotedValues := make([]string, len(t.Values))
+
 	for i, value := range t.Values {
 		quotedValues[i] = quoteLiteral(value)
 	}

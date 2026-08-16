@@ -44,7 +44,9 @@ func main() {
 			},
 		},
 	}
-	if err := cmd.Run(context.Background(), os.Args); err != nil {
+
+	err := cmd.Run(context.Background(), os.Args)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "dbdiff: %v\n", err)
 		os.Exit(1)
 	}
@@ -89,6 +91,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	default:
 		return fmt.Errorf("unsupported driver: %s", cmd.String("driver"))
 	}
+
 	defer driver.Close()
 
 	diff, err := driver.Diff(ctx)

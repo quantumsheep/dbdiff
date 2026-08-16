@@ -26,6 +26,7 @@ func (t *SQLiteTable) ColumnByName(name string) (*SQLiteColumn, bool) {
 			return column, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -35,6 +36,7 @@ func (t *SQLiteTable) IndexByName(name string) (*SQLiteIndex, bool) {
 			return index, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -44,11 +46,13 @@ func (t *SQLiteTable) TriggerByName(name string) (*SQLiteTrigger, bool) {
 			return trigger, true
 		}
 	}
+
 	return nil, false
 }
 
 func (t *SQLiteTable) StringCreateTable() string {
 	var columnLines []string
+
 	for _, column := range t.Columns {
 		line := "\t" + column.String()
 		columnLines = append(columnLines, line)
@@ -65,6 +69,7 @@ func (t *SQLiteTable) StringCreateTable() string {
 
 func (t *SQLiteTable) StringCreateIndexes() string {
 	var createIndexes []string
+
 	for _, index := range t.Indexes {
 		createIndexes = append(createIndexes, index.String())
 	}
@@ -74,6 +79,7 @@ func (t *SQLiteTable) StringCreateIndexes() string {
 
 func (t *SQLiteTable) StringCreateTriggers() string {
 	var createTriggers []string
+
 	for _, trigger := range t.Triggers {
 		createTriggers = append(createTriggers, trigger.SQL+";")
 	}
@@ -84,11 +90,13 @@ func (t *SQLiteTable) StringCreateTriggers() string {
 func (t *SQLiteTable) String() string {
 	str := t.StringCreateTable()
 
-	if indexes := t.StringCreateIndexes(); indexes != "" {
+	indexes := t.StringCreateIndexes()
+	if indexes != "" {
 		str += "\n" + indexes
 	}
 
-	if triggers := t.StringCreateTriggers(); triggers != "" {
+	triggers := t.StringCreateTriggers()
+	if triggers != "" {
 		str += "\n" + triggers
 	}
 
@@ -205,13 +213,15 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 			insertColumns = append(insertColumns, quoteIdentifier(newCol.Name))
 
 			// If the column existed before (same name), copy from old table
-			if _, ok := other.ColumnByName(newCol.Name); ok {
+			_, ok := other.ColumnByName(newCol.Name)
+			if ok {
 				selectColumns = append(selectColumns, quoteIdentifier(newCol.Name))
 				continue
 			}
 
 			// If it was renamed, copy from old name
-			if oldName, ok := newToOld[newCol.Name]; ok {
+			oldName, ok := newToOld[newCol.Name]
+			if ok {
 				selectColumns = append(selectColumns, quoteIdentifier(oldName))
 				continue
 			}

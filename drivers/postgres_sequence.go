@@ -19,6 +19,7 @@ func (s *PostgresSequence) StringCycle() string {
 	if s.Cycle {
 		return "CYCLE"
 	}
+
 	return "NO CYCLE"
 }
 

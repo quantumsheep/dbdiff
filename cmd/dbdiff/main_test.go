@@ -22,6 +22,7 @@ func buildDbdiff(tb testing.TB) string {
 	tb.Helper()
 
 	binaryPath := filepath.Join(tb.TempDir(), "dbdiff")
+
 	if runtime.GOOS == "windows" {
 		binaryPath += ".exe"
 	}
@@ -46,6 +47,7 @@ func runDbdiff(tb testing.TB, binaryPath string, args ...string) commandResult {
 	err := command.Run()
 
 	exitCode := 0
+
 	if err != nil {
 		var exitError *exec.ExitError
 		require.True(tb, errors.As(err, &exitError), err)

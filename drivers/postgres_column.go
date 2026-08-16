@@ -26,11 +26,14 @@ func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 
 func (c *PostgresColumn) String() string {
 	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
+
 	if c.NotNull {
 		value += " NOT NULL"
 	}
+
 	if c.Default.Valid {
 		value += fmt.Sprintf(" DEFAULT %s", c.Default.String)
 	}
+
 	return value
 }

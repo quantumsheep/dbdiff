@@ -67,36 +67,42 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	subDiff, err = d.DiffTypes(ctx)
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	subDiff, err = d.DiffSequences(ctx)
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	subDiff, err = d.DiffFunctions(ctx)
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	subDiff, err = d.DiffTables(ctx)
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	subDiff, err = d.DiffViews(ctx)
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	return strings.TrimSpace(diff.String()), nil
@@ -166,7 +172,8 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (string, error) {
 			continue
 		}
 
-		if subDiff := sourceType.Diff(targetType); subDiff != "" {
+		subDiff := sourceType.Diff(targetType)
+		if subDiff != "" {
 			fmt.Fprintf(&diff, "%s\n", subDiff)
 		}
 	}
@@ -207,7 +214,8 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (string, error) {
 			continue
 		}
 
-		if subDiff := sourceSequence.Diff(targetSequence); subDiff != "" {
+		subDiff := sourceSequence.Diff(targetSequence)
+		if subDiff != "" {
 			fmt.Fprintf(&diff, "%s\n", subDiff)
 		}
 	}
@@ -292,6 +300,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		fmt.Fprintln(&diff, subDiff)
 	}
 
@@ -364,9 +373,11 @@ func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*Post
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var extensions []*PostgresExtension
+
 	for rows.Next() {
 		extension := &PostgresExtension{}
 
@@ -378,7 +389,8 @@ func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*Post
 		extensions = append(extensions, extension)
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -399,12 +411,16 @@ func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresT
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var types []*PostgresType
+
 	for rows.Next() {
 		var typeName, value string
-		if err := rows.Scan(&typeName, &value); err != nil {
+
+		err := rows.Scan(&typeName, &value)
+		if err != nil {
 			return nil, err
 		}
 
@@ -417,7 +433,8 @@ func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresT
 		lastType.Values = append(lastType.Values, value)
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -442,9 +459,11 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var sequences []*PostgresSequence
+
 	for rows.Next() {
 		sequence := &PostgresSequence{}
 
@@ -464,7 +483,8 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 		sequences = append(sequences, sequence)
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -494,9 +514,11 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var functions []*PostgresFunction
+
 	for rows.Next() {
 		function := &PostgresFunction{}
 
@@ -510,7 +532,8 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 		functions = append(functions, function)
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -526,9 +549,11 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 	if err != nil {
 		return nil, err
 	}
+
 	defer viewRows.Close()
 
 	var views []*PostgresView
+
 	for viewRows.Next() {
 		view := &PostgresView{}
 
@@ -540,7 +565,8 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 		views = append(views, view)
 	}
 
-	if err := viewRows.Err(); err != nil {
+	err = viewRows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -557,12 +583,16 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 	if err != nil {
 		return nil, err
 	}
+
 	defer tableRows.Close()
 
 	var tables []*PostgresTable
+
 	for tableRows.Next() {
 		var tableName string
-		if err := tableRows.Scan(&tableName); err != nil {
+
+		err := tableRows.Scan(&tableName)
+		if err != nil {
 			return nil, err
 		}
 
@@ -574,7 +604,8 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		tables = append(tables, table)
 	}
 
-	if err := tableRows.Err(); err != nil {
+	err = tableRows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -594,12 +625,15 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	if err != nil {
 		return nil, err
 	}
+
 	defer columnRows.Close()
 
 	for columnRows.Next() {
 		var colName, dataType, isNullable string
 		var colDefault sql.NullString
-		if err := columnRows.Scan(&colName, &dataType, &isNullable, &colDefault); err != nil {
+
+		err := columnRows.Scan(&colName, &dataType, &isNullable, &colDefault)
+		if err != nil {
 			return nil, err
 		}
 
@@ -612,7 +646,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		table.Columns = append(table.Columns, column)
 	}
 
-	if err := columnRows.Err(); err != nil {
+	err = columnRows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -625,6 +660,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	if err != nil {
 		return nil, err
 	}
+
 	defer constraintRows.Close()
 
 	for constraintRows.Next() {
@@ -638,7 +674,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		table.Constraints = append(table.Constraints, constraint)
 	}
 
-	if err := constraintRows.Err(); err != nil {
+	err = constraintRows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -654,6 +691,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	if err != nil {
 		return nil, err
 	}
+
 	defer indexRows.Close()
 
 	for indexRows.Next() {
@@ -667,7 +705,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		table.Indexes = append(table.Indexes, index)
 	}
 
-	if err := indexRows.Err(); err != nil {
+	err = indexRows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -680,6 +719,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	if err != nil {
 		return nil, err
 	}
+
 	defer triggerRows.Close()
 
 	for triggerRows.Next() {
@@ -693,7 +733,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		table.Triggers = append(table.Triggers, trigger)
 	}
 
-	if err := triggerRows.Err(); err != nil {
+	err = triggerRows.Err()
+	if err != nil {
 		return nil, err
 	}
 

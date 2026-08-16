@@ -32,6 +32,7 @@ func (i *SQLiteIndex) Equal(other *SQLiteIndex) bool {
 
 func (i *SQLiteIndex) String() string {
 	createIndex := "CREATE "
+
 	if i.Unique {
 		createIndex += "UNIQUE "
 	}

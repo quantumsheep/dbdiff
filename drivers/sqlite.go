@@ -70,12 +70,14 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	subDiff, err = d.DiffViews(ctx)
 	if err != nil {
 		return "", err
 	}
+
 	fmt.Fprintln(&diff, subDiff)
 
 	return strings.TrimSpace(diff.String()), nil
@@ -112,18 +114,21 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		fmt.Fprintln(&diff, subDiff)
 
 		subDiff, err = sourceTable.DiffIndexes(targetTable)
 		if err != nil {
 			return "", err
 		}
+
 		fmt.Fprintln(&diff, subDiff)
 
 		subDiff, err = sourceTable.DiffTriggers(targetTable)
 		if err != nil {
 			return "", err
 		}
+
 		fmt.Fprintln(&diff, subDiff)
 
 	}
@@ -170,6 +175,7 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		fmt.Fprintln(&diff, subDiff)
 	}
 
@@ -191,12 +197,16 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var tables []*SQLiteTable
+
 	for rows.Next() {
 		var tableName string
-		if err := rows.Scan(&tableName); err != nil {
+
+		err := rows.Scan(&tableName)
+		if err != nil {
 			return nil, err
 		}
 
@@ -208,7 +218,8 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 		tables = append(tables, table)
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -250,9 +261,11 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var columns []*SQLiteColumn
+
 	for rows.Next() {
 		var cid int
 		var name string
@@ -261,7 +274,8 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		var defaultValue sql.NullString
 		var isPrimaryKey int
 
-		if err := rows.Scan(&cid, &name, &ctype, &isNotNull, &defaultValue, &isPrimaryKey); err != nil {
+		err := rows.Scan(&cid, &name, &ctype, &isNotNull, &defaultValue, &isPrimaryKey)
+		if err != nil {
 			return nil, err
 		}
 
@@ -274,7 +288,8 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		})
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -286,9 +301,11 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var indexes []*SQLiteIndex
+
 	for rows.Next() {
 		var seq int
 		var name string
@@ -314,7 +331,8 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 		})
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -326,22 +344,26 @@ func (d *SQLiteDriver) GetIndexColumns(ctx context.Context, db *sql.DB, indexNam
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var columns []string
+
 	for rows.Next() {
 		var seqno int
 		var cid int
 		var name string
 
-		if err := rows.Scan(&seqno, &cid, &name); err != nil {
+		err := rows.Scan(&seqno, &cid, &name)
+		if err != nil {
 			return nil, err
 		}
 
 		columns = append(columns, name)
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -353,21 +375,27 @@ func (d *SQLiteDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableNa
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var triggers []*SQLiteTrigger
+
 	for rows.Next() {
 		var name, sqlContent string
-		if err := rows.Scan(&name, &sqlContent); err != nil {
+
+		err := rows.Scan(&name, &sqlContent)
+		if err != nil {
 			return nil, err
 		}
+
 		triggers = append(triggers, &SQLiteTrigger{
 			Name: name,
 			SQL:  sqlContent,
 		})
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -379,21 +407,27 @@ func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	var views []*SQLiteView
+
 	for rows.Next() {
 		var name, sqlContent string
-		if err := rows.Scan(&name, &sqlContent); err != nil {
+
+		err := rows.Scan(&name, &sqlContent)
+		if err != nil {
 			return nil, err
 		}
+
 		views = append(views, &SQLiteView{
 			Name: name,
 			SQL:  sqlContent,
 		})
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -405,6 +439,7 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 	if err != nil {
 		return nil, err
 	}
+
 	defer rows.Close()
 
 	foreignKeysMap := make(map[int]*SQLiteForeignKey)
@@ -412,7 +447,9 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 	for rows.Next() {
 		var id, seq int
 		var table, from, to, onUpdate, onDelete, match string
-		if err := rows.Scan(&id, &seq, &table, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+
+		err := rows.Scan(&id, &seq, &table, &from, &to, &onUpdate, &onDelete, &match)
+		if err != nil {
 			return nil, err
 		}
 
@@ -432,7 +469,8 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 		foreignKey.To = append(foreignKey.To, to)
 	}
 
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	if err != nil {
 		return nil, err
 	}
 
@@ -440,6 +478,7 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 
 	sort.SliceStable(foreignKeysSet, func(i, j int) bool {
 		a := foreignKeysSet[i]
+
 		b := foreignKeysSet[j]
 
 		if a.Table != b.Table {

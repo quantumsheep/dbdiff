@@ -54,6 +54,7 @@ func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules s
 	require.NoError(d.tb, err)
 
 	var results []map[string]any
+
 	for rows.Next() {
 		columnValues := make([]any, len(columns))
 
@@ -66,12 +67,14 @@ func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules s
 		require.NoError(d.tb, err)
 
 		row := make(map[string]any)
+
 		for i, col := range columns {
 			row[col.Name] = columnValues[i]
 		}
 
 		results = append(results, row)
 	}
+
 	require.NoError(d.tb, rows.Err())
 
 	return results

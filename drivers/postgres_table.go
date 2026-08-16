@@ -19,6 +19,7 @@ func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
 			return column, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -75,11 +76,13 @@ func (t *PostgresTable) DiffTable(other *PostgresTable) (string, error) {
 			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.String())
 			continue
 		}
+
 		if sourceConstraint.Def != targetConstraint.Def {
 			fmt.Fprintf(&diff, "ALTER TABLE %s DROP CONSTRAINT %s;\n", quoteIdentifier(t.Name), quoteIdentifier(targetConstraint.Name))
 			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.String())
 		}
 	}
+
 	for _, targetConstraint := range other.Constraints {
 		_, found := t.ConstraintByName(targetConstraint.Name)
 		if !found {
@@ -94,11 +97,13 @@ func (t *PostgresTable) DiffTable(other *PostgresTable) (string, error) {
 			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
 			continue
 		}
+
 		if sourceIndex.Def != targetIndex.Def {
 			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
 			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
 		}
 	}
+
 	for _, targetIndex := range other.Indexes {
 		_, found := t.IndexByName(targetIndex.Name)
 		if !found {
@@ -113,11 +118,13 @@ func (t *PostgresTable) DiffTable(other *PostgresTable) (string, error) {
 			fmt.Fprintf(&diff, "%s\n", sourceTrigger.String())
 			continue
 		}
+
 		if sourceTrigger.Def != targetTrigger.Def {
 			fmt.Fprintf(&diff, "DROP TRIGGER %s ON %s;\n", quoteIdentifier(targetTrigger.Name), quoteIdentifier(t.Name))
 			fmt.Fprintf(&diff, "%s\n", sourceTrigger.String())
 		}
 	}
+
 	for _, targetTrigger := range other.Triggers {
 		_, found := t.TriggerByName(targetTrigger.Name)
 		if !found {
@@ -134,6 +141,7 @@ func (t *PostgresTable) ConstraintByName(name string) (*PostgresConstraint, bool
 			return c, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -143,6 +151,7 @@ func (t *PostgresTable) IndexByName(name string) (*PostgresIndex, bool) {
 			return i, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -152,11 +161,13 @@ func (t *PostgresTable) TriggerByName(name string) (*PostgresTrigger, bool) {
 			return tr, true
 		}
 	}
+
 	return nil, false
 }
 
 func (t *PostgresTable) StringCreateTable() string {
 	var columnLines []string
+
 	for _, column := range t.Columns {
 		line := "\t" + column.String()
 		columnLines = append(columnLines, line)
