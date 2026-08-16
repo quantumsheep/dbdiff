@@ -3,8 +3,6 @@ package drivers
 import (
 	"fmt"
 	"strings"
-
-	"github.com/samber/lo"
 )
 
 type SQLiteForeignKey struct {
@@ -16,17 +14,10 @@ type SQLiteForeignKey struct {
 }
 
 func (fk *SQLiteForeignKey) String() string {
-	fromColumnsQuoted := lo.Map(fk.From, func(c string, _ int) string {
-		return fmt.Sprintf("\"%s\"", c)
-	})
-	toColumnsQuoted := lo.Map(fk.To, func(c string, _ int) string {
-		return fmt.Sprintf("\"%s\"", c)
-	})
+	fromColumns := strings.Join(quoteIdentifiers(fk.From), ", ")
+	toColumns := strings.Join(quoteIdentifiers(fk.To), ", ")
 
-	fromColumns := strings.Join(fromColumnsQuoted, ", ")
-	toColumns := strings.Join(toColumnsQuoted, ", ")
-
-	s := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES \"%s\" (%s)", fromColumns, fk.Table, toColumns)
+	s := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)", fromColumns, quoteIdentifier(fk.Table), toColumns)
 	if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "" {
 		s += fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate)
 	}

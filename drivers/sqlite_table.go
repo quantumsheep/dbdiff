@@ -60,7 +60,7 @@ func (t *SQLiteTable) StringCreateTable() string {
 	}
 
 	createTableColumns := strings.Join(columnLines, ",\n")
-	return fmt.Sprintf("CREATE TABLE \"%s\" (\n%s\n);", t.Name, createTableColumns)
+	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", quoteIdentifier(t.Name), createTableColumns)
 }
 
 func (t *SQLiteTable) StringCreateIndexes() string {
@@ -119,12 +119,16 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		// New column
 		if !found {
 			// Maybe it's a renamed column?
-			renamedColumn, found := lo.Find(other.Columns, func(c *SQLiteColumn) bool {
+			candidates := lo.Filter(other.Columns, func(c *SQLiteColumn, _ int) bool {
 				_, existsInSourceTable := t.ColumnByName(c.Name)
-				return !existsInSourceTable && c.HasEqualAttributes(sourceColumn)
+				_, alreadyRenamed := diff.Renamed[c.Name]
+				return !existsInSourceTable && !alreadyRenamed && c.HasEqualAttributes(sourceColumn)
 			})
-			if found {
-				diff.Renamed[renamedColumn.Name] = sourceColumn.Name
+
+			// A rename is a guess. Several candidates make the guess wrong, so the
+			// column becomes an addition and the old columns become removals.
+			if len(candidates) == 1 {
+				diff.Renamed[candidates[0].Name] = sourceColumn.Name
 				continue
 			}
 
@@ -198,17 +202,17 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 		var selectColumns []string
 
 		for _, newCol := range t.Columns {
-			insertColumns = append(insertColumns, fmt.Sprintf("\"%s\"", newCol.Name))
+			insertColumns = append(insertColumns, quoteIdentifier(newCol.Name))
 
 			// If the column existed before (same name), copy from old table
 			if _, ok := other.ColumnByName(newCol.Name); ok {
-				selectColumns = append(selectColumns, fmt.Sprintf("\"%s\"", newCol.Name))
+				selectColumns = append(selectColumns, quoteIdentifier(newCol.Name))
 				continue
 			}
 
 			// If it was renamed, copy from old name
 			if oldName, ok := newToOld[newCol.Name]; ok {
-				selectColumns = append(selectColumns, fmt.Sprintf("\"%s\"", oldName))
+				selectColumns = append(selectColumns, quoteIdentifier(oldName))
 				continue
 			}
 
@@ -223,18 +227,18 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 		// Copy data from old table to new temp table with explicit mapping
 		fmt.Fprintf(
 			&diff,
-			"INSERT INTO \"%s\" (%s) SELECT %s FROM \"%s\";\n",
-			tempTable.Name,
+			"INSERT INTO %s (%s) SELECT %s FROM %s;\n",
+			quoteIdentifier(tempTable.Name),
 			strings.Join(insertColumns, ", "),
 			strings.Join(selectColumns, ", "),
-			t.Name,
+			quoteIdentifier(t.Name),
 		)
 
 		// Drop old table
-		fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", t.Name)
+		fmt.Fprintf(&diff, "DROP TABLE %s;\n", quoteIdentifier(t.Name))
 
 		// Rename new table to old table's name
-		fmt.Fprintf(&diff, "ALTER TABLE \"%s\" RENAME TO \"%s\";\n", tempTable.Name, t.Name)
+		fmt.Fprintf(&diff, "ALTER TABLE %s RENAME TO %s;\n", quoteIdentifier(tempTable.Name), quoteIdentifier(t.Name))
 
 		// Recreate indexes (on final table name)
 		for _, idx := range t.Indexes {
@@ -242,11 +246,11 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 		}
 	} else {
 		for oldName, newName := range columnsDiff.Renamed {
-			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" RENAME COLUMN \"%s\" TO \"%s\";\n", t.Name, oldName, newName)
+			fmt.Fprintf(&diff, "ALTER TABLE %s RENAME COLUMN %s TO %s;\n", quoteIdentifier(t.Name), quoteIdentifier(oldName), quoteIdentifier(newName))
 		}
 
 		for _, columnName := range columnsDiff.Removed {
-			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" DROP COLUMN \"%s\";\n", t.Name, columnName)
+			fmt.Fprintf(&diff, "ALTER TABLE %s DROP COLUMN %s;\n", quoteIdentifier(t.Name), quoteIdentifier(columnName))
 		}
 
 		for _, columnName := range columnsDiff.Added {
@@ -255,7 +259,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 				return "", fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
 			}
 
-			fmt.Fprintf(&diff, "ALTER TABLE \"%s\" ADD COLUMN %s;\n", t.Name, column.String())
+			fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", quoteIdentifier(t.Name), column.String())
 		}
 
 	}
@@ -276,7 +280,7 @@ func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) (string, error) {
 
 		if sourceTrigger.SQL != targetTrigger.SQL {
 			// Modified trigger: drop and recreate
-			fmt.Fprintf(&diff, "DROP TRIGGER \"%s\";\n", targetTrigger.Name)
+			fmt.Fprintf(&diff, "DROP TRIGGER %s;\n", quoteIdentifier(targetTrigger.Name))
 			fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
 		}
 	}
@@ -285,7 +289,7 @@ func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) (string, error) {
 		_, found := t.TriggerByName(targetTrigger.Name)
 		if !found {
 			// Removed trigger
-			fmt.Fprintf(&diff, "DROP TRIGGER \"%s\";\n", targetTrigger.Name)
+			fmt.Fprintf(&diff, "DROP TRIGGER %s;\n", quoteIdentifier(targetTrigger.Name))
 		}
 	}
 
@@ -305,7 +309,7 @@ func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) (string, error) {
 
 		if !sourceIndex.Equal(targetIndex) {
 			// Modified index: drop and recreate
-			fmt.Fprintf(&diff, "DROP INDEX \"%s\";\n", targetIndex.Name)
+			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
 			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
 		}
 	}
@@ -314,7 +318,7 @@ func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) (string, error) {
 		_, found := t.IndexByName(targetIndex.Name)
 		if !found {
 			// Removed index
-			fmt.Fprintf(&diff, "DROP INDEX \"%s\";\n", targetIndex.Name)
+			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
 		}
 	}
 

@@ -3,8 +3,6 @@ package drivers
 import (
 	"fmt"
 	"strings"
-
-	"github.com/samber/lo"
 )
 
 type SQLiteIndex struct {
@@ -38,12 +36,9 @@ func (i *SQLiteIndex) String() string {
 		createIndex += "UNIQUE "
 	}
 
-	quotedColumns := lo.Map(i.Columns, func(c string, _ int) string {
-		return fmt.Sprintf("\"%s\"", c)
-	})
-	columns := strings.Join(quotedColumns, ", ")
+	columns := strings.Join(quoteIdentifiers(i.Columns), ", ")
 
-	createIndex += fmt.Sprintf("INDEX \"%s\" ON \"%s\" (%s);", i.Name, i.Table, columns)
+	createIndex += fmt.Sprintf("INDEX %s ON %s (%s);", quoteIdentifier(i.Name), quoteIdentifier(i.Table), columns)
 
 	return createIndex
 }

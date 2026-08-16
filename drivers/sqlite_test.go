@@ -218,6 +218,66 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("RenameColumnWithSeveralCandidates", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				first_name TEXT,
+				last_name TEXT
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name_a TEXT,
+				name_b TEXT
+			);
+		`)
+
+		// Two target columns have the same attributes. A rename is a guess, so the
+		// diff removes the old columns and adds the new ones.
+		diff := driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "name_a";
+ALTER TABLE "users" DROP COLUMN "name_b";
+ALTER TABLE "users" ADD COLUMN "first_name" TEXT;
+ALTER TABLE "users" ADD COLUMN "last_name" TEXT;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("RenameColumnTakesOneCandidateOnly", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				first_name TEXT,
+				last_name TEXT
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name_a TEXT
+			);
+
+			INSERT INTO users (id, name_a) VALUES (1, 'Alice');
+		`)
+
+		diff := driver.RequireDiff(`ALTER TABLE "users" RENAME COLUMN "name_a" TO "first_name";
+ALTER TABLE "users" ADD COLUMN "last_name" TEXT;`)
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "first_name": "Alice", "last_name": nil},
+		}, rows)
+	})
+
 	t.Run("ModifyColumnType", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -344,6 +404,26 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 		`)
 
 		driver.RequireDiff(`DROP TABLE "users";`)
+	})
+
+	t.Run("TableNameThatNeedsQuotes", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE "order ""list""" (
+				id INTEGER PRIMARY KEY,
+				name TEXT
+			);
+			CREATE INDEX "idx name" ON "order ""list""" (name);
+		`)
+
+		diff := driver.RequireDiff(`CREATE TABLE "order ""list""" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT
+);
+CREATE INDEX "idx name" ON "order ""list""" ("name");`)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("CreateIndexes", func(t *testing.T) {

@@ -136,7 +136,7 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 
 		// Table not found in source database
 		if !found {
-			fmt.Fprintf(&diff, "DROP TABLE \"%s\";\n", targetTable.Name)
+			fmt.Fprintf(&diff, "DROP TABLE %s;\n", quoteIdentifier(targetTable.Name))
 		}
 	}
 
@@ -179,7 +179,7 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 		})
 		if !found {
 			// Removed view
-			fmt.Fprintf(&diff, "DROP VIEW \"%s\";\n", targetView.Name)
+			fmt.Fprintf(&diff, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
 		}
 	}
 
@@ -206,6 +206,10 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 		}
 
 		tables = append(tables, table)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return tables, nil
@@ -242,7 +246,7 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 }
 
 func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+tableName+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -270,11 +274,15 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return columns, nil
 }
 
 func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteIndex, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+tableName+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+quoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -306,11 +314,15 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return indexes, nil
 }
 
 func (d *SQLiteDriver) GetIndexColumns(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+indexName+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -327,6 +339,10 @@ func (d *SQLiteDriver) GetIndexColumns(ctx context.Context, db *sql.DB, indexNam
 		}
 
 		columns = append(columns, name)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return columns, nil
@@ -350,6 +366,11 @@ func (d *SQLiteDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableNa
 			SQL:  sqlContent,
 		})
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return triggers, nil
 }
 
@@ -371,11 +392,16 @@ func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 			SQL:  sqlContent,
 		})
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return views, nil
 }
 
 func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteForeignKey, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+tableName+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+quoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +430,10 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 
 		foreignKey.From = append(foreignKey.From, from)
 		foreignKey.To = append(foreignKey.To, to)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	foreignKeysSet := lo.Values(foreignKeysMap)

@@ -26,7 +26,7 @@ func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
 }
 
 func (c *SQLiteColumn) String() string {
-	value := fmt.Sprintf("\"%s\" %s", c.Name, c.Type)
+	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
 	if c.NotNull {
 		value += " NOT NULL"
 	}
