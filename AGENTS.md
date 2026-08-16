@@ -346,6 +346,60 @@ of the command.
 - The `drivers` package exports its types and its methods, because the tests and the CLI
   use them.
 
+## Blocks
+
+An `if`, a `for`, a `switch`, and a `select` are blocks. Two rules cover every block.
+
+**Never initialize a variable in the header of a block.** Write the assignment on the line
+above the block. Write `err := f()` and `if err != nil {` on two lines. Never write
+`if err := f(); err != nil {`. When the scope holds an `err` variable already, write
+`err = f()`.
+
+**Put a blank line before a block and after a block.** Three cases take no blank line:
+
+- The assignment that the condition checks belongs to the block. It stays on the line
+  directly above the block, and the blank line goes before that assignment. A comment
+  above the block belongs to the block in the same way.
+- A block that opens a body takes no blank line above it.
+- A block that closes a body takes no blank line below it. An `else` keeps `} else {` on
+  one line, with no blank line above it and none below it.
+
+```go
+func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table';")
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var tables []*SQLiteTable
+
+	for rows.Next() {
+		var tableName string
+
+		err := rows.Scan(&tableName)
+		if err != nil {
+			return nil, err
+		}
+
+		table, err := d.GetTable(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
+		tables = append(tables, table)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return tables, nil
+}
+```
+
 # Writing style
 
 Write every text in ASD-STE100 Simplified Technical English. This rule covers code
