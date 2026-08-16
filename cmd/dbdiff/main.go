@@ -13,9 +13,14 @@ import (
 func main() {
 	cmd := &cli.Command{
 		Name:        "dbdiff",
+		Usage:       "Compare database schemas and generate migration scripts",
 		Description: "Compare database schemas and generate migration scripts",
 		Action:      action,
 		UsageText:   "dbdiff [global options] <url1> <url2>",
+		// main prints the error. Without this handler the command prints it too.
+		OnUsageError: func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+			return err
+		},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "driver",
@@ -39,7 +44,10 @@ func main() {
 			},
 		},
 	}
-	cmd.Run(context.Background(), os.Args)
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "dbdiff: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func action(ctx context.Context, cmd *cli.Command) error {
