@@ -184,6 +184,118 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t, `RENAME TO "users"`, action.TableActionClause())
 	})
+
+	t.Run("SQLiteAlterTableAddColumn", func(t *testing.T) {
+		instruction := &SQLiteAlterTableInstruction{
+			Name: "users",
+			Action: &SQLiteAddColumnAction{
+				Column: &SQLiteColumn{Name: "email", Type: "TEXT"},
+			},
+		}
+
+		require.Equal(t, `ALTER TABLE "users" ADD COLUMN "email" TEXT;`, instruction.String())
+	})
+
+	t.Run("SQLiteAlterTableRenameColumn", func(t *testing.T) {
+		instruction := &SQLiteAlterTableInstruction{
+			Name:   "users",
+			Action: &SQLRenameColumnAction{ColumnName: "name", NewColumnName: "full_name"},
+		}
+
+		require.Equal(t,
+			`ALTER TABLE "users" RENAME COLUMN "name" TO "full_name";`,
+			instruction.String())
+	})
+
+	t.Run("SQLiteCreateTable", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "users",
+			Columns: []*SQLiteColumn{
+				{Name: "id", Type: "INTEGER", PrimaryKey: true},
+				{Name: "name", Type: "TEXT", NotNull: true},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "users" (
+	"id" INTEGER PRIMARY KEY,
+	"name" TEXT NOT NULL
+);`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateTableWithATableConstraint", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "memberships",
+			Columns: []*SQLiteColumn{
+				{Name: "team", Type: "TEXT", NotNull: true},
+				{Name: "member", Type: "TEXT", NotNull: true},
+			},
+			PrimaryKey:        []string{"team", "member"},
+			UniqueConstraints: [][]string{{"member"}},
+			ForeignKeys: []*SQLiteForeignKey{
+				{Table: "teams", From: []string{"team"}, To: []string{"name"}},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "memberships" (
+	"team" TEXT NOT NULL,
+	"member" TEXT NOT NULL,
+	PRIMARY KEY ("team", "member"),
+	UNIQUE ("member"),
+	FOREIGN KEY ("team") REFERENCES "teams" ("name")
+);`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateIndex", func(t *testing.T) {
+		instruction := &SQLiteCreateIndexInstruction{
+			Name:      "idx_users_name",
+			TableName: "users",
+			Keys:      []string{`"name"`},
+		}
+
+		require.Equal(t,
+			`CREATE INDEX "idx_users_name" ON "users" ("name");`,
+			instruction.String())
+	})
+
+	t.Run("SQLiteCreateUniquePartialIndex", func(t *testing.T) {
+		instruction := &SQLiteCreateIndexInstruction{
+			Unique:    true,
+			Name:      "idx_users_active",
+			TableName: "users",
+			Keys:      []string{`"name"`, "lower(email)"},
+			Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+		}
+
+		require.Equal(t,
+			`CREATE UNIQUE INDEX "idx_users_active" ON "users" ("name", lower(email)) WHERE active = 1;`,
+			instruction.String())
+	})
+
+	t.Run("SQLiteCreateTrigger", func(t *testing.T) {
+		instruction := &SQLiteCreateTriggerInstruction{
+			Definition: "CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END",
+		}
+
+		require.Equal(t,
+			"CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END;",
+			instruction.String())
+	})
+
+	t.Run("SQLiteCreateView", func(t *testing.T) {
+		instruction := &SQLiteCreateViewInstruction{
+			Definition: "CREATE VIEW user_ids AS SELECT id FROM users",
+		}
+
+		require.Equal(t,
+			"CREATE VIEW user_ids AS SELECT id FROM users;",
+			instruction.String())
+	})
+
+	t.Run("SQLiteDropTrigger", func(t *testing.T) {
+		instruction := &SQLiteDropTriggerInstruction{Name: "set_timestamp"}
+
+		require.Equal(t, `DROP TRIGGER "set_timestamp";`, instruction.String())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.
