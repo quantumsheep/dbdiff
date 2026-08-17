@@ -143,16 +143,17 @@ func (d *TestingPostgresDriver) ExecOnTarget(sqlStatements string) {
 	require.NoError(d.tb, err)
 }
 
-func (d *TestingPostgresDriver) RequireDiff(expectedDiff string) string {
+// RequireInstructions compares the instructions of the diff. The SQL text of each kind
+// belongs to instruction_test.go, so this method compares no text. It returns the rendered
+// diff, so the caller applies it to the target.
+func (d *TestingPostgresDriver) RequireInstructions(expected []Instruction) string {
 	d.tb.Helper()
 
 	instructions, err := d.Diff(context.Background())
 	require.NoError(d.tb, err)
+	require.Equal(d.tb, expected, instructions)
 
-	diff := RenderInstructions(instructions)
-	require.Equal(d.tb, expectedDiff, diff)
-
-	return diff
+	return RenderInstructions(instructions)
 }
 
 func (d *TestingPostgresDriver) FetchAllFromTarget(table string, additionalRules string) []map[string]any {
@@ -199,11 +200,15 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE simple (id INT, name TEXT);`)
 
-		expected := `CREATE TABLE "simple" (
-	"id" integer,
-	"name" text
-);`
-		driver.RequireDiff(expected)
+		driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "simple",
+				Columns: []*PostgresColumn{
+					{Name: "id", Type: "integer"},
+					{Name: "name", Type: "text"},
+				},
+			},
+		})
 	})
 
 	t.Run("DropTable", func(t *testing.T) {
@@ -211,7 +216,9 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
 
-		driver.RequireDiff(`DROP TABLE "users";`)
+		driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "users"},
+		})
 	})
 
 	t.Run("AddColumn", func(t *testing.T) {
@@ -220,7 +227,14 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
 
-		driver.RequireDiff(`ALTER TABLE "users" ADD COLUMN "name" text;`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddColumnAction{Column: &PostgresColumn{Name: "name", Type: "text"}},
+				},
+			},
+		})
 	})
 
 	t.Run("DropColumn", func(t *testing.T) {
@@ -229,7 +243,14 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT);`)
 
-		driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "name";`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "name"},
+				},
+			},
+		})
 	})
 
 	t.Run("AlterColumnType", func(t *testing.T) {
@@ -238,7 +259,14 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name VARCHAR(50));`)
 
-		driver.RequireDiff(`ALTER TABLE "users" ALTER COLUMN "name" TYPE text;`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAlterColumnTypeAction{ColumnName: "name", DataType: "text"},
+				},
+			},
+		})
 	})
 
 	t.Run("AlterColumnTypeWithAutomaticCast", func(t *testing.T) {
@@ -249,7 +277,14 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`INSERT INTO users (id, score) VALUES (1, 42);`)
 
 		// PostgreSQL casts an integer to a bigint, so the statement needs no USING clause.
-		diff := driver.RequireDiff(`ALTER TABLE "users" ALTER COLUMN "score" TYPE bigint;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAlterColumnTypeAction{ColumnName: "score", DataType: "bigint"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -268,7 +303,14 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`INSERT INTO users (id, score) VALUES (1, '42');`)
 
 		// PostgreSQL casts no text to an integer, so the statement needs a USING clause.
-		diff := driver.RequireDiff(`ALTER TABLE "users" ALTER COLUMN "score" TYPE integer USING "score"::integer;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAlterColumnTypeAction{ColumnName: "score", DataType: "integer", UsingCast: true},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -284,10 +326,15 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE tags (id INT, labels TEXT[]);`)
 
-		diff := driver.RequireDiff(`CREATE TABLE "tags" (
-	"id" integer,
-	"labels" text[]
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "tags",
+				Columns: []*PostgresColumn{
+					{Name: "id", Type: "integer"},
+					{Name: "labels", Type: "text[]"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -300,11 +347,16 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT, mood mood);
 		`)
 
-		diff := driver.RequireDiff(`CREATE TYPE "mood" AS ENUM ('sad', 'ok');
-CREATE TABLE "users" (
-	"id" integer,
-	"mood" mood
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateEnumTypeInstruction{Name: "mood", Values: []string{"sad", "ok"}},
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{Name: "id", Type: "integer"},
+					{Name: "mood", Type: "mood"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -318,7 +370,14 @@ CREATE TABLE "users" (
 
 		// information_schema.columns gives the text ARRAY for both types. format_type gives
 		// the exact type name, so the statement below is valid SQL.
-		diff := driver.RequireDiff(`ALTER TABLE "users" ALTER COLUMN "tags" TYPE bigint[] USING "tags"::bigint[];`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAlterColumnTypeAction{ColumnName: "tags", DataType: "bigint[]", UsingCast: true},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -335,7 +394,14 @@ CREATE TABLE "users" (
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT NOT NULL);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT);`)
 
-		driver.RequireDiff(`ALTER TABLE "users" ALTER COLUMN "name" SET NOT NULL;`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresSetNotNullAction{ColumnName: "name"},
+				},
+			},
+		})
 	})
 
 	t.Run("AlterColumnDefault", func(t *testing.T) {
@@ -344,7 +410,14 @@ CREATE TABLE "users" (
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT DEFAULT 'anon');`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT);`)
 
-		driver.RequireDiff(`ALTER TABLE "users" ALTER COLUMN "name" SET DEFAULT 'anon'::text;`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresSetDefaultAction{ColumnName: "name", Expression: "'anon'::text"},
+				},
+			},
+		})
 	})
 
 	t.Run("ConstraintsPrimaryKey", func(t *testing.T) {
@@ -355,7 +428,22 @@ CREATE TABLE "users" (
 
 		driver.ExecOnSource(`DROP TABLE users; CREATE TABLE users (id INT, CONSTRAINT pk_users PRIMARY KEY (id));`)
 
-		driver.RequireDiff("ALTER TABLE \"users\" ALTER COLUMN \"id\" SET NOT NULL;\nALTER TABLE \"users\" ADD CONSTRAINT \"pk_users\" PRIMARY KEY (id);")
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresSetNotNullAction{ColumnName: "id"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{Name: "pk_users", Type: "p", Def: "PRIMARY KEY (id)"},
+					},
+				},
+			},
+		})
 	})
 
 	t.Run("ConstraintsUnique", func(t *testing.T) {
@@ -364,7 +452,16 @@ CREATE TABLE "users" (
 		driver.ExecOnSource(`CREATE TABLE users (email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
 		driver.ExecOnTarget(`CREATE TABLE users (email TEXT);`)
 
-		driver.RequireDiff(`ALTER TABLE "users" ADD CONSTRAINT "uq_email" UNIQUE (email);`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{Name: "uq_email", Type: "u", Def: "UNIQUE (email)"},
+					},
+				},
+			},
+		})
 	})
 
 	t.Run("ConstraintsForeignKey", func(t *testing.T) {
@@ -379,7 +476,16 @@ CREATE TABLE "users" (
 			CREATE TABLE users (role_id INT);
 		`)
 
-		driver.RequireDiff(`ALTER TABLE "users" ADD CONSTRAINT "fk_role" FOREIGN KEY (role_id) REFERENCES roles(id);`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{Name: "fk_role", Type: "f", Def: "FOREIGN KEY (role_id) REFERENCES roles(id)"},
+					},
+				},
+			},
+		})
 	})
 
 	t.Run("DropColumnWithPrimaryKey", func(t *testing.T) {
@@ -389,8 +495,20 @@ CREATE TABLE "users" (
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, code INT, CONSTRAINT pk_users PRIMARY KEY (code));`)
 
 		// PostgreSQL drops the constraint with the column, so its drop comes first.
-		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "pk_users";
-ALTER TABLE "users" DROP COLUMN "code";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "pk_users"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "code"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -401,8 +519,20 @@ ALTER TABLE "users" DROP COLUMN "code";`)
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
 
-		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "uq_email";
-ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "uq_email"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "email"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -421,8 +551,20 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		`)
 
 		// The primary key covers no removed column, so the diff keeps it.
-		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "uq_email";
-ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "uq_email"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "email"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -433,9 +575,28 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TABLE users (id INT, CONSTRAINT uq_users UNIQUE (id));`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_users UNIQUE (id, email));`)
 
-		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "uq_users";
-ALTER TABLE "users" ADD CONSTRAINT "uq_users" UNIQUE (id);
-ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "uq_users"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{Name: "uq_users", Type: "u", Def: "UNIQUE (id)"},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "email"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -446,7 +607,9 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TABLE users (name TEXT); CREATE INDEX idx_name ON users(name);`)
 		driver.ExecOnTarget(`CREATE TABLE users (name TEXT);`)
 
-		diff := driver.RequireDiff(`CREATE INDEX idx_name ON users USING btree (name);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateIndexInstruction{Definition: "CREATE INDEX idx_name ON users USING btree (name)"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -458,7 +621,7 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(schema)
 		driver.ExecOnTarget(schema)
 
-		driver.RequireDiff("")
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("DropColumnDropsItsIndex", func(t *testing.T) {
@@ -469,8 +632,15 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 
 		// A DROP COLUMN statement drops every index of that column, so the DROP INDEX
 		// statement must print first.
-		diff := driver.RequireDiff(`DROP INDEX "idx_email";
-ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropIndexInstruction{Name: "idx_email"},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "email"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -481,9 +651,16 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT); CREATE INDEX idx_name ON users(name);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email);`)
 
-		diff := driver.RequireDiff(`CREATE INDEX idx_name ON users USING btree (name);
-DROP INDEX "idx_email";
-ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateIndexInstruction{Definition: "CREATE INDEX idx_name ON users USING btree (name)"},
+			&SQLDropIndexInstruction{Name: "idx_email"},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "email"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -495,10 +672,17 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email); CREATE INDEX idx_name ON users(name);`)
 
 		// The two statements of the modified index must stay adjacent.
-		diff := driver.RequireDiff(`DROP INDEX "idx_name";
-CREATE UNIQUE INDEX idx_name ON users USING btree (name);
-DROP INDEX "idx_email";
-ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropIndexInstruction{Name: "idx_name"},
+			&PostgresCreateIndexInstruction{Definition: "CREATE UNIQUE INDEX idx_name ON users USING btree (name)"},
+			&SQLDropIndexInstruction{Name: "idx_email"},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "email"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -523,7 +707,11 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		`)
 		driver.ExecOnTarget(`CREATE TABLE users (updated_at TIMESTAMP);`)
 
-		diff := driver.RequireDiff(`CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp()",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -545,7 +733,7 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(schema)
 		driver.ExecOnTarget(schema)
 
-		driver.RequireDiff("")
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("Views", func(t *testing.T) {
@@ -554,8 +742,12 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TABLE users (id INT); CREATE VIEW user_ids AS SELECT id FROM users;`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
 
-		driver.RequireDiff(`CREATE VIEW "user_ids" AS  SELECT id
-   FROM users;`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresCreateViewInstruction{
+				Name:  "user_ids",
+				Query: " SELECT id\n   FROM users;",
+			},
+		})
 	})
 
 	t.Run("CreateSequence", func(t *testing.T) {
@@ -563,7 +755,16 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 
 		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
 
-		diff := driver.RequireDiff(`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 NO CYCLE;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateSequenceInstruction{
+				Name:      "counter",
+				DataType:  "bigint",
+				Increment: 1,
+				Min:       1,
+				Max:       9223372036854775807,
+				Start:     1,
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -573,7 +774,9 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		diff := driver.RequireDiff(`DROP SEQUENCE "counter";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropSequenceInstruction{Name: "counter"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -584,7 +787,14 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterSequenceInstruction{
+				Name:      "counter",
+				Increment: sql.NullInt64{Int64: 2, Valid: true},
+				Max:       sql.NullInt64{Int64: 100, Valid: true},
+				Cycle:     sql.NullBool{Bool: true, Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -598,7 +808,14 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		// The current value stays below the new minimum, so MINVALUE needs a RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter');`)
 
-		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" MINVALUE 100 START WITH 100 RESTART WITH 100;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterSequenceInstruction{
+				Name:    "counter",
+				Min:     sql.NullInt64{Int64: 100, Valid: true},
+				Start:   sql.NullInt64{Int64: 100, Valid: true},
+				Restart: sql.NullInt64{Int64: 100, Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -612,7 +829,13 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		// The current value climbs above the new maximum, so MAXVALUE needs a RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter') FROM generate_series(1, 10);`)
 
-		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" MAXVALUE 5 RESTART WITH 1;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterSequenceInstruction{
+				Name:    "counter",
+				Max:     sql.NullInt64{Int64: 5, Valid: true},
+				Restart: sql.NullInt64{Int64: 1, Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -626,7 +849,14 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		// The current value stays inside the new range, so the diff holds no RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter');`)
 
-		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterSequenceInstruction{
+				Name:      "counter",
+				Increment: sql.NullInt64{Int64: 2, Valid: true},
+				Max:       sql.NullInt64{Int64: 100, Valid: true},
+				Cycle:     sql.NullBool{Bool: true, Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -637,9 +867,19 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TABLE users (id SERIAL);`)
 
 		// The table creates its own sequence. The diff holds the table only.
-		driver.RequireDiff(`CREATE TABLE "users" (
-	"id" integer NOT NULL DEFAULT nextval('users_id_seq'::regclass)
-);`)
+		driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+						Default: sql.NullString{String: "nextval('users_id_seq'::regclass)", Valid: true},
+					},
+				},
+			},
+		})
 	})
 
 	t.Run("CreateEnumType", func(t *testing.T) {
@@ -647,7 +887,9 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 
 		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
 
-		diff := driver.RequireDiff(`CREATE TYPE "mood" AS ENUM ('sad', 'ok');`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateEnumTypeInstruction{Name: "mood", Values: []string{"sad", "ok"}},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -658,7 +900,9 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');`)
 		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
 
-		diff := driver.RequireDiff(`ALTER TYPE "mood" ADD VALUE 'happy';`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTypeAddValueInstruction{Name: "mood", Value: "happy"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -670,8 +914,10 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
 
 		// PostgreSQL removes no value from an enum. The type needs a recreation.
-		diff := driver.RequireDiff(`DROP TYPE "mood";
-CREATE TYPE "mood" AS ENUM ('sad');`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropTypeInstruction{Name: "mood"},
+			&PostgresCreateEnumTypeInstruction{Name: "mood", Values: []string{"sad"}},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -681,7 +927,9 @@ CREATE TYPE "mood" AS ENUM ('sad');`)
 
 		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad');`)
 
-		diff := driver.RequireDiff(`DROP TYPE "mood";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropTypeInstruction{Name: "mood"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -691,7 +939,17 @@ CREATE TYPE "mood" AS ENUM ('sad');`)
 
 		driver.ExecOnSource(`CREATE DOMAIN positive_int AS integer NOT NULL DEFAULT 1 CHECK (VALUE > 0);`)
 
-		diff := driver.RequireDiff(`CREATE DOMAIN "positive_int" AS integer DEFAULT 1 NOT NULL CONSTRAINT "positive_int_check" CHECK ((VALUE > 0));`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateDomainInstruction{
+				Name:     "positive_int",
+				BaseType: "integer",
+				Default:  sql.NullString{String: "1", Valid: true},
+				NotNull:  true,
+				Constraints: []*PostgresDomainConstraint{
+					{Name: "positive_int_check", Def: "CHECK ((VALUE > 0))"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -702,9 +960,23 @@ CREATE TYPE "mood" AS ENUM ('sad');`)
 		driver.ExecOnSource(`CREATE DOMAIN positive_int AS integer NOT NULL DEFAULT 2 CHECK (VALUE > 0);`)
 		driver.ExecOnTarget(`CREATE DOMAIN positive_int AS integer DEFAULT 1;`)
 
-		diff := driver.RequireDiff(`ALTER DOMAIN "positive_int" SET DEFAULT 2;
-ALTER DOMAIN "positive_int" SET NOT NULL;
-ALTER DOMAIN "positive_int" ADD CONSTRAINT "positive_int_check" CHECK ((VALUE > 0));`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterDomainInstruction{
+				Name:   "positive_int",
+				Action: &PostgresSetDomainDefaultAction{Expression: "2"},
+			},
+			&PostgresAlterDomainInstruction{
+				Name:   "positive_int",
+				Action: &PostgresSetDomainNotNullAction{},
+			},
+			&PostgresAlterDomainInstruction{
+				Name: "positive_int",
+				Action: &PostgresAddDomainConstraintAction{
+					ConstraintName: "positive_int_check",
+					Definition:     "CHECK ((VALUE > 0))",
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -716,8 +988,13 @@ ALTER DOMAIN "positive_int" ADD CONSTRAINT "positive_int_check" CHECK ((VALUE > 
 		driver.ExecOnTarget(`CREATE DOMAIN short_text AS integer;`)
 
 		// PostgreSQL changes no base type of a domain, so the diff recreates the domain.
-		diff := driver.RequireDiff(`DROP DOMAIN "short_text";
-CREATE DOMAIN "short_text" AS character varying(10);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropDomainInstruction{Name: "short_text"},
+			&PostgresCreateDomainInstruction{
+				Name:     "short_text",
+				BaseType: "character varying(10)",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -727,7 +1004,9 @@ CREATE DOMAIN "short_text" AS character varying(10);`)
 
 		driver.ExecOnTarget(`CREATE DOMAIN positive_int AS integer CHECK (VALUE > 0);`)
 
-		diff := driver.RequireDiff(`DROP DOMAIN "positive_int";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropDomainInstruction{Name: "positive_int"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -737,10 +1016,15 @@ CREATE DOMAIN "short_text" AS character varying(10);`)
 
 		driver.ExecOnSource(`CREATE TYPE address AS (street TEXT, city VARCHAR(10));`)
 
-		diff := driver.RequireDiff(`CREATE TYPE "address" AS (
-	"street" text,
-	"city" character varying(10)
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateCompositeTypeInstruction{
+				Name: "address",
+				Attributes: []*PostgresCompositeTypeAttribute{
+					{Name: "street", Type: "text"},
+					{Name: "city", Type: "character varying(10)"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -751,11 +1035,16 @@ CREATE DOMAIN "short_text" AS character varying(10);`)
 		driver.ExecOnSource(`CREATE TYPE address AS (street TEXT, city TEXT);`)
 		driver.ExecOnTarget(`CREATE TYPE address AS (street TEXT);`)
 
-		diff := driver.RequireDiff(`DROP TYPE "address";
-CREATE TYPE "address" AS (
-	"street" text,
-	"city" text
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropTypeInstruction{Name: "address"},
+			&PostgresCreateCompositeTypeInstruction{
+				Name: "address",
+				Attributes: []*PostgresCompositeTypeAttribute{
+					{Name: "street", Type: "text"},
+					{Name: "city", Type: "text"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -765,7 +1054,9 @@ CREATE TYPE "address" AS (
 
 		driver.ExecOnTarget(`CREATE TYPE address AS (street TEXT);`)
 
-		diff := driver.RequireDiff(`DROP TYPE "address";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropTypeInstruction{Name: "address"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -779,7 +1070,15 @@ CREATE TYPE "address" AS (
 
 		driver.ExecOnSource(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 
-		diff := driver.RequireDiff(`CREATE AGGREGATE "total"(integer) (SFUNC = "int_add", STYPE = integer, INITCOND = '0');`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateAggregateInstruction{
+				Name:               "total",
+				Arguments:          "integer",
+				TransitionFunction: "int_add",
+				StateType:          "integer",
+				InitialCondition:   sql.NullString{String: "0", Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -795,8 +1094,16 @@ CREATE TYPE "address" AS (
 		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '10');`)
 
 		// PostgreSQL changes no option of an aggregate, so the diff recreates it.
-		diff := driver.RequireDiff(`DROP AGGREGATE "total"(integer);
-CREATE AGGREGATE "total"(integer) (SFUNC = "int_add", STYPE = integer, INITCOND = '0');`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"},
+			&PostgresCreateAggregateInstruction{
+				Name:               "total",
+				Arguments:          "integer",
+				TransitionFunction: "int_add",
+				StateType:          "integer",
+				InitialCondition:   sql.NullString{String: "0", Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -810,7 +1117,9 @@ CREATE AGGREGATE "total"(integer) (SFUNC = "int_add", STYPE = integer, INITCOND 
 
 		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 
-		diff := driver.RequireDiff(`DROP AGGREGATE "total"(integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -821,8 +1130,10 @@ CREATE AGGREGATE "total"(integer) (SFUNC = "int_add", STYPE = integer, INITCOND 
 		driver.ExecOnTarget(`CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`)
 		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 
-		diff := driver.RequireDiff(`DROP AGGREGATE "total"(integer);
-DROP FUNCTION "int_add"(integer, integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"},
+			&PostgresDropFunctionInstruction{Name: "int_add", Arguments: "integer, integer"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -833,8 +1144,14 @@ DROP FUNCTION "int_add"(integer, integer);`)
 		driver.ExecOnTarget(`CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`)
 		driver.ExecOnTarget(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 
-		diff := driver.RequireDiff(`DROP OPERATOR === (integer, integer);
-DROP FUNCTION "int_add"(integer, integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropOperatorInstruction{
+				Name:          "===",
+				LeftArgument:  sql.NullString{String: "integer", Valid: true},
+				RightArgument: sql.NullString{String: "integer", Valid: true},
+			},
+			&PostgresDropFunctionInstruction{Name: "int_add", Arguments: "integer, integer"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -848,7 +1165,14 @@ DROP FUNCTION "int_add"(integer, integer);`)
 
 		driver.ExecOnSource(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 
-		diff := driver.RequireDiff(`CREATE OPERATOR === (FUNCTION = "int_add", LEFTARG = integer, RIGHTARG = integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateOperatorInstruction{
+				Name:          "===",
+				Function:      "int_add",
+				LeftArgument:  sql.NullString{String: "integer", Valid: true},
+				RightArgument: sql.NullString{String: "integer", Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -867,8 +1191,19 @@ DROP FUNCTION "int_add"(integer, integer);`)
 		driver.ExecOnTarget(`CREATE OPERATOR === (FUNCTION = int_sub, LEFTARG = integer, RIGHTARG = integer);`)
 
 		// PostgreSQL changes no function of an operator, so the diff recreates it.
-		diff := driver.RequireDiff(`DROP OPERATOR === (integer, integer);
-CREATE OPERATOR === (FUNCTION = "int_add", LEFTARG = integer, RIGHTARG = integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropOperatorInstruction{
+				Name:          "===",
+				LeftArgument:  sql.NullString{String: "integer", Valid: true},
+				RightArgument: sql.NullString{String: "integer", Valid: true},
+			},
+			&PostgresCreateOperatorInstruction{
+				Name:          "===",
+				Function:      "int_add",
+				LeftArgument:  sql.NullString{String: "integer", Valid: true},
+				RightArgument: sql.NullString{String: "integer", Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -882,7 +1217,13 @@ CREATE OPERATOR === (FUNCTION = "int_add", LEFTARG = integer, RIGHTARG = integer
 
 		driver.ExecOnTarget(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 
-		diff := driver.RequireDiff(`DROP OPERATOR === (integer, integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropOperatorInstruction{
+				Name:          "===",
+				LeftArgument:  sql.NullString{String: "integer", Valid: true},
+				RightArgument: sql.NullString{String: "integer", Valid: true},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -898,14 +1239,11 @@ CREATE OPERATOR === (FUNCTION = "int_add", LEFTARG = integer, RIGHTARG = integer
 			$$ LANGUAGE plpgsql;
 		`)
 
-		diff := driver.RequireDiff(`CREATE OR REPLACE FUNCTION increment(a integer)
- RETURNS integer
- LANGUAGE plpgsql
-AS $function$
-			BEGIN
-				RETURN a + 1;
-			END;
-			$function$;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION increment(a integer)\n RETURNS integer\n LANGUAGE plpgsql\nAS $function$\n\t\t\tBEGIN\n\t\t\t\tRETURN a + 1;\n\t\t\tEND;\n\t\t\t$function$",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -916,10 +1254,11 @@ AS $function$
 		driver.ExecOnSource(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 2; END; $$ LANGUAGE plpgsql;`)
 		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
 
-		diff := driver.RequireDiff(`CREATE OR REPLACE FUNCTION increment(a integer)
- RETURNS integer
- LANGUAGE plpgsql
-AS $function$ BEGIN RETURN a + 2; END; $function$;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION increment(a integer)\n RETURNS integer\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN a + 2; END; $function$",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -930,10 +1269,11 @@ AS $function$ BEGIN RETURN a + 2; END; $function$;`)
 		driver.ExecOnSource(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 3; END; $$ LANGUAGE plpgsql;`)
 		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
 
-		diff := driver.RequireDiff(`CREATE OR REPLACE FUNCTION increment(a integer)
- RETURNS integer
- LANGUAGE plpgsql
-AS $function$ BEGIN RETURN a + 3; END; $function$;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION increment(a integer)\n RETURNS integer\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN a + 3; END; $function$",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -945,11 +1285,12 @@ AS $function$ BEGIN RETURN a + 3; END; $function$;`)
 		driver.ExecOnTarget(`CREATE FUNCTION calculate(a integer) RETURNS integer AS $$ BEGIN RETURN a; END; $$ LANGUAGE plpgsql;`)
 
 		// PostgreSQL refuses CREATE OR REPLACE FUNCTION when the return type changes.
-		diff := driver.RequireDiff(`DROP FUNCTION "calculate"(a integer);
-CREATE OR REPLACE FUNCTION calculate(a integer)
- RETURNS text
- LANGUAGE plpgsql
-AS $function$ BEGIN RETURN a::text; END; $function$;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropFunctionInstruction{Name: "calculate", Arguments: "a integer"},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION calculate(a integer)\n RETURNS text\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN a::text; END; $function$",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -959,7 +1300,9 @@ AS $function$ BEGIN RETURN a::text; END; $function$;`)
 
 		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
 
-		diff := driver.RequireDiff(`DROP FUNCTION "increment"(a integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropFunctionInstruction{Name: "increment", Arguments: "a integer"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -969,7 +1312,9 @@ AS $function$ BEGIN RETURN a::text; END; $function$;`)
 
 		driver.ExecOnSource(`CREATE EXTENSION pg_trgm;`)
 
-		diff := driver.RequireDiff(`CREATE EXTENSION "pg_trgm";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateExtensionInstruction{Name: "pg_trgm"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -979,7 +1324,9 @@ AS $function$ BEGIN RETURN a::text; END; $function$;`)
 
 		driver.ExecOnTarget(`CREATE EXTENSION pg_trgm;`)
 
-		diff := driver.RequireDiff(`DROP EXTENSION "pg_trgm";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropExtensionInstruction{Name: "pg_trgm"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -993,8 +1340,10 @@ AS $function$ BEGIN RETURN a::text; END; $function$;`)
 		`)
 
 		// The table uses the type, so the table goes away first.
-		diff := driver.RequireDiff(`DROP TABLE "events";
-DROP TYPE "mood";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "events"},
+			&PostgresDropTypeInstruction{Name: "mood"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1008,8 +1357,10 @@ DROP TYPE "mood";`)
 		`)
 
 		// The view uses the table, so the view goes away first.
-		diff := driver.RequireDiff(`DROP VIEW "user_ids";
-DROP TABLE "users";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "user_ids"},
+			&SQLDropTableInstruction{Name: "users"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1024,8 +1375,15 @@ DROP TABLE "users";`)
 		`)
 
 		// The view reads the column, so the view goes away before the column.
-		diff := driver.RequireDiff(`DROP VIEW "user_labels";
-ALTER TABLE "users" DROP COLUMN "label";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "user_labels"},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: "label"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1043,10 +1401,19 @@ ALTER TABLE "users" DROP COLUMN "label";`)
 		`)
 
 		// The definition stays equal, but the view reads a column that changes its type.
-		diff := driver.RequireDiff(`DROP VIEW "user_labels";
-ALTER TABLE "users" ALTER COLUMN "label" TYPE character varying;
-CREATE VIEW "user_labels" AS  SELECT label
-   FROM users;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "user_labels"},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAlterColumnTypeAction{ColumnName: "label", DataType: "character varying"},
+				},
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "user_labels",
+				Query: " SELECT label\n   FROM users;",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1062,10 +1429,16 @@ CREATE VIEW "user_labels" AS  SELECT label
 		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
 
 		// view_a reads view_b, so the diff creates view_b first, against the name order.
-		diff := driver.RequireDiff(`CREATE VIEW "view_b" AS  SELECT id
-   FROM users;
-CREATE VIEW "view_a" AS  SELECT id
-   FROM view_b;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateViewInstruction{
+				Name:  "view_b",
+				Query: " SELECT id\n   FROM users;",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "view_a",
+				Query: " SELECT id\n   FROM view_b;",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1080,9 +1453,11 @@ CREATE VIEW "view_a" AS  SELECT id
 		`)
 
 		// PostgreSQL refuses to drop view_b while view_a still reads it.
-		diff := driver.RequireDiff(`DROP VIEW "view_a";
-DROP VIEW "view_b";
-DROP TABLE "users";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "view_a"},
+			&SQLDropViewInstruction{Name: "view_b"},
+			&SQLDropTableInstruction{Name: "users"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1099,11 +1474,32 @@ DROP TABLE "users";`)
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');`)
 
-		expected := `INSERT INTO "users" ("id", "name") VALUES (3, 'Carol');
-UPDATE "users" SET "name" = 'Robert' WHERE "id" = 2;
-DELETE FROM "users" WHERE "id" = 4;`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Values:      []string{"3", "'Carol'"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*SQLSetClause{
+					{ColumnName: "name", Expression: "'Robert'"},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+					},
+				},
+			},
+			&SQLDeleteInstruction{
+				TableName: "users",
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "4"},
+					},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1128,7 +1524,11 @@ DELETE FROM "users" WHERE "id" = 4;`
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO logs (message) VALUES ('stop');`)
 
-		diff := driver.RequireDiff(`-- The table "logs" holds no primary key, so dbdiff compares no row of it.`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLCommentInstruction{
+				Text: `The table "logs" holds no primary key, so dbdiff compares no row of it.`,
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1151,11 +1551,35 @@ DELETE FROM "users" WHERE "id" = 4;`
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO notes (id, body) VALUES (1, 'plain'), (2, 'not empty');`)
 
-		expected := `INSERT INTO "notes" ("id", "body") VALUES (3, NULL);
-UPDATE "notes" SET "body" = 'it''s a note' WHERE "id" = 1;
-UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "notes",
+				ColumnNames: []string{"id", "body"},
+				Values:      []string{"3", "NULL"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "notes",
+				SetClauses: []*SQLSetClause{
+					{ColumnName: "body", Expression: "'it''s a note'"},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+					},
+				},
+			},
+			&SQLUpdateInstruction{
+				TableName: "notes",
+				SetClauses: []*SQLSetClause{
+					{ColumnName: "body", Expression: "NULL"},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+					},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1179,11 +1603,27 @@ UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
 		driver.ExecOnTarget(`CREATE TABLE items (label TEXT);`)
 
 		// The target holds no column with the name of the key.
-		expected := `ALTER TABLE "items" ADD COLUMN "code" integer NOT NULL;
-ALTER TABLE "items" ADD CONSTRAINT "items_pkey" PRIMARY KEY (code);
--- The table "items" holds another primary key in the target, so dbdiff compares no row of it.`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{Name: "code", Type: "integer", NotNull: true},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{Name: "items_pkey", Type: "p", Def: "PRIMARY KEY (code)"},
+					},
+				},
+			},
+			&SQLCommentInstruction{
+				Text: `The table "items" holds another primary key in the target, so dbdiff compares no row of it.`,
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1203,7 +1643,7 @@ ALTER TABLE "items" ADD CONSTRAINT "items_pkey" PRIMARY KEY (code);
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (2, 'Bob');`)
 
-		diff := driver.RequireDiff("")
+		diff := driver.RequireInstructions(nil)
 
 		driver.ExecOnTarget(diff)
 
@@ -1219,9 +1659,14 @@ ALTER TABLE "items" ADD CONSTRAINT "items_pkey" PRIMARY KEY (code);
 
 		driver.ExecOnSource(`CREATE TABLE "order ""list""" (id INT NOT NULL);`)
 
-		diff := driver.RequireDiff(`CREATE TABLE "order ""list""" (
-	"id" integer NOT NULL
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: `order "list"`,
+				Columns: []*PostgresColumn{
+					{Name: "id", Type: "integer", NotNull: true},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
