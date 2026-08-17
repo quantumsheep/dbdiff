@@ -141,27 +141,21 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 		sectionDiffs = append(sectionDiffs, sectionDiff)
 	}
 
-	var diff strings.Builder
+	var instructions []Instruction
 
 	// PostgreSQL refuses a DROP statement while another object uses the object, so every
 	// removal takes the reverse section order. An early removal runs before every addition,
 	// because a view blocks a change of the column that it reads.
 	for _, sectionDiff := range slices.Backward(sectionDiffs) {
-		if sectionDiff.EarlyRemovals != "" {
-			fmt.Fprintln(&diff, sectionDiff.EarlyRemovals)
-		}
+		instructions = append(instructions, sectionDiff.EarlyRemovals...)
 	}
 
 	for _, sectionDiff := range sectionDiffs {
-		if sectionDiff.Additions != "" {
-			fmt.Fprintln(&diff, sectionDiff.Additions)
-		}
+		instructions = append(instructions, sectionDiff.Additions...)
 	}
 
 	for _, sectionDiff := range slices.Backward(sectionDiffs) {
-		if sectionDiff.Removals != "" {
-			fmt.Fprintln(&diff, sectionDiff.Removals)
-		}
+		instructions = append(instructions, sectionDiff.Removals...)
 	}
 
 	if d.CompareData {
@@ -170,12 +164,10 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 			return "", err
 		}
 
-		if len(dataInstructions) > 0 {
-			fmt.Fprintln(&diff, RenderInstructions(dataInstructions))
-		}
+		instructions = append(instructions, dataInstructions...)
 	}
 
-	return strings.TrimSpace(diff.String()), nil
+	return RenderInstructions(instructions), nil
 }
 
 func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, error) {
@@ -215,7 +207,7 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
@@ -254,7 +246,7 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) {
@@ -293,7 +285,7 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, error) {
@@ -332,7 +324,7 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, error) {
@@ -371,7 +363,7 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error) {
@@ -410,7 +402,7 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error) {
@@ -449,7 +441,7 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error) {
@@ -496,7 +488,7 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
@@ -543,7 +535,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		}
 	}
 
-	return newSectionDiffFromInstructions(additions, removals), nil
+	return &SectionDiff{Additions: additions, Removals: removals}, nil
 }
 
 // DiffViews writes every DROP VIEW statement into the early removals. PostgreSQL refuses a
@@ -596,10 +588,7 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		}
 	}
 
-	return &SectionDiff{
-		EarlyRemovals: RenderInstructions(earlyRemovals),
-		Additions:     RenderInstructions(additions),
-	}, nil
+	return &SectionDiff{EarlyRemovals: earlyRemovals, Additions: additions}, nil
 }
 
 func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*PostgresExtension, error) {
