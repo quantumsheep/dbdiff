@@ -3,7 +3,6 @@ package drivers
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
 type PostgresAggregate struct {
@@ -23,38 +22,27 @@ func (a *PostgresAggregate) Equal(other *PostgresAggregate) bool {
 	return *a == *other
 }
 
-func (a *PostgresAggregate) String() string {
-	options := []string{
-		fmt.Sprintf("SFUNC = %s", quoteIdentifier(a.TransitionFunction)),
-		fmt.Sprintf("STYPE = %s", a.StateType),
+func (a *PostgresAggregate) CreateInstruction() *PostgresCreateAggregateInstruction {
+	return &PostgresCreateAggregateInstruction{
+		Name:               a.Name,
+		Arguments:          a.Arguments,
+		TransitionFunction: a.TransitionFunction,
+		StateType:          a.StateType,
+		FinalFunction:      a.FinalFunction,
+		InitialCondition:   a.InitialCondition,
 	}
-
-	if a.FinalFunction.Valid {
-		options = append(options, fmt.Sprintf("FINALFUNC = %s", quoteIdentifier(a.FinalFunction.String)))
-	}
-
-	if a.InitialCondition.Valid {
-		options = append(options, fmt.Sprintf("INITCOND = %s", quoteLiteral(a.InitialCondition.String)))
-	}
-
-	return fmt.Sprintf("CREATE AGGREGATE %s(%s) (%s);", quoteIdentifier(a.Name), a.Arguments, strings.Join(options, ", "))
 }
 
-func (a *PostgresAggregate) StringDrop() string {
-	return fmt.Sprintf("DROP AGGREGATE %s(%s);", quoteIdentifier(a.Name), a.Arguments)
+func (a *PostgresAggregate) DropInstruction() *PostgresDropAggregateInstruction {
+	return &PostgresDropAggregateInstruction{Name: a.Name, Arguments: a.Arguments}
 }
 
 // PostgreSQL changes the name and the owner of an aggregate only, so every other change
 // needs a recreation.
-func (a *PostgresAggregate) Diff(other *PostgresAggregate) string {
+func (a *PostgresAggregate) Diff(other *PostgresAggregate) []Instruction {
 	if a.Equal(other) {
-		return ""
+		return nil
 	}
 
-	var diff strings.Builder
-
-	fmt.Fprintf(&diff, "%s\n", other.StringDrop())
-	fmt.Fprintf(&diff, "%s\n", a.String())
-
-	return strings.TrimSpace(diff.String())
+	return []Instruction{other.DropInstruction(), a.CreateInstruction()}
 }

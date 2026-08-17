@@ -336,8 +336,8 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 }
 
 func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceAggregates, err := d.GetAggregates(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -354,14 +354,12 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 			return aggregate.Signature() == sourceAggregate.Signature()
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceAggregate.String())
+			additions = append(additions, sourceAggregate.CreateInstruction())
 			continue
 		}
 
-		subDiff := sourceAggregate.Diff(targetAggregate)
-		if subDiff != "" {
-			fmt.Fprintf(&additions, "%s\n", subDiff)
-		}
+		subInstructions := sourceAggregate.Diff(targetAggregate)
+		additions = append(additions, subInstructions...)
 	}
 
 	for _, targetAggregate := range targetAggregates {
@@ -369,16 +367,16 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 			return aggregate.Signature() == targetAggregate.Signature()
 		})
 		if !found {
-			fmt.Fprintf(&removals, "%s\n", targetAggregate.StringDrop())
+			removals = append(removals, targetAggregate.DropInstruction())
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceOperators, err := d.GetOperators(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -395,14 +393,12 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 			return operator.Signature() == sourceOperator.Signature()
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceOperator.String())
+			additions = append(additions, sourceOperator.CreateInstruction())
 			continue
 		}
 
-		subDiff := sourceOperator.Diff(targetOperator)
-		if subDiff != "" {
-			fmt.Fprintf(&additions, "%s\n", subDiff)
-		}
+		subInstructions := sourceOperator.Diff(targetOperator)
+		additions = append(additions, subInstructions...)
 	}
 
 	for _, targetOperator := range targetOperators {
@@ -410,11 +406,11 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 			return operator.Signature() == targetOperator.Signature()
 		})
 		if !found {
-			fmt.Fprintf(&removals, "%s\n", targetOperator.StringDrop())
+			removals = append(removals, targetOperator.DropInstruction())
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error) {
@@ -457,8 +453,8 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 }
 
 func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceFunctions, err := d.GetFunctions(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -477,12 +473,17 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 		targetFunction, found := lo.Find(targetFunctions, func(function *PostgresFunction) bool {
 			return function.Signature() == sourceFunction.Signature()
 		})
-		if found && sourceFunction.ReturnType != targetFunction.ReturnType {
-			fmt.Fprintf(&additions, "%s\n", targetFunction.StringDrop())
+		if !found {
+			additions = append(additions, sourceFunction.CreateInstruction())
+			continue
 		}
 
-		if !found || sourceFunction.Def != targetFunction.Def {
-			fmt.Fprintf(&additions, "%s\n", sourceFunction.String())
+		if sourceFunction.Def != targetFunction.Def {
+			if sourceFunction.ReturnType != targetFunction.ReturnType {
+				additions = append(additions, targetFunction.DropInstruction())
+			}
+
+			additions = append(additions, sourceFunction.CreateInstruction())
 		}
 	}
 
@@ -491,11 +492,11 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 			return function.Signature() == targetFunction.Signature()
 		})
 		if !found {
-			fmt.Fprintf(&removals, "%s\n", targetFunction.StringDrop())
+			removals = append(removals, targetFunction.DropInstruction())
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {

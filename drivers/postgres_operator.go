@@ -3,7 +3,6 @@ package drivers
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
 type PostgresOperator struct {
@@ -29,41 +28,29 @@ func (o *PostgresOperator) Equal(other *PostgresOperator) bool {
 	return *o == *other
 }
 
-// The name of an operator holds punctuation marks only, so it takes no quotes.
-func (o *PostgresOperator) String() string {
-	options := []string{fmt.Sprintf("FUNCTION = %s", quoteIdentifier(o.Function))}
-
-	if o.LeftArgument.Valid {
-		options = append(options, fmt.Sprintf("LEFTARG = %s", o.LeftArgument.String))
+func (o *PostgresOperator) CreateInstruction() *PostgresCreateOperatorInstruction {
+	return &PostgresCreateOperatorInstruction{
+		Name:          o.Name,
+		Function:      o.Function,
+		LeftArgument:  o.LeftArgument,
+		RightArgument: o.RightArgument,
 	}
-
-	if o.RightArgument.Valid {
-		options = append(options, fmt.Sprintf("RIGHTARG = %s", o.RightArgument.String))
-	}
-
-	return fmt.Sprintf("CREATE OPERATOR %s (%s);", o.Name, strings.Join(options, ", "))
 }
 
-func (o *PostgresOperator) StringDrop() string {
-	return fmt.Sprintf(
-		"DROP OPERATOR %s (%s, %s);",
-		o.Name,
-		postgresOperatorArgument(o.LeftArgument),
-		postgresOperatorArgument(o.RightArgument),
-	)
+func (o *PostgresOperator) DropInstruction() *PostgresDropOperatorInstruction {
+	return &PostgresDropOperatorInstruction{
+		Name:          o.Name,
+		LeftArgument:  o.LeftArgument,
+		RightArgument: o.RightArgument,
+	}
 }
 
 // PostgreSQL changes the owner and the support options of an operator only, so a new
 // function needs a recreation.
-func (o *PostgresOperator) Diff(other *PostgresOperator) string {
+func (o *PostgresOperator) Diff(other *PostgresOperator) []Instruction {
 	if o.Equal(other) {
-		return ""
+		return nil
 	}
 
-	var diff strings.Builder
-
-	fmt.Fprintf(&diff, "%s\n", other.StringDrop())
-	fmt.Fprintf(&diff, "%s\n", o.String())
-
-	return strings.TrimSpace(diff.String())
+	return []Instruction{other.DropInstruction(), o.CreateInstruction()}
 }
