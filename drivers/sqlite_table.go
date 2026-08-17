@@ -3,7 +3,6 @@ package drivers
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/samber/lo"
 )
@@ -63,67 +62,36 @@ func (t *SQLiteTable) TriggerByName(name string) (*SQLiteTrigger, bool) {
 	return nil, false
 }
 
-func (t *SQLiteTable) StringCreateTable() string {
-	var columnLines []string
-
-	for _, column := range t.Columns {
-		line := "\t" + column.Definition()
-		columnLines = append(columnLines, line)
+func (t *SQLiteTable) CreateTableInstruction() *SQLiteCreateTableInstruction {
+	return &SQLiteCreateTableInstruction{
+		Name:              t.Name,
+		Columns:           t.Columns,
+		PrimaryKey:        t.PrimaryKey,
+		UniqueConstraints: t.UniqueConstraints,
+		ForeignKeys:       t.ForeignKeys,
 	}
-
-	if len(t.PrimaryKey) > 0 {
-		line := fmt.Sprintf("\tPRIMARY KEY (%s)", strings.Join(quoteIdentifiers(t.PrimaryKey), ", "))
-		columnLines = append(columnLines, line)
-	}
-
-	for _, constraint := range t.UniqueConstraints {
-		line := fmt.Sprintf("\tUNIQUE (%s)", strings.Join(quoteIdentifiers(constraint), ", "))
-		columnLines = append(columnLines, line)
-	}
-
-	for _, foreignKey := range t.ForeignKeys {
-		line := "\t" + foreignKey.Clause()
-		columnLines = append(columnLines, line)
-	}
-
-	createTableColumns := strings.Join(columnLines, ",\n")
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", quoteIdentifier(t.Name), createTableColumns)
 }
 
-func (t *SQLiteTable) StringCreateIndexes() string {
-	var createIndexes []string
-
-	for _, index := range t.Indexes {
-		createIndexes = append(createIndexes, index.String())
-	}
-
-	return strings.Join(createIndexes, "\n")
+func (t *SQLiteTable) IndexInstructions() []Instruction {
+	return lo.Map(t.Indexes, func(index *SQLiteIndex, _ int) Instruction {
+		return index.CreateInstruction()
+	})
 }
 
-func (t *SQLiteTable) StringCreateTriggers() string {
-	var createTriggers []string
-
-	for _, trigger := range t.Triggers {
-		createTriggers = append(createTriggers, trigger.SQL+";")
-	}
-
-	return strings.Join(createTriggers, "\n")
+func (t *SQLiteTable) TriggerInstructions() []Instruction {
+	return lo.Map(t.Triggers, func(trigger *SQLiteTrigger, _ int) Instruction {
+		return &SQLiteCreateTriggerInstruction{Definition: trigger.SQL}
+	})
 }
 
-func (t *SQLiteTable) String() string {
-	statement := t.StringCreateTable()
+// Instructions returns the statement that creates the table, then the statements of its
+// indexes, then the statements of its triggers.
+func (t *SQLiteTable) Instructions() []Instruction {
+	instructions := []Instruction{t.CreateTableInstruction()}
+	instructions = append(instructions, t.IndexInstructions()...)
+	instructions = append(instructions, t.TriggerInstructions()...)
 
-	indexes := t.StringCreateIndexes()
-	if indexes != "" {
-		statement += "\n" + indexes
-	}
-
-	triggers := t.StringCreateTriggers()
-	if triggers != "" {
-		statement += "\n" + triggers
-	}
-
-	return statement
+	return instructions
 }
 
 type SQLiteTableColumnsDiff struct {
@@ -208,10 +176,10 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 	return diff
 }
 
-func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
+func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 	columnsDiff := t.DiffColumns(other)
 
-	var diff strings.Builder
+	var instructions []Instruction
 
 	// SQLite supports no ALTER COLUMN, so a modified column, a new foreign key, or a new
 	// table constraint needs a recreation of the table.
@@ -219,7 +187,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 		tempTable := t.Copy()
 		tempTable.Name = "_" + t.Name + "_temp"
 
-		fmt.Fprintf(&diff, "%s\n", tempTable.StringCreateTable())
+		instructions = append(instructions, tempTable.CreateTableInstruction())
 
 		newToOld := lo.Invert(columnsDiff.Renamed)
 
@@ -227,7 +195,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 		var selectColumns []string
 
 		for _, newColumn := range t.Columns {
-			insertColumns = append(insertColumns, quoteIdentifier(newColumn.Name))
+			insertColumns = append(insertColumns, newColumn.Name)
 
 			_, ok := other.ColumnByName(newColumn.Name)
 			if ok {
@@ -248,93 +216,111 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 			}
 		}
 
-		fmt.Fprintf(
-			&diff,
-			"INSERT INTO %s (%s) SELECT %s FROM %s;\n",
-			quoteIdentifier(tempTable.Name),
-			strings.Join(insertColumns, ", "),
-			strings.Join(selectColumns, ", "),
-			quoteIdentifier(t.Name),
-		)
+		instructions = append(instructions, &SQLInsertSelectInstruction{
+			TableName:         tempTable.Name,
+			ColumnNames:       insertColumns,
+			SelectExpressions: selectColumns,
+			SourceTableName:   t.Name,
+		})
 
-		fmt.Fprintf(&diff, "DROP TABLE %s;\n", quoteIdentifier(t.Name))
+		instructions = append(instructions, &SQLDropTableInstruction{Name: t.Name})
 
-		fmt.Fprintf(&diff, "ALTER TABLE %s RENAME TO %s;\n", quoteIdentifier(tempTable.Name), quoteIdentifier(t.Name))
+		instructions = append(instructions, &SQLiteAlterTableInstruction{
+			Name:   tempTable.Name,
+			Action: &SQLRenameTableAction{NewName: t.Name},
+		})
 
 		for _, index := range t.Indexes {
-			fmt.Fprintf(&diff, "%s\n", index.String())
-		}
-	} else {
-		for oldName, newName := range columnsDiff.Renamed {
-			fmt.Fprintf(&diff, "ALTER TABLE %s RENAME COLUMN %s TO %s;\n", quoteIdentifier(t.Name), quoteIdentifier(oldName), quoteIdentifier(newName))
+			instructions = append(instructions, index.CreateInstruction())
 		}
 
-		for _, columnName := range columnsDiff.Removed {
-			fmt.Fprintf(&diff, "ALTER TABLE %s DROP COLUMN %s;\n", quoteIdentifier(t.Name), quoteIdentifier(columnName))
-		}
-
-		for _, columnName := range columnsDiff.Added {
-			column, ok := t.ColumnByName(columnName)
-			if !ok {
-				return "", fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
-			}
-
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", quoteIdentifier(t.Name), column.Definition())
-		}
-
+		return instructions, nil
 	}
 
-	return strings.TrimSpace(diff.String()), nil
+	for oldName, newName := range columnsDiff.Renamed {
+		instructions = append(instructions, &SQLiteAlterTableInstruction{
+			Name:   t.Name,
+			Action: &SQLRenameColumnAction{ColumnName: oldName, NewColumnName: newName},
+		})
+	}
+
+	for _, columnName := range columnsDiff.Removed {
+		instructions = append(instructions, &SQLiteAlterTableInstruction{
+			Name:   t.Name,
+			Action: &SQLDropColumnAction{ColumnName: columnName},
+		})
+	}
+
+	for _, columnName := range columnsDiff.Added {
+		column, ok := t.ColumnByName(columnName)
+		if !ok {
+			return nil, fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
+		}
+
+		instructions = append(instructions, &SQLiteAlterTableInstruction{
+			Name:   t.Name,
+			Action: &SQLiteAddColumnAction{Column: column},
+		})
+	}
+
+	return instructions, nil
 }
 
-func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) (string, error) {
-	var diff strings.Builder
+func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) ([]Instruction, error) {
+	var instructions []Instruction
 
 	for _, sourceTrigger := range t.Triggers {
 		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
 		if !found {
-			fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
+			instructions = append(instructions, &SQLiteCreateTriggerInstruction{
+				Definition: sourceTrigger.SQL,
+			})
+
 			continue
 		}
 
 		if sourceTrigger.SQL != targetTrigger.SQL {
-			fmt.Fprintf(&diff, "DROP TRIGGER %s;\n", quoteIdentifier(targetTrigger.Name))
-			fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
+			instructions = append(instructions,
+				&SQLiteDropTriggerInstruction{Name: targetTrigger.Name},
+				&SQLiteCreateTriggerInstruction{Definition: sourceTrigger.SQL})
 		}
 	}
 
 	for _, targetTrigger := range other.Triggers {
 		_, found := t.TriggerByName(targetTrigger.Name)
 		if !found {
-			fmt.Fprintf(&diff, "DROP TRIGGER %s;\n", quoteIdentifier(targetTrigger.Name))
+			instructions = append(instructions, &SQLiteDropTriggerInstruction{
+				Name: targetTrigger.Name,
+			})
 		}
 	}
 
-	return diff.String(), nil
+	return instructions, nil
 }
 
-func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) (string, error) {
-	var diff strings.Builder
+func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) ([]Instruction, error) {
+	var instructions []Instruction
 
 	for _, sourceIndex := range t.Indexes {
 		targetIndex, found := other.IndexByName(sourceIndex.Name)
 		if !found {
-			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
+			instructions = append(instructions, sourceIndex.CreateInstruction())
 			continue
 		}
 
 		if !sourceIndex.Equal(targetIndex) {
-			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
-			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
+			instructions = append(instructions,
+				&SQLDropIndexInstruction{Name: targetIndex.Name},
+				sourceIndex.CreateInstruction())
 		}
 	}
 
 	for _, targetIndex := range other.Indexes {
 		_, found := t.IndexByName(targetIndex.Name)
 		if !found {
-			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: targetIndex.Name})
 		}
 	}
 
-	return diff.String(), nil
+	return instructions, nil
 }

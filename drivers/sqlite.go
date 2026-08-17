@@ -64,25 +64,21 @@ func (d *SQLiteDriver) Close() error {
 }
 
 func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
-	var diff strings.Builder
+	var instructions []Instruction
 
-	tablesDiff, err := d.DiffTables(ctx)
+	tableInstructions, err := d.DiffTables(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	if tablesDiff != "" {
-		fmt.Fprintln(&diff, tablesDiff)
-	}
+	instructions = append(instructions, tableInstructions...)
 
 	viewInstructions, err := d.DiffViews(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	if len(viewInstructions) > 0 {
-		fmt.Fprintln(&diff, RenderInstructions(viewInstructions))
-	}
+	instructions = append(instructions, viewInstructions...)
 
 	if d.CompareData {
 		dataInstructions, err := d.DiffData(ctx)
@@ -90,25 +86,23 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 			return "", err
 		}
 
-		if len(dataInstructions) > 0 {
-			fmt.Fprintln(&diff, RenderInstructions(dataInstructions))
-		}
+		instructions = append(instructions, dataInstructions...)
 	}
 
-	return strings.TrimSpace(diff.String()), nil
+	return RenderInstructions(instructions), nil
 }
 
-func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
-	var diff strings.Builder
+func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {
+	var instructions []Instruction
 
 	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	for _, sourceTable := range sourceTables {
@@ -116,33 +110,30 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 			return table.Name == sourceTable.Name
 		})
 		if !found {
-			fmt.Fprintf(&diff, "%s\n", sourceTable.String())
+			instructions = append(instructions, sourceTable.Instructions()...)
 			continue
 		}
 
-		var subDiff string
-
-		subDiff, err = sourceTable.DiffTable(targetTable)
+		tableInstructions, err := sourceTable.DiffTable(targetTable)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		fmt.Fprintln(&diff, subDiff)
+		instructions = append(instructions, tableInstructions...)
 
-		subDiff, err = sourceTable.DiffIndexes(targetTable)
+		indexInstructions, err := sourceTable.DiffIndexes(targetTable)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		fmt.Fprintln(&diff, subDiff)
+		instructions = append(instructions, indexInstructions...)
 
-		subDiff, err = sourceTable.DiffTriggers(targetTable)
+		triggerInstructions, err := sourceTable.DiffTriggers(targetTable)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		fmt.Fprintln(&diff, subDiff)
-
+		instructions = append(instructions, triggerInstructions...)
 	}
 
 	for _, targetTable := range targetTables {
@@ -150,11 +141,11 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 			return table.Name == targetTable.Name
 		})
 		if !found {
-			fmt.Fprintf(&diff, "DROP TABLE %s;\n", quoteIdentifier(targetTable.Name))
+			instructions = append(instructions, &SQLDropTableInstruction{Name: targetTable.Name})
 		}
 	}
 
-	return strings.TrimSpace(diff.String()), nil
+	return instructions, nil
 }
 
 func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]Instruction, error) {

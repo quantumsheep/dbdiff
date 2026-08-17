@@ -745,6 +745,44 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t, `"team" = 'red' AND "member" = 'Alice'`, condition.ConditionClause())
 	})
+
+	t.Run("SQLiteTableInstructions", func(t *testing.T) {
+		table := &SQLiteTable{
+			Name:    "users",
+			Columns: []*SQLiteColumn{{Name: "id", Type: "INTEGER", PrimaryKey: true}},
+			Indexes: []*SQLiteIndex{
+				{Table: "users", Name: "idx_users_id", Keys: []string{`"id"`}},
+			},
+			Triggers: []*SQLiteTrigger{
+				{Name: "t", SQL: "CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END"},
+			},
+		}
+
+		instructions := table.Instructions()
+
+		require.Len(t, instructions, 3)
+		require.Equal(t, `CREATE TABLE "users" (
+	"id" INTEGER PRIMARY KEY
+);`, instructions[0].String())
+		require.Equal(t, `CREATE INDEX "idx_users_id" ON "users" ("id");`, instructions[1].String())
+		require.Equal(t,
+			"CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END;",
+			instructions[2].String())
+	})
+
+	t.Run("SQLiteIndexCreateInstructionCarriesThePredicate", func(t *testing.T) {
+		index := &SQLiteIndex{
+			Table:  "users",
+			Name:   "idx_users_active",
+			Keys:   []string{`"name"`},
+			Where:  "active = 1",
+			Unique: true,
+		}
+
+		require.Equal(t,
+			`CREATE UNIQUE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`,
+			index.CreateInstruction().String())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.

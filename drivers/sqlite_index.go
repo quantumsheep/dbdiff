@@ -1,7 +1,6 @@
 package drivers
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 )
@@ -30,30 +29,19 @@ func (i *SQLiteIndex) Equal(other *SQLiteIndex) bool {
 	return slices.Equal(i.Keys, other.Keys)
 }
 
-func (i *SQLiteIndex) String() string {
-	var statement strings.Builder
-
-	statement.WriteString("CREATE ")
-
-	if i.Unique {
-		statement.WriteString("UNIQUE ")
+func (i *SQLiteIndex) CreateInstruction() *SQLiteCreateIndexInstruction {
+	instruction := &SQLiteCreateIndexInstruction{
+		Unique:    i.Unique,
+		Name:      i.Name,
+		TableName: i.Table,
+		Keys:      i.Keys,
 	}
-
-	fmt.Fprintf(
-		&statement,
-		"INDEX %s ON %s (%s)",
-		quoteIdentifier(i.Name),
-		quoteIdentifier(i.Table),
-		strings.Join(i.Keys, ", "),
-	)
 
 	if i.Where != "" {
-		fmt.Fprintf(&statement, " WHERE %s", i.Where)
+		instruction.Condition = &SQLiteIndexPredicateCondition{Expression: i.Where}
 	}
 
-	statement.WriteString(";")
-
-	return statement.String()
+	return instruction
 }
 
 const noQuote = rune(0)
