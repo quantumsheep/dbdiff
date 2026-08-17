@@ -623,6 +623,90 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t, `DROP OPERATOR === (NONE, integer);`, instruction.String())
 	})
+
+	t.Run("PostgresCreateExtension", func(t *testing.T) {
+		instruction := &PostgresCreateExtensionInstruction{Name: "pgcrypto"}
+
+		require.Equal(t, `CREATE EXTENSION "pgcrypto";`, instruction.String())
+	})
+
+	t.Run("PostgresAlterExtension", func(t *testing.T) {
+		instruction := &PostgresAlterExtensionInstruction{
+			Name:       "pgcrypto",
+			NewVersion: "1.3",
+		}
+
+		require.Equal(t, `ALTER EXTENSION "pgcrypto" UPDATE TO '1.3';`, instruction.String())
+	})
+
+	t.Run("PostgresDropExtension", func(t *testing.T) {
+		instruction := &PostgresDropExtensionInstruction{Name: "pgcrypto"}
+
+		require.Equal(t, `DROP EXTENSION "pgcrypto";`, instruction.String())
+	})
+
+	t.Run("PostgresCreateSequence", func(t *testing.T) {
+		instruction := &PostgresCreateSequenceInstruction{
+			Name:      "counter",
+			DataType:  "bigint",
+			Increment: 1,
+			Min:       1,
+			Max:       9223372036854775807,
+			Start:     1,
+		}
+
+		require.Equal(t,
+			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 NO CYCLE;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateSequenceWithCycle", func(t *testing.T) {
+		instruction := &PostgresCreateSequenceInstruction{
+			Name:      "counter",
+			DataType:  "bigint",
+			Increment: 1,
+			Min:       1,
+			Max:       10,
+			Start:     1,
+			Cycle:     true,
+		}
+
+		require.Equal(t,
+			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 10 START WITH 1 CYCLE;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresAlterSequenceOneClause", func(t *testing.T) {
+		instruction := &PostgresAlterSequenceInstruction{
+			Name:      "counter",
+			Increment: sql.NullInt64{Int64: 2, Valid: true},
+		}
+
+		require.Equal(t, `ALTER SEQUENCE "counter" INCREMENT BY 2;`, instruction.String())
+	})
+
+	t.Run("PostgresAlterSequenceEveryClauseInOrder", func(t *testing.T) {
+		instruction := &PostgresAlterSequenceInstruction{
+			Name:      "counter",
+			DataType:  sql.NullString{String: "integer", Valid: true},
+			Increment: sql.NullInt64{Int64: 2, Valid: true},
+			Min:       sql.NullInt64{Int64: 5, Valid: true},
+			Max:       sql.NullInt64{Int64: 50, Valid: true},
+			Start:     sql.NullInt64{Int64: 5, Valid: true},
+			Cycle:     sql.NullBool{Bool: true, Valid: true},
+			Restart:   sql.NullInt64{Int64: 5, Valid: true},
+		}
+
+		require.Equal(t,
+			`ALTER SEQUENCE "counter" AS integer INCREMENT BY 2 MINVALUE 5 MAXVALUE 50 START WITH 5 CYCLE RESTART WITH 5;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresDropSequence", func(t *testing.T) {
+		instruction := &PostgresDropSequenceInstruction{Name: "counter"}
+
+		require.Equal(t, `DROP SEQUENCE "counter";`, instruction.String())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.
