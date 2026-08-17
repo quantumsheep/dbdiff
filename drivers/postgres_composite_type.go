@@ -21,8 +21,8 @@ func (t *PostgresCompositeType) Equal(other *PostgresCompositeType) bool {
 		return false
 	}
 
-	return slices.EqualFunc(t.Attributes, other.Attributes, func(a, b *PostgresCompositeTypeAttribute) bool {
-		return *a == *b
+	return slices.EqualFunc(t.Attributes, other.Attributes, func(first, second *PostgresCompositeTypeAttribute) bool {
+		return *first == *second
 	})
 }
 
@@ -40,9 +40,8 @@ func (t *PostgresCompositeType) StringDrop() string {
 	return fmt.Sprintf("DROP TYPE %s;", quoteIdentifier(t.Name))
 }
 
-// Diff returns the statements that make other equal to t. One ALTER TYPE statement changes
-// one attribute only, and the order of the attributes stays fixed. A recreation gives the
-// wanted attribute list in every case.
+// One ALTER TYPE statement changes one attribute only, and the order of the attributes
+// stays fixed. A recreation gives the wanted attribute list in every case.
 func (t *PostgresCompositeType) Diff(other *PostgresCompositeType) string {
 	if t.Equal(other) {
 		return ""

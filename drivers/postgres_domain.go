@@ -55,9 +55,7 @@ func (d *PostgresDomain) StringDrop() string {
 	return fmt.Sprintf("DROP DOMAIN %s;", quoteIdentifier(d.Name))
 }
 
-// Diff returns the statements that make other equal to d. PostgreSQL changes the NOT NULL
-// flag, the default value, and the check constraints with ALTER DOMAIN. It changes no base
-// type, so a new base type needs a recreation.
+// PostgreSQL changes no base type of a domain, so a new base type needs a recreation.
 func (d *PostgresDomain) Diff(other *PostgresDomain) string {
 	var diff strings.Builder
 

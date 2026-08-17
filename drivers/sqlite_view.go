@@ -14,7 +14,6 @@ func (v *SQLiteView) Diff(other *SQLiteView) (string, error) {
 	var diff strings.Builder
 
 	if v.SQL != other.SQL {
-		// Modified view
 		fmt.Fprintf(&diff, "DROP VIEW %s;\n", quoteIdentifier(other.Name))
 		fmt.Fprintf(&diff, "%s;\n", v.SQL)
 	}

@@ -13,17 +13,15 @@ import (
 	"github.com/samber/lo"
 )
 
-// PostgresTableData holds the rows of one table. A key joins the SQL literals of the
-// primary key columns of one row. A row maps a column name to the SQL literal of its
-// value.
+// A key joins the SQL literals of the primary key columns of one row. A row maps a column
+// name to the SQL literal of its value.
 type PostgresTableData struct {
 	Keys []string
 	Rows map[string]map[string]string
 }
 
-// DiffData compares the rows of each table that the source schema and the target schema
-// both hold. The schema section creates a new table and drops an old table, so a table of
-// one side only needs no row statement.
+// DiffData compares the rows of each table that both schemas hold. The schema section
+// already creates or drops the other tables.
 func (d *PostgresDriver) DiffData(ctx context.Context) (string, error) {
 	var diff strings.Builder
 
@@ -38,10 +36,9 @@ func (d *PostgresDriver) DiffData(ctx context.Context) (string, error) {
 	}
 
 	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(t *PostgresTable) bool {
-			return t.Name == sourceTable.Name
+		targetTable, found := lo.Find(targetTables, func(table *PostgresTable) bool {
+			return table.Name == sourceTable.Name
 		})
-
 		if !found {
 			continue
 		}
@@ -79,7 +76,6 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, sourceTable *Postgre
 		return column.Name
 	})
 
-	// The diff reads the key of a target row, so the target must hold every key column.
 	holdsEveryKeyColumn := lo.EveryBy(primaryKeyColumnNames, func(name string) bool {
 		return slices.Contains(targetColumnNames, name)
 	})
@@ -87,8 +83,6 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, sourceTable *Postgre
 		return fmt.Sprintf("-- The table %s holds another primary key in the target, so dbdiff compares no row of it.", quotedTableName), nil
 	}
 
-	// The target holds no value for a column that the schema section adds, so the
-	// comparison of two rows covers the columns of both sides.
 	commonColumnNames := lo.Filter(sourceColumnNames, func(name string, _ int) bool {
 		return slices.Contains(targetColumnNames, name)
 	})
@@ -107,7 +101,6 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, sourceTable *Postgre
 	var modifications strings.Builder
 	var removals strings.Builder
 
-	// Added or modified rows
 	for _, key := range sourceData.Keys {
 		sourceRow := sourceData.Rows[key]
 
@@ -143,7 +136,6 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, sourceTable *Postgre
 			postgresRowKeyCondition(primaryKeyColumnNames, sourceRow))
 	}
 
-	// Removed rows
 	for _, key := range targetData.Keys {
 		_, found := sourceData.Rows[key]
 		if found {
@@ -160,8 +152,6 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, sourceTable *Postgre
 	return strings.TrimSpace(diff), nil
 }
 
-// GetTablePrimaryKey returns the columns of the primary key of a table, in the order of
-// the constraint. The list is empty when the table holds no primary key.
 func (d *PostgresDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT a.attname
@@ -198,9 +188,8 @@ func (d *PostgresDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tab
 	return columnNames, nil
 }
 
-// GetTableData reads the given columns of a table. It sorts the rows by the primary key,
-// because PostgreSQL gives no stable order. Without that sort the output changes between
-// two runs.
+// GetTableData sorts the rows by the primary key, because PostgreSQL gives no stable
+// order. Without that sort the output changes between two runs.
 func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName string, columnNames []string, primaryKeyColumnNames []string) (*PostgresTableData, error) {
 	statement := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s;",
 		strings.Join(quoteIdentifiers(columnNames), ", "),
@@ -251,15 +240,10 @@ func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName
 	return data, nil
 }
 
-// postgresTimeLayout is the text form that PostgreSQL reads for a timestamp value and for
-// a timestamp with time zone value.
 const postgresTimeLayout = "2006-01-02 15:04:05.999999-07:00"
 
 // formatPostgresValue returns the SQL literal of one value. The diff compares two rows
-// through these literals, so one value gives one literal on both sides.
-//
-// The last line quotes the text form of every other type. PostgreSQL reads such a literal
-// as a value of an unknown type, and it casts the literal to the type of the column.
+// through these literals, so NULL never equals the text 'NULL'.
 func formatPostgresValue(value any) string {
 	if value == nil {
 		return "NULL"
@@ -302,8 +286,6 @@ func formatPostgresValue(value any) string {
 	return quoteLiteral(fmt.Sprintf("%v", value))
 }
 
-// postgresRowKey joins the literals of the primary key columns. A literal keeps its
-// quotes, so two different keys never give the same text.
 func postgresRowKey(primaryKeyColumnNames []string, row map[string]string) string {
 	literals := lo.Map(primaryKeyColumnNames, func(name string, _ int) string {
 		return row[name]

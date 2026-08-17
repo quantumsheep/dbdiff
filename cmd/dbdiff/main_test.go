@@ -92,7 +92,6 @@ func TestDbdiffCommand(t *testing.T) {
 
 		require.Equal(t, 1, result.ExitCode)
 		require.Contains(t, result.Stderr, "unsupported driver: mysql")
-		// The command prints the error one time only.
 		require.Equal(t, 1, strings.Count(result.Stderr, "unsupported driver: mysql"))
 	})
 
@@ -128,7 +127,6 @@ func TestDbdiffCommand(t *testing.T) {
 		writeSQLiteDatabase(t, sourcePath, schema+`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
 		writeSQLiteDatabase(t, targetPath, schema+`INSERT INTO users (id, name) VALUES (1, 'Bob');`)
 
-		// The flag is off, so the output holds no row statement.
 		result := runDbdiff(t, binaryPath, sourcePath, targetPath)
 
 		require.Equal(t, 0, result.ExitCode)

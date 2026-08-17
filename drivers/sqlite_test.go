@@ -71,8 +71,8 @@ func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules s
 
 		row := make(map[string]any)
 
-		for i, col := range columns {
-			row[col.Name] = columnValues[i]
+		for i, column := range columns {
+			row[column.Name] = columnValues[i]
 		}
 
 		results = append(results, row)
@@ -104,12 +104,11 @@ func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 	}
 }
 
-// errRowIteration is the error that failingRows returns after it exhausts its rows. A
-// read method must return this error through rows.Err.
+// A read method must return this error through rows.Err.
 var errRowIteration = errors.New("row iteration failed")
 
-// failingRows is a driver.Rows value that yields a fixed set of rows, then fails. It
-// simulates a connection that breaks in the middle of a read.
+// failingRows yields a fixed set of rows, then fails. It simulates a connection that
+// breaks in the middle of a read.
 type failingRows struct {
 	columns  []string
 	rows     [][]driver.Value
@@ -135,8 +134,6 @@ func (r *failingRows) Next(dest []driver.Value) error {
 	return nil
 }
 
-// failingStmt is a driver.Stmt value. Its Query method returns a failingRows value for
-// every query, no matter the query text.
 type failingStmt struct {
 	columns []string
 	rows    [][]driver.Value
@@ -158,7 +155,6 @@ func (s *failingStmt) Query(args []driver.Value) (driver.Rows, error) {
 	return &failingRows{columns: s.columns, rows: s.rows}, nil
 }
 
-// failingConn is a driver.Conn value. It prepares a failingStmt value for every query.
 type failingConn struct {
 	columns []string
 	rows    [][]driver.Value
@@ -176,8 +172,6 @@ func (c *failingConn) Begin() (driver.Tx, error) {
 	return nil, errors.New("failingConn does not support Begin")
 }
 
-// failingDriver is a driver.Driver value. It opens a connection that fails in the
-// middle of a read, after it yields the given rows.
 type failingDriver struct {
 	columns []string
 	rows    [][]driver.Value
@@ -187,8 +181,7 @@ func (d *failingDriver) Open(name string) (driver.Conn, error) {
 	return &failingConn{columns: d.columns, rows: d.rows}, nil
 }
 
-// init registers failingDriver one time. A second call to sql.Register with the same
-// name panics, and go test can load this package one time only per process.
+// A second call to sql.Register with the same name panics.
 func init() {
 	sql.Register("sqlite3_failing_rows", &failingDriver{
 		columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
@@ -245,7 +238,6 @@ func TestSQLiteDriver(t *testing.T) {
 
 		diff := driver.RequireDiff(`ALTER TABLE "users" ADD COLUMN "email" TEXT;`)
 
-		// Check that data is preserved after applying the diff
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
@@ -277,7 +269,6 @@ func TestSQLiteDriver(t *testing.T) {
 
 		diff := driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "email";`)
 
-		// Check that data is preserved after applying the diff
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
@@ -308,7 +299,6 @@ func TestSQLiteDriver(t *testing.T) {
 
 		diff := driver.RequireDiff(`ALTER TABLE "users" RENAME COLUMN "name" TO "full_name";`)
 
-		// Check that data is preserved after applying the diff
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
@@ -337,8 +327,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		// Two target columns have the same attributes. A rename is a guess, so the
-		// diff removes the old columns and adds the new ones.
+		// Two target columns hold the same attributes, so the rename guess is unsafe.
 		diff := driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "name_a";
 ALTER TABLE "users" DROP COLUMN "name_b";
 ALTER TABLE "users" ADD COLUMN "first_name" TEXT;
@@ -408,7 +397,6 @@ INSERT INTO "_users_temp" ("id", "name", "age") SELECT "id", "name", "age" FROM 
 DROP TABLE "users";
 ALTER TABLE "_users_temp" RENAME TO "users";`)
 
-		// Check that data is preserved after applying the diff
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
@@ -445,7 +433,6 @@ INSERT INTO "_users_temp" ("id", "name") SELECT "id", "name" FROM "users";
 DROP TABLE "users";
 ALTER TABLE "_users_temp" RENAME TO "users";`)
 
-		// Check that data is preserved after applying the diff
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
 
@@ -482,7 +469,6 @@ INSERT INTO "_users_temp" ("id", "name") SELECT "id", "name" FROM "users";
 DROP TABLE "users";
 ALTER TABLE "_users_temp" RENAME TO "users";`)
 
-		// Check that data is preserved after applying the diff
 		driver.ExecOnTarget(diff)
 
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -791,10 +777,8 @@ CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
 			INSERT INTO users (id, email, age) VALUES (1, 'alice@example.com', '30'), (2, 'bob@example.com', '25');
 		`)
 
-		// The UNIQUE constraint builds an index of the origin "u". The recreation of the
-		// table keeps the constraint in the definition of the column. It must not print a
-		// CREATE INDEX statement for that index, because SQLite refuses a CREATE INDEX
-		// statement with the name of such an index.
+		// The recreation keeps the constraint in the definition of the column. SQLite
+		// refuses a CREATE INDEX statement with the name of the index of a constraint.
 		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
 	"id" INTEGER PRIMARY KEY,
 	"email" TEXT UNIQUE,
@@ -829,8 +813,7 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			);
 		`)
 
-		// A UNIQUE constraint of two or more columns is a table constraint. It keeps the
-		// order of the columns of the constraint.
+		// A UNIQUE constraint of two or more columns keeps the order of its columns.
 		diff := driver.RequireDiff(`CREATE TABLE "members" (
 	"id" INTEGER PRIMARY KEY,
 	"team" TEXT NOT NULL,
@@ -867,8 +850,7 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice'), (2, 'blue', 'Bob');
 		`)
 
-		// SQLite adds no table constraint to a table, so the new constraint needs a
-		// recreation of the table.
+		// SQLite adds no table constraint, so the new constraint needs a recreation.
 		diff := driver.RequireDiff(`CREATE TABLE "_members_temp" (
 	"id" INTEGER PRIMARY KEY,
 	"team" TEXT NOT NULL,
@@ -900,8 +882,7 @@ ALTER TABLE "_members_temp" RENAME TO "members";`)
 			);
 		`)
 
-		// A primary key of two or more columns is a table constraint. It keeps the order of
-		// the key, and that order differs from the order of the columns of the table.
+		// The key order differs from the column order of the table.
 		diff := driver.RequireDiff(`CREATE TABLE "memberships" (
 	"team" TEXT NOT NULL,
 	"member" TEXT NOT NULL,
@@ -926,9 +907,8 @@ ALTER TABLE "_members_temp" RENAME TO "members";`)
 			);
 		`)
 
-		// An INTEGER PRIMARY KEY is the alias of the rowid of SQLite. It keeps the form of a
-		// column constraint, because the form of a table constraint changes the type of the
-		// key.
+		// An INTEGER PRIMARY KEY is the alias of the rowid. The form of a table constraint
+		// changes the type of the key, so the key keeps the column constraint form.
 		diff := driver.RequireDiff(`CREATE TABLE "counters" (
 	"id" INTEGER PRIMARY KEY,
 	"total" INTEGER
@@ -967,8 +947,7 @@ ALTER TABLE "_members_temp" RENAME TO "members";`)
 			INSERT INTO memberships (team, member, level) VALUES ('red', 'Alice', '3'), ('blue', 'Bob', '1');
 		`)
 
-		// The type of the column "level" changes, so the driver recreates the table. The new
-		// table keeps the whole primary key.
+		// The type of the column "level" changes, so the new table keeps the whole key.
 		diff := driver.RequireDiff(`CREATE TABLE "_memberships_temp" (
 	"team" TEXT NOT NULL,
 	"member" TEXT NOT NULL,
@@ -1011,8 +990,7 @@ ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
 			INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');
 		`)
 
-		// The primary key of the target holds another column, so the driver recreates the
-		// table.
+		// The primary key of the target holds another column.
 		diff := driver.RequireDiff(`CREATE TABLE "_memberships_temp" (
 	"team" TEXT NOT NULL,
 	"member" TEXT NOT NULL,
@@ -1052,8 +1030,7 @@ ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
 			INSERT INTO users (email, age) VALUES ('alice@example.com', '30'), ('bob@example.com', '25');
 		`)
 
-		// The PRIMARY KEY builds an index of the origin "pk". The recreation of the table
-		// must print the explicit index only, and no index of the PRIMARY KEY.
+		// The recreation prints the explicit index only, and no index of the PRIMARY KEY.
 		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
 	"email" TEXT PRIMARY KEY,
 	"age" INTEGER
@@ -1167,7 +1144,6 @@ DROP VIEW "old_view";`
 			INSERT INTO posts (id, user_id, title) VALUES (1, 1, 'First Post'), (2, 1, 'Second Post');
 		`)
 
-		// Since adding a FK requires table recreation
 		expected := `CREATE TABLE "_posts_temp" (
 	"id" INTEGER PRIMARY KEY,
 	"user_id" INTEGER,
@@ -1180,7 +1156,6 @@ ALTER TABLE "_posts_temp" RENAME TO "posts";`
 
 		diff := driver.RequireDiff(expected)
 
-		// Check that data is preserved after applying the diff
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("posts", "ORDER BY id")
 
@@ -1281,8 +1256,7 @@ UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
 		driver.ExecOnTarget(`CREATE TABLE items (identifier INTEGER PRIMARY KEY, label TEXT);`)
 		driver.ExecOnTarget(`INSERT INTO items (identifier, label) VALUES (1, 'old');`)
 
-		// The target holds no column with the name of the key, so the driver reads no key
-		// of a target row.
+		// The target holds no column with the name of the key.
 		expected := `ALTER TABLE "items" RENAME COLUMN "identifier" TO "code";
 -- The table "items" holds another primary key in the target, so dbdiff compares no row of it.`
 
@@ -1327,8 +1301,7 @@ UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
 
 		driver := &SQLiteDriver{}
 
-		// failingDriver yields one row, then fails on the second call to Next. The
-		// read method must return that failure through rows.Err.
+		// The read method must return the failure of Next through rows.Err.
 		_, err = driver.GetTableColumns(t.Context(), db, "users")
 		require.ErrorIs(t, err, errRowIteration)
 	})

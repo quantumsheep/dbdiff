@@ -9,8 +9,6 @@ type PostgresFunction struct {
 	Def        string
 }
 
-// Signature identifies the function. PostgreSQL accepts several functions with one name
-// and different arguments.
 func (f *PostgresFunction) Signature() string {
 	return fmt.Sprintf("%s(%s)", f.Name, f.Arguments)
 }

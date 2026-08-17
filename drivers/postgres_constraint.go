@@ -4,7 +4,7 @@ import "fmt"
 
 type PostgresConstraint struct {
 	Name string
-	Type string // p (primary), u (unique), c (check), f (foreign)
+	Type string
 	Def  string
 }
 

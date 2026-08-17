@@ -13,8 +13,8 @@ type PostgresColumn struct {
 }
 
 func (c *PostgresColumn) Copy() *PostgresColumn {
-	new := *c
-	return &new
+	columnCopy := *c
+	return &columnCopy
 }
 
 func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {

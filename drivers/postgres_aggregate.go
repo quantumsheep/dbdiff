@@ -15,8 +15,6 @@ type PostgresAggregate struct {
 	InitialCondition   sql.NullString
 }
 
-// Signature identifies the aggregate. PostgreSQL accepts several aggregates with one name
-// and different arguments.
 func (a *PostgresAggregate) Signature() string {
 	return fmt.Sprintf("%s(%s)", a.Name, a.Arguments)
 }
@@ -46,8 +44,8 @@ func (a *PostgresAggregate) StringDrop() string {
 	return fmt.Sprintf("DROP AGGREGATE %s(%s);", quoteIdentifier(a.Name), a.Arguments)
 }
 
-// Diff returns the statements that make other equal to a. PostgreSQL changes the name and
-// the owner of an aggregate only, so every other change needs a recreation.
+// PostgreSQL changes the name and the owner of an aggregate only, so every other change
+// needs a recreation.
 func (a *PostgresAggregate) Diff(other *PostgresAggregate) string {
 	if a.Equal(other) {
 		return ""

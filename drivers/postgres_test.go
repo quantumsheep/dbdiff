@@ -24,14 +24,13 @@ type TestingPostgresDriver struct {
 func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	tb.Helper()
 
-	dsn := postgresTestConnectionString
-	conn, err := sql.Open("pgx", dsn)
+	connectionString := postgresTestConnectionString
+	conn, err := sql.Open("pgx", connectionString)
 	require.NoError(tb, err)
 
 	err = conn.PingContext(tb.Context())
 	require.NoError(tb, err)
 
-	// Create unique schemas
 	id := time.Now().UnixNano()
 	sourceSchema := fmt.Sprintf("source_%d", id)
 	targetSchema := fmt.Sprintf("target_%d", id)
@@ -41,8 +40,7 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", targetSchema))
 	require.NoError(tb, err)
 
-	// The connection stays open for this cleanup. A closed connection drops no schema,
-	// and the test database keeps every schema of every run.
+	// The connection stays open for this cleanup. A closed connection drops no schema.
 	tb.Cleanup(func() {
 		_, err := conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", sourceSchema))
 		require.NoError(tb, err)
@@ -53,12 +51,12 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 		require.NoError(tb, conn.Close())
 	})
 
-	sourceDSN := fmt.Sprintf("%s&search_path=%s", dsn, sourceSchema)
-	targetDSN := fmt.Sprintf("%s&search_path=%s", dsn, targetSchema)
+	sourceConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, sourceSchema)
+	targetConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, targetSchema)
 
 	driver, err := NewPostgresDriver(&PostgresDriverConfig{
-		SourceConnectionString: sourceDSN,
-		TargetConnectionString: targetDSN,
+		SourceConnectionString: sourceConnectionString,
+		TargetConnectionString: targetConnectionString,
 	})
 	require.NoError(tb, err)
 
@@ -75,9 +73,8 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	}
 }
 
-// NewTestPostgresDriverWithTwoDatabases builds a harness with one source database and one
-// target database. PostgreSQL holds one extension one time per database, so a test of an
-// extension needs this harness instead of NewTestPostgresDriver.
+// PostgreSQL holds one extension one time per database, so a test of an extension needs
+// this harness instead of NewTestPostgresDriver.
 func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver {
 	tb.Helper()
 
@@ -89,8 +86,7 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 	require.NoError(tb, err)
 
 	// A CREATE DATABASE statement needs a connection outside a transaction, so the admin
-	// connection runs it against the dbdiff database, not against the source database or
-	// the target database.
+	// connection runs it against the dbdiff database.
 	id := time.Now().UnixNano()
 	sourceDatabase := fmt.Sprintf("dbdiff_source_%d", id)
 	targetDatabase := fmt.Sprintf("dbdiff_target_%d", id)
@@ -100,8 +96,7 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 	_, err = adminConn.ExecContext(tb.Context(), fmt.Sprintf("CREATE DATABASE %s", targetDatabase))
 	require.NoError(tb, err)
 
-	// The admin connection stays open for this cleanup. A closed connection drops no
-	// database, and the test server keeps every database of every run.
+	// The admin connection stays open for this cleanup.
 	tb.Cleanup(func() {
 		_, err := adminConn.ExecContext(context.Background(), fmt.Sprintf("DROP DATABASE %s", sourceDatabase))
 		require.NoError(tb, err)
@@ -112,18 +107,17 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 		require.NoError(tb, adminConn.Close())
 	})
 
-	sourceDSN := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", sourceDatabase)
-	targetDSN := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", targetDatabase)
+	sourceConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", sourceDatabase)
+	targetConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", targetDatabase)
 
 	driver, err := NewPostgresDriver(&PostgresDriverConfig{
-		SourceConnectionString: sourceDSN,
-		TargetConnectionString: targetDSN,
+		SourceConnectionString: sourceConnectionString,
+		TargetConnectionString: targetConnectionString,
 	})
 	require.NoError(tb, err)
 
-	// Go calls a cleanup function in the reverse order of its registration, so this
-	// cleanup closes every connection of the driver before the database drop above runs.
-	// A database drop fails while a connection still uses the database.
+	// Go calls a cleanup in the reverse order of its registration, so this one closes every
+	// connection before the database drop above. A drop fails while a connection uses it.
 	tb.Cleanup(func() {
 		require.NoError(tb, driver.Close())
 	})
@@ -201,7 +195,6 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		// Let's use simple types first.
 		driver.ExecOnSource(`CREATE TABLE simple (id INT, name TEXT);`)
 
 		expected := `CREATE TABLE "simple" (
@@ -321,8 +314,8 @@ CREATE TABLE "users" (
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, tags INT[]);`)
 		driver.ExecOnTarget(`INSERT INTO users (id, tags) VALUES (1, ARRAY[5, 6]);`)
 
-		// information_schema.columns gives the text ARRAY for both types. format_type
-		// gives the exact type name, so the statement below is valid SQL.
+		// information_schema.columns gives the text ARRAY for both types. format_type gives
+		// the exact type name, so the statement below is valid SQL.
 		diff := driver.RequireDiff(`ALTER TABLE "users" ALTER COLUMN "tags" TYPE bigint[] USING "tags"::bigint[];`)
 
 		driver.ExecOnTarget(diff)
@@ -393,8 +386,7 @@ CREATE TABLE "users" (
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, code INT, CONSTRAINT pk_users PRIMARY KEY (code));`)
 
-		// PostgreSQL drops the constraint with the column, so the DROP CONSTRAINT
-		// statement comes first.
+		// PostgreSQL drops the constraint with the column, so its drop comes first.
 		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "pk_users";
 ALTER TABLE "users" DROP COLUMN "code";`)
 
@@ -473,9 +465,8 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT); CREATE INDEX idx_email ON users(email);`)
 
-		// The DROP INDEX statement must print before the DROP COLUMN statement. A DROP
-		// COLUMN statement drops every index of that column too, so a DROP INDEX statement
-		// that prints after it fails, because the index is already gone.
+		// A DROP COLUMN statement drops every index of that column, so the DROP INDEX
+		// statement must print first.
 		diff := driver.RequireDiff(`DROP INDEX "idx_email";
 ALTER TABLE "users" DROP COLUMN "email";`)
 
@@ -501,9 +492,7 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT); CREATE UNIQUE INDEX idx_name ON users(name);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email); CREATE INDEX idx_name ON users(name);`)
 
-		// The DROP INDEX statement and the CREATE INDEX statement of the modified index
-		// must stay adjacent. Neither the unrelated index drop nor the column drop can
-		// print between them.
+		// The two statements of the modified index must stay adjacent.
 		diff := driver.RequireDiff(`DROP INDEX "idx_name";
 CREATE UNIQUE INDEX idx_name ON users USING btree (name);
 DROP INDEX "idx_email";
@@ -604,8 +593,7 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE SEQUENCE counter MINVALUE 100 START WITH 100;`)
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		// The current value of the target sequence stays below the new minimum. PostgreSQL
-		// refuses the new MINVALUE without a RESTART clause.
+		// The current value stays below the new minimum, so MINVALUE needs a RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter');`)
 
 		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" MINVALUE 100 START WITH 100 RESTART WITH 100;`)
@@ -619,8 +607,7 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE SEQUENCE counter MAXVALUE 5;`)
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		// The current value of the target sequence climbs above the new maximum. PostgreSQL
-		// refuses the new MAXVALUE without a RESTART clause.
+		// The current value climbs above the new maximum, so MAXVALUE needs a RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter') FROM generate_series(1, 10);`)
 
 		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" MAXVALUE 5 RESTART WITH 1;`)
@@ -634,8 +621,7 @@ ALTER TABLE "users" DROP COLUMN "email";`)
 		driver.ExecOnSource(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		// The current value of the target sequence stays inside the new range. The diff
-		// holds no RESTART clause.
+		// The current value stays inside the new range, so the diff holds no RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter');`)
 
 		diff := driver.RequireDiff(`ALTER SEQUENCE "counter" INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
@@ -956,8 +942,7 @@ AS $function$ BEGIN RETURN a + 3; END; $function$;`)
 		driver.ExecOnSource(`CREATE FUNCTION calculate(a integer) RETURNS text AS $$ BEGIN RETURN a::text; END; $$ LANGUAGE plpgsql;`)
 		driver.ExecOnTarget(`CREATE FUNCTION calculate(a integer) RETURNS integer AS $$ BEGIN RETURN a; END; $$ LANGUAGE plpgsql;`)
 
-		// PostgreSQL refuses CREATE OR REPLACE FUNCTION when the return type changes, so
-		// the diff drops the target function first.
+		// PostgreSQL refuses CREATE OR REPLACE FUNCTION when the return type changes.
 		diff := driver.RequireDiff(`DROP FUNCTION "calculate"(a integer);
 CREATE OR REPLACE FUNCTION calculate(a integer)
  RETURNS text
@@ -1055,8 +1040,7 @@ ALTER TABLE "users" DROP COLUMN "label";`)
 			CREATE VIEW user_labels AS SELECT label FROM users;
 		`)
 
-		// The definition of the view stays equal, but the view reads a column that
-		// changes its type. The view goes away before the change, and comes back after it.
+		// The definition stays equal, but the view reads a column that changes its type.
 		diff := driver.RequireDiff(`DROP VIEW "user_labels";
 ALTER TABLE "users" ALTER COLUMN "label" TYPE character varying;
 CREATE VIEW "user_labels" AS  SELECT label
@@ -1075,8 +1059,7 @@ CREATE VIEW "user_labels" AS  SELECT label
 		`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
 
-		// view_a reads view_b, so the diff must create view_b first, even if the name of
-		// view_a sorts before the name of view_b.
+		// view_a reads view_b, so the diff creates view_b first, against the name order.
 		diff := driver.RequireDiff(`CREATE VIEW "view_b" AS  SELECT id
    FROM users;
 CREATE VIEW "view_a" AS  SELECT id
@@ -1094,8 +1077,7 @@ CREATE VIEW "view_a" AS  SELECT id
 			CREATE VIEW view_a AS SELECT id FROM view_b;
 		`)
 
-		// view_a reads view_b, so the diff must drop view_a first. PostgreSQL refuses to
-		// drop view_b while view_a still reads it.
+		// PostgreSQL refuses to drop view_b while view_a still reads it.
 		diff := driver.RequireDiff(`DROP VIEW "view_a";
 DROP VIEW "view_b";
 DROP TABLE "users";`)
@@ -1194,8 +1176,7 @@ UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
 		// A new NOT NULL column needs an empty table, so the target holds no row here.
 		driver.ExecOnTarget(`CREATE TABLE items (label TEXT);`)
 
-		// The target holds no column with the name of the key, so the driver reads no key
-		// of a target row.
+		// The target holds no column with the name of the key.
 		expected := `ALTER TABLE "items" ADD COLUMN "code" integer NOT NULL;
 ALTER TABLE "items" ADD CONSTRAINT "items_pkey" PRIMARY KEY (code);
 -- The table "items" holds another primary key in the target, so dbdiff compares no row of it.`
@@ -1248,8 +1229,7 @@ ALTER TABLE "items" ADD CONSTRAINT "items_pkey" PRIMARY KEY (code);
 
 		harness.ExecOnSource(`CREATE TABLE users (id INT NOT NULL);`)
 
-		// The two connection strings hold no search path. The schema of the config
-		// selects the schema that each query reads.
+		// The two connection strings hold no search path, so the config selects the schema.
 		driver, err := NewPostgresDriver(&PostgresDriverConfig{
 			SourceConnectionString: postgresTestConnectionString,
 			TargetConnectionString: postgresTestConnectionString,

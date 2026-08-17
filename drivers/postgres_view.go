@@ -1,8 +1,7 @@
 package drivers
 
-// A PostgresViewColumn is one column of a table that a view reads. The diff compares these
-// columns, because a type change of such a column keeps the definition text of the view
-// equal.
+// A PostgresViewColumn is one column that a view reads. The diff compares these columns,
+// because a type change of such a column keeps the definition text of the view equal.
 type PostgresViewColumn struct {
 	Table  string
 	Column string

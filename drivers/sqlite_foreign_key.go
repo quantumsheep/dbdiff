@@ -17,17 +17,17 @@ func (fk *SQLiteForeignKey) String() string {
 	fromColumns := strings.Join(quoteIdentifiers(fk.From), ", ")
 	toColumns := strings.Join(quoteIdentifiers(fk.To), ", ")
 
-	s := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)", fromColumns, quoteIdentifier(fk.Table), toColumns)
+	statement := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)", fromColumns, quoteIdentifier(fk.Table), toColumns)
 
 	if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "" {
-		s += fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate)
+		statement += fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate)
 	}
 
 	if fk.OnDelete != "NO ACTION" && fk.OnDelete != "" {
-		s += fmt.Sprintf(" ON DELETE %s", fk.OnDelete)
+		statement += fmt.Sprintf(" ON DELETE %s", fk.OnDelete)
 	}
 
-	return s
+	return statement
 }
 
 func (fk *SQLiteForeignKey) Equal(other *SQLiteForeignKey) bool {

@@ -11,14 +11,13 @@ import (
 )
 
 func main() {
-	cmd := &cli.Command{
+	command := &cli.Command{
 		Name:        "dbdiff",
 		Usage:       "Compare database schemas and generate migration scripts",
 		Description: "Compare database schemas and generate migration scripts",
 		Action:      action,
 		UsageText:   "dbdiff [global options] <url1> <url2>",
-		// main prints the error. Without this handler the command prints it too.
-		OnUsageError: func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+		OnUsageError: func(ctx context.Context, command *cli.Command, err error, isSubcommand bool) error {
 			return err
 		},
 		Flags: []cli.Flag{
@@ -53,20 +52,20 @@ func main() {
 		},
 	}
 
-	err := cmd.Run(context.Background(), os.Args)
+	err := command.Run(context.Background(), os.Args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dbdiff: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func action(ctx context.Context, cmd *cli.Command) error {
-	sourceDatabaseURL := cmd.StringArg("source")
+func action(ctx context.Context, command *cli.Command) error {
+	sourceDatabaseURL := command.StringArg("source")
 	if sourceDatabaseURL == "" {
 		return fmt.Errorf("source database URL is required")
 	}
 
-	targetDatabaseURL := cmd.StringArg("target")
+	targetDatabaseURL := command.StringArg("target")
 	if targetDatabaseURL == "" {
 		return fmt.Errorf("target database URL is required")
 	}
@@ -74,14 +73,14 @@ func action(ctx context.Context, cmd *cli.Command) error {
 	var driver drivers.Driver
 	var err error
 
-	driverFlag := cmd.String("driver")
+	driverFlag := command.String("driver")
 	if driverFlag == "" {
 		driverFlag = "sqlite3"
 	}
 
-	schemaFlag := cmd.String("schema")
+	schemaFlag := command.String("schema")
 
-	compareData := cmd.Bool("data")
+	compareData := command.Bool("data")
 
 	switch driverFlag {
 	case "sqlite3":
@@ -109,7 +108,7 @@ func action(ctx context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("failed to create postgres driver: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported driver: %s", cmd.String("driver"))
+		return fmt.Errorf("unsupported driver: %s", command.String("driver"))
 	}
 
 	defer driver.Close()

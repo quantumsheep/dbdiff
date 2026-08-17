@@ -21,7 +21,6 @@ func (t *PostgresType) String() string {
 	return fmt.Sprintf("CREATE TYPE %s AS ENUM (%s);", quoteIdentifier(t.Name), strings.Join(quotedValues, ", "))
 }
 
-// StartsWith reports that the values of other are the first values of t.
 func (t *PostgresType) StartsWith(other *PostgresType) bool {
 	if len(other.Values) > len(t.Values) {
 		return false
@@ -37,8 +36,7 @@ func (t *PostgresType) Diff(other *PostgresType) string {
 
 	var diff strings.Builder
 
-	// PostgreSQL adds a value to an enum, but it removes none and it moves none. Every
-	// other change needs a recreation of the type.
+	// PostgreSQL adds a value to an enum, but it removes none and it moves none.
 	if t.StartsWith(other) {
 		for _, value := range t.Values[len(other.Values):] {
 			fmt.Fprintf(&diff, "ALTER TYPE %s ADD VALUE %s;\n", quoteIdentifier(t.Name), quoteLiteral(value))

@@ -10,12 +10,9 @@ type SQLiteIndex struct {
 	Table string
 	Name  string
 
-	// Keys holds the SQL text of each key part of the index. A key that a column builds
-	// holds the quoted name of the column. A key that an expression builds holds the text
-	// of the expression.
-	Keys []string
-
-	// Where holds the condition of a partial index. It is empty for a full index.
+	// Keys holds the SQL text of each key part. A key that a column builds holds the quoted
+	// name of the column. A key that an expression builds holds the text of the expression.
+	Keys  []string
 	Where string
 
 	Unique bool
@@ -61,8 +58,6 @@ func (i *SQLiteIndex) String() string {
 
 const noQuote = rune(0)
 
-// closingQuote returns the character that closes a quoted part of a statement. It returns
-// noQuote for a character that opens no quoted part.
 func closingQuote(character rune) rune {
 	switch character {
 	case '\'', '"', '`':
@@ -75,8 +70,7 @@ func closingQuote(character rune) rune {
 }
 
 // parseIndexDefinition reads the key parts and the condition of a CREATE INDEX statement.
-// PRAGMA index_info gives no name for a key that an expression builds, and it gives no
-// condition. The text of the definition gives both.
+// PRAGMA index_info gives no name for an expression key, and it gives no condition.
 func parseIndexDefinition(definition string) ([]string, string) {
 	start := indexOfKeyList(definition)
 	if start < 0 {
@@ -143,8 +137,6 @@ func parseIndexDefinition(definition string) ([]string, string) {
 	return nil, ""
 }
 
-// indexOfKeyList returns the position of the parenthesis that opens the key list. It
-// returns -1 when the statement holds no key list.
 func indexOfKeyList(definition string) int {
 	quote := noQuote
 
@@ -171,13 +163,12 @@ func indexOfKeyList(definition string) int {
 	return -1
 }
 
-// parseIndexCondition returns the condition of a partial index. The text starts after the
+// parseIndexCondition reads the condition of a partial index. The text starts after the
 // parenthesis that closes the key list.
 func parseIndexCondition(text string) string {
 	const whereKeyword = "WHERE"
 
 	condition := strings.TrimSpace(text)
-
 	if len(condition) <= len(whereKeyword) || !strings.EqualFold(condition[:len(whereKeyword)], whereKeyword) {
 		return ""
 	}

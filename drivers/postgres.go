@@ -17,10 +17,7 @@ type PostgresDriverConfig struct {
 	TargetConnectionString string
 	SourceSchema           string
 	TargetSchema           string
-
-	// CompareData turns the comparison of the rows on. The default value is false, so the
-	// diff holds the schema only.
-	CompareData bool
+	CompareData            bool
 }
 
 type PostgresDriver struct {
@@ -53,9 +50,6 @@ func NewPostgresDriver(config *PostgresDriverConfig) (*PostgresDriver, error) {
 	return driver, nil
 }
 
-// Every query reads the first schema of the search path. An empty schema name keeps the
-// search path of the connection string. A schema name replaces that search path on each
-// connection of the pool.
 func openPostgresConnection(connectionString string, schema string) (*sql.DB, error) {
 	if schema == "" {
 		return sql.Open("pgx", connectionString)
@@ -72,7 +66,7 @@ func openPostgresConnection(connectionString string, schema string) (*sql.DB, er
 }
 
 // PostgreSQL accepts a search path that names no schema, and each query then reads an
-// empty schema. This check gives an error instead.
+// empty schema. Without this check the diff drops every object of the target.
 func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema string, role string) error {
 	if schema == "" {
 		return nil
@@ -121,9 +115,8 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// A table can use an extension, a type, a domain, a composite type, a sequence, or a
-	// function, so these come first. An aggregate and an operator use a function, so these
-	// come after the functions.
+	// A table uses an extension, a type, a domain, a composite type, a sequence, or a
+	// function. An aggregate and an operator use a function. Keep this order.
 	sections := []func(ctx context.Context) (*SectionDiff, error){
 		d.DiffExtensions,
 		d.DiffTypes,
@@ -150,9 +143,9 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 
 	var diff strings.Builder
 
-	// An early removal takes the reverse order too, and it runs before every addition. A
-	// view reads a column of a table, and PostgreSQL refuses a change of that column while
-	// the view exists.
+	// PostgreSQL refuses a DROP statement while another object uses the object, so every
+	// removal takes the reverse section order. An early removal runs before every addition,
+	// because a view blocks a change of the column that it reads.
 	for _, sectionDiff := range slices.Backward(sectionDiffs) {
 		if sectionDiff.EarlyRemovals != "" {
 			fmt.Fprintln(&diff, sectionDiff.EarlyRemovals)
@@ -165,16 +158,12 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 		}
 	}
 
-	// A removal takes the reverse order. PostgreSQL refuses a DROP statement while
-	// another object uses the object.
 	for _, sectionDiff := range slices.Backward(sectionDiffs) {
 		if sectionDiff.Removals != "" {
 			fmt.Fprintln(&diff, sectionDiff.Removals)
 		}
 	}
 
-	// A new row needs its table and its column, so the data section comes after the whole
-	// schema section.
 	if d.CompareData {
 		dataDiff, err := d.DiffData(ctx)
 		if err != nil {
@@ -204,10 +193,9 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 	}
 
 	for _, sourceExtension := range sourceExtensions {
-		targetExtension, found := lo.Find(targetExtensions, func(e *PostgresExtension) bool {
-			return e.Name == sourceExtension.Name
+		targetExtension, found := lo.Find(targetExtensions, func(extension *PostgresExtension) bool {
+			return extension.Name == sourceExtension.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceExtension.String())
 			continue
@@ -219,10 +207,9 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 	}
 
 	for _, targetExtension := range targetExtensions {
-		_, found := lo.Find(sourceExtensions, func(e *PostgresExtension) bool {
-			return e.Name == targetExtension.Name
+		_, found := lo.Find(sourceExtensions, func(extension *PostgresExtension) bool {
+			return extension.Name == targetExtension.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "%s\n", targetExtension.StringDrop())
 		}
@@ -246,10 +233,9 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
 	}
 
 	for _, sourceType := range sourceTypes {
-		targetType, found := lo.Find(targetTypes, func(t *PostgresType) bool {
-			return t.Name == sourceType.Name
+		targetType, found := lo.Find(targetTypes, func(enumType *PostgresType) bool {
+			return enumType.Name == sourceType.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceType.String())
 			continue
@@ -262,10 +248,9 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
 	}
 
 	for _, targetType := range targetTypes {
-		_, found := lo.Find(sourceTypes, func(t *PostgresType) bool {
-			return t.Name == targetType.Name
+		_, found := lo.Find(sourceTypes, func(enumType *PostgresType) bool {
+			return enumType.Name == targetType.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "DROP TYPE %s;\n", quoteIdentifier(targetType.Name))
 		}
@@ -292,7 +277,6 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 		targetDomain, found := lo.Find(targetDomains, func(domain *PostgresDomain) bool {
 			return domain.Name == sourceDomain.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceDomain.String())
 			continue
@@ -308,7 +292,6 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 		_, found := lo.Find(sourceDomains, func(domain *PostgresDomain) bool {
 			return domain.Name == targetDomain.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "%s\n", targetDomain.StringDrop())
 		}
@@ -332,10 +315,9 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 	}
 
 	for _, sourceCompositeType := range sourceCompositeTypes {
-		targetCompositeType, found := lo.Find(targetCompositeTypes, func(t *PostgresCompositeType) bool {
-			return t.Name == sourceCompositeType.Name
+		targetCompositeType, found := lo.Find(targetCompositeTypes, func(compositeType *PostgresCompositeType) bool {
+			return compositeType.Name == sourceCompositeType.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceCompositeType.String())
 			continue
@@ -348,10 +330,9 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 	}
 
 	for _, targetCompositeType := range targetCompositeTypes {
-		_, found := lo.Find(sourceCompositeTypes, func(t *PostgresCompositeType) bool {
-			return t.Name == targetCompositeType.Name
+		_, found := lo.Find(sourceCompositeTypes, func(compositeType *PostgresCompositeType) bool {
+			return compositeType.Name == targetCompositeType.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "%s\n", targetCompositeType.StringDrop())
 		}
@@ -375,10 +356,9 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 	}
 
 	for _, sourceAggregate := range sourceAggregates {
-		targetAggregate, found := lo.Find(targetAggregates, func(a *PostgresAggregate) bool {
-			return a.Signature() == sourceAggregate.Signature()
+		targetAggregate, found := lo.Find(targetAggregates, func(aggregate *PostgresAggregate) bool {
+			return aggregate.Signature() == sourceAggregate.Signature()
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceAggregate.String())
 			continue
@@ -391,10 +371,9 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 	}
 
 	for _, targetAggregate := range targetAggregates {
-		_, found := lo.Find(sourceAggregates, func(a *PostgresAggregate) bool {
-			return a.Signature() == targetAggregate.Signature()
+		_, found := lo.Find(sourceAggregates, func(aggregate *PostgresAggregate) bool {
+			return aggregate.Signature() == targetAggregate.Signature()
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "%s\n", targetAggregate.StringDrop())
 		}
@@ -418,10 +397,9 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 	}
 
 	for _, sourceOperator := range sourceOperators {
-		targetOperator, found := lo.Find(targetOperators, func(o *PostgresOperator) bool {
-			return o.Signature() == sourceOperator.Signature()
+		targetOperator, found := lo.Find(targetOperators, func(operator *PostgresOperator) bool {
+			return operator.Signature() == sourceOperator.Signature()
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceOperator.String())
 			continue
@@ -434,10 +412,9 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 	}
 
 	for _, targetOperator := range targetOperators {
-		_, found := lo.Find(sourceOperators, func(o *PostgresOperator) bool {
-			return o.Signature() == targetOperator.Signature()
+		_, found := lo.Find(sourceOperators, func(operator *PostgresOperator) bool {
+			return operator.Signature() == targetOperator.Signature()
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "%s\n", targetOperator.StringDrop())
 		}
@@ -461,10 +438,9 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 	}
 
 	for _, sourceSequence := range sourceSequences {
-		targetSequence, found := lo.Find(targetSequences, func(s *PostgresSequence) bool {
-			return s.Name == sourceSequence.Name
+		targetSequence, found := lo.Find(targetSequences, func(sequence *PostgresSequence) bool {
+			return sequence.Name == sourceSequence.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceSequence.String())
 			continue
@@ -477,10 +453,9 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 	}
 
 	for _, targetSequence := range targetSequences {
-		_, found := lo.Find(sourceSequences, func(s *PostgresSequence) bool {
-			return s.Name == targetSequence.Name
+		_, found := lo.Find(sourceSequences, func(sequence *PostgresSequence) bool {
+			return sequence.Name == targetSequence.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "DROP SEQUENCE %s;\n", quoteIdentifier(targetSequence.Name))
 		}
@@ -503,15 +478,13 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 		return nil, err
 	}
 
-	// The definition of PostgreSQL starts with CREATE OR REPLACE FUNCTION, so a new
-	// function and a modified function take the same statement. PostgreSQL refuses that
-	// statement when the return type changes, so the diff drops the target function
-	// first in that case.
+	// The definition starts with CREATE OR REPLACE FUNCTION, so a new function and a
+	// modified function take the same statement. PostgreSQL refuses that statement when the
+	// return type changes.
 	for _, sourceFunction := range sourceFunctions {
-		targetFunction, found := lo.Find(targetFunctions, func(f *PostgresFunction) bool {
-			return f.Signature() == sourceFunction.Signature()
+		targetFunction, found := lo.Find(targetFunctions, func(function *PostgresFunction) bool {
+			return function.Signature() == sourceFunction.Signature()
 		})
-
 		if found && sourceFunction.ReturnType != targetFunction.ReturnType {
 			fmt.Fprintf(&additions, "%s\n", targetFunction.StringDrop())
 		}
@@ -522,10 +495,9 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	}
 
 	for _, targetFunction := range targetFunctions {
-		_, found := lo.Find(sourceFunctions, func(f *PostgresFunction) bool {
-			return f.Signature() == targetFunction.Signature()
+		_, found := lo.Find(sourceFunctions, func(function *PostgresFunction) bool {
+			return function.Signature() == targetFunction.Signature()
 		})
-
 		if !found {
 			fmt.Fprintf(&removals, "%s\n", targetFunction.StringDrop())
 		}
@@ -548,19 +520,14 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		return nil, err
 	}
 
-	// The target database holds the rows that the diff casts, so it answers the question
-	// of the cast.
 	hasAutomaticCast := func(oldType string, newType string) (bool, error) {
 		return d.HasAutomaticCast(ctx, d.TargetDatabaseConnection, oldType, newType)
 	}
 
-	// Added or modified tables
 	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(t *PostgresTable) bool {
-			return t.Name == sourceTable.Name
+		targetTable, found := lo.Find(targetTables, func(table *PostgresTable) bool {
+			return table.Name == sourceTable.Name
 		})
-
-		// Table not found in target database
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceTable.String())
 			continue
@@ -576,13 +543,10 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		}
 	}
 
-	// Removed tables
 	for _, targetTable := range targetTables {
-		_, found := lo.Find(sourceTables, func(t *PostgresTable) bool {
-			return t.Name == targetTable.Name
+		_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
+			return table.Name == targetTable.Name
 		})
-
-		// Table not found in source database
 		if !found {
 			fmt.Fprintf(&removals, "DROP TABLE %s;\n", quoteIdentifier(targetTable.Name))
 		}
@@ -591,10 +555,8 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	return newSectionDiff(&additions, &removals), nil
 }
 
-// DiffViews writes every DROP VIEW statement into the early removals. A view reads the
-// columns of a table, and PostgreSQL refuses a change of such a column while the view
-// exists. The table section prints the change into its additions, so the view must go away
-// before every addition.
+// DiffViews writes every DROP VIEW statement into the early removals. PostgreSQL refuses a
+// change of a column while a view that reads it exists.
 func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 	var earlyRemovals strings.Builder
 	var additions strings.Builder
@@ -609,35 +571,30 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		return nil, err
 	}
 
-	// Added or modified views. sourceViews holds a view after every view that it reads, so
-	// a forward walk writes a CREATE VIEW statement after the statement of every view that
-	// it depends on.
+	// sourceViews holds a view after every view that it reads, so a forward walk creates
+	// each view after the views that it depends on.
 	for _, sourceView := range sourceViews {
-		targetView, found := lo.Find(targetViews, func(v *PostgresView) bool {
-			return v.Name == sourceView.Name
+		targetView, found := lo.Find(targetViews, func(view *PostgresView) bool {
+			return view.Name == sourceView.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&additions, "%s\n", sourceView.String())
 			continue
 		}
 
-		// A column that the view reads can change its type. The definition text stays
-		// equal in that case, so the columns give the second condition.
+		// A type change of a column that the view reads keeps the definition text equal,
+		// so the columns give the second condition.
 		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
 			fmt.Fprintf(&additions, "%s\n", sourceView.String())
 		}
 	}
 
-	// Removed or modified views. targetViews holds a view after every view that it reads,
-	// so a backward walk writes a DROP VIEW statement of a dependent view before the
-	// statement of the view that it reads. PostgreSQL refuses a DROP VIEW statement while
-	// another view still reads the view.
+	// PostgreSQL refuses a DROP VIEW statement while another view still reads the view, so
+	// a backward walk drops each dependent view first.
 	for _, targetView := range slices.Backward(targetViews) {
-		sourceView, found := lo.Find(sourceViews, func(v *PostgresView) bool {
-			return v.Name == targetView.Name
+		sourceView, found := lo.Find(sourceViews, func(view *PostgresView) bool {
+			return view.Name == targetView.Name
 		})
-
 		if !found {
 			fmt.Fprintf(&earlyRemovals, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
 			continue
@@ -735,7 +692,7 @@ func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresT
 }
 
 func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*PostgresDomain, error) {
-	// PostgreSQL 17 keeps the NOT NULL flag of a domain in pg_constraint too. The query
+	// PostgreSQL 17 keeps the NOT NULL flag of a domain in pg_constraint too. This query
 	// reads the check constraints only, because typnotnull holds that flag already.
 	rows, err := db.QueryContext(ctx, `
 		SELECT
@@ -948,11 +905,8 @@ func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*Postg
 }
 
 func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*PostgresSequence, error) {
-	// A serial column and an identity column own their sequence. The table creates it,
-	// so the diff of the sequences leaves it out.
-	//
-	// s.last_value is NULL until the first call of nextval. The diff needs that value to
-	// decide if a RESTART clause is necessary.
+	// A serial column and an identity column own their sequence, and the table creates it.
+	// s.last_value is NULL until the first call of nextval.
 	rows, err := db.QueryContext(ctx, `
 		SELECT s.sequencename, s.data_type::text, s.start_value, s.min_value, s.max_value, s.increment_by, s.cycle, s.last_value
 		FROM pg_sequences s
@@ -1002,8 +956,8 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 }
 
 func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*PostgresFunction, error) {
-	// The definition holds the name of the schema. The diff compares two schemas, so the
-	// query removes that prefix from the header.
+	// The regexp_replace call removes the schema prefix of the header. The source schema
+	// and the target schema hold a different name, and the diff compares the two texts.
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			p.proname,
@@ -1093,7 +1047,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 }
 
 // sortViewsByDependency orders the views so that a view comes after every view that it
-// reads. Two views with no dependency between them keep the order that the query gives.
+// reads. Two independent views keep the order that the query gives.
 func sortViewsByDependency(views []*PostgresView) []*PostgresView {
 	viewByName := make(map[string]*PostgresView, len(views))
 
@@ -1131,8 +1085,7 @@ func sortViewsByDependency(views []*PostgresView) []*PostgresView {
 }
 
 // GetViewColumns returns the columns of the tables and of the views that one view reads.
-// The rule of the view holds these dependencies in pg_depend. The type of each column
-// comes with them, because a type change makes the view invalid.
+// The type of each column comes with it, because a type change makes the view invalid.
 func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresViewColumn, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT DISTINCT
@@ -1223,11 +1176,10 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*PostgresTable, error) {
 	table := &PostgresTable{Name: tableName}
 
-	// Get columns. information_schema.columns gives the text ARRAY for an array column,
-	// and the text USER-DEFINED for an enum column or a composite column. format_type
-	// gives the exact type name instead, for example integer[] or the name of the enum
-	// type. format_type adds a schema prefix to a type of another schema, so the query
-	// removes the prefix of a type that the current schema holds.
+	// information_schema.columns gives the text ARRAY for an array column, and the text
+	// USER-DEFINED for an enum column or a composite column. format_type gives the exact
+	// type name, for example integer[]. It also adds a prefix to a type of another schema,
+	// so the query removes the prefix of the current schema.
 	columnRows, err := db.QueryContext(ctx, `
 			SELECT
 				a.attname,
@@ -1252,20 +1204,20 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	defer columnRows.Close()
 
 	for columnRows.Next() {
-		var colName, dataType string
+		var columnName, columnType string
 		var notNull bool
-		var colDefault sql.NullString
+		var columnDefault sql.NullString
 
-		err := columnRows.Scan(&colName, &dataType, &notNull, &colDefault)
+		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault)
 		if err != nil {
 			return nil, err
 		}
 
 		column := &PostgresColumn{
-			Name:    colName,
-			Type:    dataType,
+			Name:    columnName,
+			Type:    columnType,
 			NotNull: notNull,
-			Default: colDefault,
+			Default: columnDefault,
 		}
 		table.Columns = append(table.Columns, column)
 	}
@@ -1275,7 +1227,6 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	// Get constraints
 	constraintRows, err := db.QueryContext(ctx, `
 			SELECT conname, contype, pg_get_constraintdef(oid)
 			FROM pg_constraint
@@ -1303,9 +1254,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	// The definition names the schema of the table. The diff compares two schemas, so the
-	// query removes the prefix of the current schema. The statement then builds the index
-	// in the schema of the target.
+	// The regexp_replace call removes the schema prefix of the table. Without it the
+	// statement builds the index in the source schema.
 	indexRows, err := db.QueryContext(ctx, `
 			SELECT
 				indexname,
@@ -1342,9 +1292,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	// The definition names the schema of the table. The diff compares two schemas, so the
-	// query removes the prefix of the current schema. The statement then builds the
-	// trigger on the table of the target. A table of a second schema keeps its prefix.
+	// The regexp_replace call removes the schema prefix of the table. Without it the
+	// statement builds the trigger on the table of the source schema.
 	triggerRows, err := db.QueryContext(ctx, `
 			SELECT
 				tgname,

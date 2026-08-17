@@ -13,8 +13,6 @@ type PostgresOperator struct {
 	Function      string
 }
 
-// A prefix operator holds no left argument. PostgreSQL writes NONE in the argument list of
-// that operator.
 func postgresOperatorArgument(argument sql.NullString) string {
 	if argument.Valid {
 		return argument.String
@@ -23,8 +21,6 @@ func postgresOperatorArgument(argument sql.NullString) string {
 	return "NONE"
 }
 
-// Signature identifies the operator. PostgreSQL accepts several operators with one name and
-// different arguments.
 func (o *PostgresOperator) Signature() string {
 	return fmt.Sprintf("%s(%s, %s)", o.Name, postgresOperatorArgument(o.LeftArgument), postgresOperatorArgument(o.RightArgument))
 }
@@ -33,8 +29,7 @@ func (o *PostgresOperator) Equal(other *PostgresOperator) bool {
 	return *o == *other
 }
 
-// String returns the CREATE statement. The name of an operator holds punctuation marks
-// only, so it takes no quotes.
+// The name of an operator holds punctuation marks only, so it takes no quotes.
 func (o *PostgresOperator) String() string {
 	options := []string{fmt.Sprintf("FUNCTION = %s", quoteIdentifier(o.Function))}
 
@@ -58,8 +53,8 @@ func (o *PostgresOperator) StringDrop() string {
 	)
 }
 
-// Diff returns the statements that make other equal to o. PostgreSQL changes the owner and
-// the support options of an operator only, so a new function needs a recreation.
+// PostgreSQL changes the owner and the support options of an operator only, so a new
+// function needs a recreation.
 func (o *PostgresOperator) Diff(other *PostgresOperator) string {
 	if o.Equal(other) {
 		return ""

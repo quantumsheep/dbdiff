@@ -8,11 +8,9 @@ import (
 	"github.com/samber/lo"
 )
 
-// equalColumnGroups compares two lists of column groups. The two lists hold their groups in
-// the same order, because each read method sorts them.
 func equalColumnGroups(first [][]string, second [][]string) bool {
-	return slices.EqualFunc(first, second, func(a []string, b []string) bool {
-		return slices.Equal(a, b)
+	return slices.EqualFunc(first, second, func(firstGroup []string, secondGroup []string) bool {
+		return slices.Equal(firstGroup, secondGroup)
 	})
 }
 
@@ -20,14 +18,9 @@ type SQLiteTable struct {
 	Name    string
 	Columns []*SQLiteColumn
 
-	// PrimaryKey holds the columns of a primary key of two or more columns, in the order of
-	// the key. A primary key of one column stays a column constraint, so this field is
-	// empty for such a key.
-	PrimaryKey []string
-
-	// UniqueConstraints holds the columns of each UNIQUE constraint of two or more columns.
-	// A UNIQUE constraint of one column stays a column constraint, so this field holds no
-	// entry for such a constraint.
+	// A key or a constraint of one column stays a column constraint. These two fields hold
+	// the columns of a key or of a constraint of two or more columns only.
+	PrimaryKey        []string
 	UniqueConstraints [][]string
 
 	Indexes     []*SQLiteIndex
@@ -36,8 +29,8 @@ type SQLiteTable struct {
 }
 
 func (t *SQLiteTable) Copy() *SQLiteTable {
-	new := *t
-	return &new
+	tableCopy := *t
+	return &tableCopy
 }
 
 func (t *SQLiteTable) ColumnByName(name string) (*SQLiteColumn, bool) {
@@ -88,8 +81,8 @@ func (t *SQLiteTable) StringCreateTable() string {
 		columnLines = append(columnLines, line)
 	}
 
-	for _, fk := range t.ForeignKeys {
-		line := "\t" + fk.String()
+	for _, foreignKey := range t.ForeignKeys {
+		line := "\t" + foreignKey.String()
 		columnLines = append(columnLines, line)
 	}
 
@@ -118,32 +111,28 @@ func (t *SQLiteTable) StringCreateTriggers() string {
 }
 
 func (t *SQLiteTable) String() string {
-	str := t.StringCreateTable()
+	statement := t.StringCreateTable()
 
 	indexes := t.StringCreateIndexes()
 	if indexes != "" {
-		str += "\n" + indexes
+		statement += "\n" + indexes
 	}
 
 	triggers := t.StringCreateTriggers()
 	if triggers != "" {
-		str += "\n" + triggers
+		statement += "\n" + triggers
 	}
 
-	return str
+	return statement
 }
 
 type SQLiteTableColumnsDiff struct {
 	Added    []string
 	Modified []string
 	Removed  []string
-	Renamed  map[string]string // oldName -> newName
+	Renamed  map[string]string
 
 	ForeignKeysChanged bool
-
-	// ConstraintsChanged is true when the primary key of two or more columns changes, or
-	// when a UNIQUE constraint of two or more columns changes. SQLite adds no such
-	// constraint to a table, so the change needs a recreation of the table.
 	ConstraintsChanged bool
 }
 
@@ -159,18 +148,15 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 
 	for _, sourceColumn := range t.Columns {
 		targetColumn, found := other.ColumnByName(sourceColumn.Name)
-
-		// New column
 		if !found {
-			// Maybe it's a renamed column?
-			candidates := lo.Filter(other.Columns, func(c *SQLiteColumn, _ int) bool {
-				_, existsInSourceTable := t.ColumnByName(c.Name)
-				_, alreadyRenamed := diff.Renamed[c.Name]
-				return !existsInSourceTable && !alreadyRenamed && c.HasEqualAttributes(sourceColumn)
+			candidates := lo.Filter(other.Columns, func(column *SQLiteColumn, _ int) bool {
+				_, existsInSourceTable := t.ColumnByName(column.Name)
+				_, alreadyRenamed := diff.Renamed[column.Name]
+				return !existsInSourceTable && !alreadyRenamed && column.HasEqualAttributes(sourceColumn)
 			})
 
-			// A rename is a guess. Several candidates make the guess wrong, so the
-			// column becomes an addition and the old columns become removals.
+			// A rename is a guess. Two candidates make the guess unsafe, so the column
+			// becomes an addition and the old columns become removals.
 			if len(candidates) == 1 {
 				diff.Renamed[candidates[0].Name] = sourceColumn.Name
 				continue
@@ -185,7 +171,6 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		}
 
 		if sourceColumn.Type != targetColumn.Type {
-			// Type change to compatible type should be done in table recreation
 			if sourceColumn.IsTypeChangeCompatible(targetColumn) {
 				diff.Modified = append(diff.Modified, sourceColumn.Name)
 				continue
@@ -199,7 +184,6 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		diff.Modified = append(diff.Modified, sourceColumn.Name)
 	}
 
-	// Removed columns
 	for _, targetColumn := range other.Columns {
 		_, found := t.ColumnByName(targetColumn.Name)
 		if !found && !lo.Contains(lo.Keys(diff.Renamed), targetColumn.Name) {
@@ -207,13 +191,12 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		}
 	}
 
-	// Check if foreign keys changed
 	if len(t.ForeignKeys) != len(other.ForeignKeys) {
 		diff.ForeignKeysChanged = true
 	} else {
 		for _, sourceForeignKey := range t.ForeignKeys {
-			found := lo.SomeBy(other.ForeignKeys, func(fk *SQLiteForeignKey) bool {
-				return fk.Equal(sourceForeignKey)
+			found := lo.SomeBy(other.ForeignKeys, func(foreignKey *SQLiteForeignKey) bool {
+				return foreignKey.Equal(sourceForeignKey)
 			})
 			if !found {
 				diff.ForeignKeysChanged = true
@@ -230,47 +213,41 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 
 	var diff strings.Builder
 
-	// Modified columns or Foreign Keys need to be handled via table recreation
+	// SQLite supports no ALTER COLUMN, so a modified column, a new foreign key, or a new
+	// table constraint needs a recreation of the table.
 	if len(columnsDiff.Modified) > 0 || columnsDiff.ForeignKeysChanged || columnsDiff.ConstraintsChanged {
 		tempTable := t.Copy()
 		tempTable.Name = "_" + t.Name + "_temp"
 
-		// Create temp table (table only; indexes recreated after rename)
 		fmt.Fprintf(&diff, "%s\n", tempTable.StringCreateTable())
 
-		// Reverse rename map: newName -> oldName
 		newToOld := lo.Invert(columnsDiff.Renamed)
 
-		// Build INSERT column list (new schema) and SELECT expressions (from old schema)
 		var insertColumns []string
 		var selectColumns []string
 
-		for _, newCol := range t.Columns {
-			insertColumns = append(insertColumns, quoteIdentifier(newCol.Name))
+		for _, newColumn := range t.Columns {
+			insertColumns = append(insertColumns, quoteIdentifier(newColumn.Name))
 
-			// If the column existed before (same name), copy from old table
-			_, ok := other.ColumnByName(newCol.Name)
+			_, ok := other.ColumnByName(newColumn.Name)
 			if ok {
-				selectColumns = append(selectColumns, quoteIdentifier(newCol.Name))
+				selectColumns = append(selectColumns, quoteIdentifier(newColumn.Name))
 				continue
 			}
 
-			// If it was renamed, copy from old name
-			oldName, ok := newToOld[newCol.Name]
+			oldName, ok := newToOld[newColumn.Name]
 			if ok {
 				selectColumns = append(selectColumns, quoteIdentifier(oldName))
 				continue
 			}
 
-			// Otherwise it is a new column: use DEFAULT if present, else NULL
-			if newCol.Default.Valid {
-				selectColumns = append(selectColumns, newCol.Default.String)
+			if newColumn.Default.Valid {
+				selectColumns = append(selectColumns, newColumn.Default.String)
 			} else {
 				selectColumns = append(selectColumns, "NULL")
 			}
 		}
 
-		// Copy data from old table to new temp table with explicit mapping
 		fmt.Fprintf(
 			&diff,
 			"INSERT INTO %s (%s) SELECT %s FROM %s;\n",
@@ -280,15 +257,12 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 			quoteIdentifier(t.Name),
 		)
 
-		// Drop old table
 		fmt.Fprintf(&diff, "DROP TABLE %s;\n", quoteIdentifier(t.Name))
 
-		// Rename new table to old table's name
 		fmt.Fprintf(&diff, "ALTER TABLE %s RENAME TO %s;\n", quoteIdentifier(tempTable.Name), quoteIdentifier(t.Name))
 
-		// Recreate indexes (on final table name)
-		for _, idx := range t.Indexes {
-			fmt.Fprintf(&diff, "%s\n", idx.String())
+		for _, index := range t.Indexes {
+			fmt.Fprintf(&diff, "%s\n", index.String())
 		}
 	} else {
 		for oldName, newName := range columnsDiff.Renamed {
@@ -319,13 +293,11 @@ func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) (string, error) {
 	for _, sourceTrigger := range t.Triggers {
 		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
 		if !found {
-			// New trigger
 			fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
 			continue
 		}
 
 		if sourceTrigger.SQL != targetTrigger.SQL {
-			// Modified trigger: drop and recreate
 			fmt.Fprintf(&diff, "DROP TRIGGER %s;\n", quoteIdentifier(targetTrigger.Name))
 			fmt.Fprintf(&diff, "%s;\n", sourceTrigger.SQL)
 		}
@@ -334,7 +306,6 @@ func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) (string, error) {
 	for _, targetTrigger := range other.Triggers {
 		_, found := t.TriggerByName(targetTrigger.Name)
 		if !found {
-			// Removed trigger
 			fmt.Fprintf(&diff, "DROP TRIGGER %s;\n", quoteIdentifier(targetTrigger.Name))
 		}
 	}
@@ -348,13 +319,11 @@ func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) (string, error) {
 	for _, sourceIndex := range t.Indexes {
 		targetIndex, found := other.IndexByName(sourceIndex.Name)
 		if !found {
-			// New index
 			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
 			continue
 		}
 
 		if !sourceIndex.Equal(targetIndex) {
-			// Modified index: drop and recreate
 			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
 			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
 		}
@@ -363,7 +332,6 @@ func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) (string, error) {
 	for _, targetIndex := range other.Indexes {
 		_, found := t.IndexByName(targetIndex.Name)
 		if !found {
-			// Removed index
 			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
 		}
 	}

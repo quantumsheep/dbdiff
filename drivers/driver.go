@@ -11,13 +11,8 @@ type Driver interface {
 }
 
 // A SectionDiff holds the statements of one kind of schema object. A driver prints the
-// early removals in the reverse section order, then the additions in the section order,
-// then the removals in the reverse section order. An object that uses another object must
-// go away first.
-//
-// An early removal goes away before every addition. An addition of one section can need
-// that removal. A view of the view section reads a column of the table section, and that
-// view blocks a change of the column.
+// early removals first, then the additions, then the removals. An early removal covers the
+// object that blocks an addition of another section.
 type SectionDiff struct {
 	EarlyRemovals string
 	Additions     string

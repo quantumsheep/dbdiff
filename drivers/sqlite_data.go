@@ -13,16 +13,13 @@ import (
 	"github.com/samber/lo"
 )
 
-// SQLiteTableData holds the rows of one table. A key joins the SQL literals of the primary
-// key columns of one row. A row maps a column name to the SQL literal of its value.
+// A key joins the SQL literals of the primary key columns of one row. A row maps a column
+// name to the SQL literal of its value.
 type SQLiteTableData struct {
 	Keys []string
 	Rows map[string]map[string]string
 }
 
-// PrimaryKeyColumnNames returns the columns of the primary key. A key of two or more
-// columns keeps the order of the key. A key of one column comes from the definition of that
-// column. The list is empty when the table holds no primary key.
 func (t *SQLiteTable) PrimaryKeyColumnNames() []string {
 	if len(t.PrimaryKey) > 0 {
 		return t.PrimaryKey
@@ -39,9 +36,8 @@ func (t *SQLiteTable) PrimaryKeyColumnNames() []string {
 	return names
 }
 
-// DiffData compares the rows of each table that the source database and the target
-// database both hold. The schema section creates a new table and drops an old table, so a
-// table of one side only needs no row statement.
+// DiffData compares the rows of each table that both databases hold. The schema section
+// already creates or drops the other tables.
 func (d *SQLiteDriver) DiffData(ctx context.Context) (string, error) {
 	var diff strings.Builder
 
@@ -56,10 +52,9 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) (string, error) {
 	}
 
 	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(t *SQLiteTable) bool {
-			return t.Name == sourceTable.Name
+		targetTable, found := lo.Find(targetTables, func(table *SQLiteTable) bool {
+			return table.Name == sourceTable.Name
 		})
-
 		if !found {
 			continue
 		}
@@ -93,7 +88,6 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 		return column.Name
 	})
 
-	// The diff reads the key of a target row, so the target must hold every key column.
 	holdsEveryKeyColumn := lo.EveryBy(primaryKeyColumnNames, func(name string) bool {
 		return slices.Contains(targetColumnNames, name)
 	})
@@ -101,8 +95,6 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 		return fmt.Sprintf("-- The table %s holds another primary key in the target, so dbdiff compares no row of it.", quotedTableName), nil
 	}
 
-	// The target holds no value for a column that the schema section adds, so the
-	// comparison of two rows covers the columns of both sides.
 	commonColumnNames := lo.Filter(sourceColumnNames, func(name string, _ int) bool {
 		return slices.Contains(targetColumnNames, name)
 	})
@@ -121,7 +113,6 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 	var modifications strings.Builder
 	var removals strings.Builder
 
-	// Added or modified rows
 	for _, key := range sourceData.Keys {
 		sourceRow := sourceData.Rows[key]
 
@@ -157,7 +148,6 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 			sqliteRowKeyCondition(primaryKeyColumnNames, sourceRow))
 	}
 
-	// Removed rows
 	for _, key := range targetData.Keys {
 		_, found := sourceData.Rows[key]
 		if found {
@@ -174,9 +164,8 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 	return strings.TrimSpace(diff), nil
 }
 
-// GetTableData reads the given columns of a table. It sorts the rows by the primary key,
-// because SQLite gives no stable order. Without that sort the output changes between two
-// runs.
+// GetTableData sorts the rows by the primary key, because SQLite gives no stable order.
+// Without that sort the output changes between two runs.
 func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName string, columnNames []string, primaryKeyColumnNames []string) (*SQLiteTableData, error) {
 	statement := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s;",
 		strings.Join(quoteIdentifiers(columnNames), ", "),
@@ -227,11 +216,10 @@ func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName s
 	return data, nil
 }
 
-// sqliteTimeLayout is the layout that go-sqlite3 writes for a DATETIME column.
 const sqliteTimeLayout = "2006-01-02 15:04:05.999999999-07:00"
 
 // formatSQLiteValue returns the SQL literal of one value. The diff compares two rows
-// through these literals, so one value gives one literal on both sides.
+// through these literals, so NULL never equals the text 'NULL'.
 func formatSQLiteValue(value any) string {
 	if value == nil {
 		return "NULL"
@@ -274,8 +262,6 @@ func formatSQLiteValue(value any) string {
 	return quoteLiteral(fmt.Sprintf("%v", value))
 }
 
-// sqliteRowKey joins the literals of the primary key columns. A literal keeps its quotes,
-// so two different keys never give the same text.
 func sqliteRowKey(primaryKeyColumnNames []string, row map[string]string) string {
 	literals := lo.Map(primaryKeyColumnNames, func(name string, _ int) string {
 		return row[name]

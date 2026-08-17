@@ -11,21 +11,16 @@ type SQLiteColumn struct {
 
 	NotNull bool
 
-	// PrimaryKey is true for a primary key of this column only. A primary key of two or
-	// more columns is a table constraint, and the PrimaryKey field of SQLiteTable holds it.
 	PrimaryKey bool
 
-	// Unique is true for a UNIQUE constraint of this column only. A UNIQUE constraint of
-	// two or more columns is a table constraint, and the UniqueConstraints field of
-	// SQLiteTable holds it.
 	Unique bool
 
 	Default sql.NullString
 }
 
 func (c *SQLiteColumn) Copy() *SQLiteColumn {
-	new := *c
-	return &new
+	columnCopy := *c
+	return &columnCopy
 }
 
 func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
@@ -58,10 +53,8 @@ func (c *SQLiteColumn) String() string {
 }
 
 func (c *SQLiteColumn) IsTypeChangeCompatible(other *SQLiteColumn) bool {
-	// In SQLite, most type changes are compatible due to dynamic typing,
-	// but changing between certain types may lead to data loss or unexpected behavior.
-	// Here we define a simple rule: changing between TEXT, INTEGER, REAL, BLOB is compatible,
-	// but changing to or from these types to other types is not.
+	// A recreation of the table converts between these four types. Every other type change
+	// can lose data.
 
 	compatibleTypes := map[string]bool{
 		"TEXT":    true,

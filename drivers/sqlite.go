@@ -15,10 +15,7 @@ import (
 type SQLLiteDriverConfig struct {
 	SourceDatabasePath string
 	TargetDatabasePath string
-
-	// CompareData turns the comparison of the rows on. The default value is false, so the
-	// diff holds the schema only.
-	CompareData bool
+	CompareData        bool
 }
 
 type SQLiteDriver struct {
@@ -72,8 +69,6 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 		d.DiffViews,
 	}
 
-	// A new row needs its table and its column, so the data section comes after the whole
-	// schema section.
 	if d.CompareData {
 		sections = append(sections, d.DiffData)
 	}
@@ -107,13 +102,10 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// Added or modified tables
 	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(t *SQLiteTable) bool {
-			return t.Name == sourceTable.Name
+		targetTable, found := lo.Find(targetTables, func(table *SQLiteTable) bool {
+			return table.Name == sourceTable.Name
 		})
-
-		// Table not found in target database
 		if !found {
 			fmt.Fprintf(&diff, "%s\n", sourceTable.String())
 			continue
@@ -144,13 +136,10 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 
 	}
 
-	// Removed tables
 	for _, targetTable := range targetTables {
-		_, found := lo.Find(sourceTables, func(t *SQLiteTable) bool {
-			return t.Name == targetTable.Name
+		_, found := lo.Find(sourceTables, func(table *SQLiteTable) bool {
+			return table.Name == targetTable.Name
 		})
-
-		// Table not found in source database
 		if !found {
 			fmt.Fprintf(&diff, "DROP TABLE %s;\n", quoteIdentifier(targetTable.Name))
 		}
@@ -173,11 +162,10 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 	}
 
 	for _, sourceView := range sourceViews {
-		targetView, found := lo.Find(targetViews, func(v *SQLiteView) bool {
-			return v.Name == sourceView.Name
+		targetView, found := lo.Find(targetViews, func(view *SQLiteView) bool {
+			return view.Name == sourceView.Name
 		})
 		if !found {
-			// New view
 			fmt.Fprintf(&diff, "%s;\n", sourceView.SQL)
 			continue
 		}
@@ -191,11 +179,10 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 	}
 
 	for _, targetView := range targetViews {
-		_, found := lo.Find(sourceViews, func(v *SQLiteView) bool {
-			return v.Name == targetView.Name
+		_, found := lo.Find(sourceViews, func(view *SQLiteView) bool {
+			return view.Name == targetView.Name
 		})
 		if !found {
-			// Removed view
 			fmt.Fprintf(&diff, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
 		}
 	}
@@ -253,8 +240,8 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
-	// A UNIQUE constraint of one column belongs to the definition of that column. A UNIQUE
-	// constraint of two or more columns is a table constraint.
+	// A UNIQUE constraint of one column belongs to the definition of that column.
+	// A constraint of two or more columns is a table constraint.
 	var uniqueConstraints [][]string
 
 	for _, key := range uniqueKeys {
@@ -263,11 +250,11 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 			continue
 		}
 
-		column, found := lo.Find(columns, func(c *SQLiteColumn) bool {
-			return c.Name == key[0]
+		matchingColumn, found := lo.Find(columns, func(column *SQLiteColumn) bool {
+			return column.Name == key[0]
 		})
 		if found {
-			column.Unique = true
+			matchingColumn.Unique = true
 		}
 	}
 
@@ -309,21 +296,21 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 	var primaryKeyColumns []*SQLiteColumn
 
 	for rows.Next() {
-		var cid int
+		var columnID int
 		var name string
-		var ctype string
+		var columnType string
 		var isNotNull int
 		var defaultValue sql.NullString
 		var primaryKeyPosition int
 
-		err := rows.Scan(&cid, &name, &ctype, &isNotNull, &defaultValue, &primaryKeyPosition)
+		err := rows.Scan(&columnID, &name, &columnType, &isNotNull, &defaultValue, &primaryKeyPosition)
 		if err != nil {
 			return nil, err
 		}
 
 		column := &SQLiteColumn{
 			Name:    name,
-			Type:    ctype,
+			Type:    columnType,
 			NotNull: isNotNull == 1,
 			Default: defaultValue,
 		}
@@ -340,9 +327,8 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		return nil, err
 	}
 
-	// SQLite numbers the columns of a primary key 1, 2, 3 in the order of the key. A key of
-	// one column stays a column constraint. A key of two or more columns is a table
-	// constraint, and GetTablePrimaryKey reads it.
+	// A key of one column stays a column constraint, which keeps INTEGER PRIMARY KEY as the
+	// alias of the rowid. GetTablePrimaryKey reads a key of two or more columns.
 	if len(primaryKeyColumns) == 1 {
 		primaryKeyColumns[0].PrimaryKey = true
 	}
@@ -351,8 +337,7 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 }
 
 // GetTablePrimaryKey returns the columns of a primary key of two or more columns, in the
-// order of the key. It returns an empty list for a table with a key of one column, because
-// the definition of that column holds the key.
+// order of the key. A key of one column gives an empty list.
 func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdentifier(tableName)+");")
 	if err != nil {
@@ -369,14 +354,14 @@ func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, table
 	var keyColumns []primaryKeyColumn
 
 	for rows.Next() {
-		var cid int
+		var columnID int
 		var name string
-		var ctype string
+		var columnType string
 		var isNotNull int
 		var defaultValue sql.NullString
 		var primaryKeyPosition int
 
-		err := rows.Scan(&cid, &name, &ctype, &isNotNull, &defaultValue, &primaryKeyPosition)
+		err := rows.Scan(&columnID, &name, &columnType, &isNotNull, &defaultValue, &primaryKeyPosition)
 		if err != nil {
 			return nil, err
 		}
@@ -408,8 +393,7 @@ func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, table
 	return names, nil
 }
 
-// GetTableUniqueKeys returns the columns of each UNIQUE constraint of a table. PRAGMA
-// index_list gives the origin "u" to the index of such a constraint. The function sorts the
+// GetTableUniqueKeys returns the columns of each UNIQUE constraint of a table. It sorts the
 // keys, because SQLite gives no stable order.
 func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, tableName string) ([][]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+quoteIdentifier(tableName)+");")
@@ -422,13 +406,13 @@ func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, table
 	var indexNames []string
 
 	for rows.Next() {
-		var seq int
+		var position int
 		var name string
 		var isUnique int
 		var origin string
 		var partial int
 
-		err := rows.Scan(&seq, &name, &isUnique, &origin, &partial)
+		err := rows.Scan(&position, &name, &isUnique, &origin, &partial)
 		if err != nil {
 			return nil, err
 		}
@@ -463,9 +447,6 @@ func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, table
 	return keys, nil
 }
 
-// GetIndexColumnNames returns the name of each column of an index. SQLite refuses an
-// expression in a UNIQUE constraint and in a PRIMARY KEY, so every key of the index of such
-// a constraint holds a name.
 func (d *SQLiteDriver) GetIndexColumnNames(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
 	if err != nil {
@@ -477,17 +458,17 @@ func (d *SQLiteDriver) GetIndexColumnNames(ctx context.Context, db *sql.DB, inde
 	var names []string
 
 	for rows.Next() {
-		var seqno int
-		var cid int
+		var keyPosition int
+		var columnID int
 		var name sql.NullString
 
-		err := rows.Scan(&seqno, &cid, &name)
+		err := rows.Scan(&keyPosition, &columnID, &name)
 		if err != nil {
 			return nil, err
 		}
 
 		if !name.Valid {
-			return nil, fmt.Errorf("the index %s holds a key at the position %d that is no column", indexName, seqno)
+			return nil, fmt.Errorf("the index %s holds a key at the position %d that is no column", indexName, keyPosition)
 		}
 
 		names = append(names, name.String)
@@ -517,21 +498,19 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 	var indexes []*SQLiteIndex
 
 	for rows.Next() {
-		var seq int
+		var position int
 		var name string
 		var isUnique int
 		var origin string
 		var partial int
 
-		err := rows.Scan(&seq, &name, &isUnique, &origin, &partial)
+		err := rows.Scan(&position, &name, &isUnique, &origin, &partial)
 		if err != nil {
 			return nil, err
 		}
 
-		// The origin "c" marks an index that a CREATE INDEX statement built. The origin
-		// "u" marks the index of a UNIQUE constraint, and the origin "pk" marks the index
-		// of a PRIMARY KEY. The column definition already prints those two constraints, so
-		// this function skips their index.
+		// The origin "c" marks an index that a CREATE INDEX statement built. The column
+		// definition already prints the index of a UNIQUE constraint or of a PRIMARY KEY.
 		if origin != "c" {
 			continue
 		}
@@ -561,7 +540,7 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 }
 
 // GetIndexDefinitions returns the text of each index of a table. An index that a UNIQUE
-// constraint or a PRIMARY KEY builds has no text, and the map holds no entry for it.
+// constraint or a PRIMARY KEY builds holds no text, and the map holds no entry for it.
 func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tableName string) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
 	if err != nil {
@@ -592,8 +571,7 @@ func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tabl
 }
 
 // GetIndexKeys returns the SQL text of each key part of an index. PRAGMA index_info gives
-// no name for a key that an expression builds. For that key the function takes the text of
-// the definition.
+// no name for a key that an expression builds, so that key comes from definitionKeys.
 func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName string, definitionKeys []string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
 	if err != nil {
@@ -605,11 +583,11 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 	var keys []string
 
 	for rows.Next() {
-		var seqno int
-		var cid int
+		var keyPosition int
+		var columnID int
 		var name sql.NullString
 
-		err := rows.Scan(&seqno, &cid, &name)
+		err := rows.Scan(&keyPosition, &columnID, &name)
 		if err != nil {
 			return nil, err
 		}
@@ -619,11 +597,11 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 			continue
 		}
 
-		if seqno < 0 || seqno >= len(definitionKeys) {
-			return nil, fmt.Errorf("the definition of the index %s holds no key at the position %d", indexName, seqno)
+		if keyPosition < 0 || keyPosition >= len(definitionKeys) {
+			return nil, fmt.Errorf("the definition of the index %s holds no key at the position %d", indexName, keyPosition)
 		}
 
-		keys = append(keys, definitionKeys[seqno])
+		keys = append(keys, definitionKeys[keyPosition])
 	}
 
 	err = rows.Err()
@@ -709,15 +687,15 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 	foreignKeysMap := make(map[int]*SQLiteForeignKey)
 
 	for rows.Next() {
-		var id, seq int
+		var foreignKeyID, keyPosition int
 		var table, from, to, onUpdate, onDelete, match string
 
-		err := rows.Scan(&id, &seq, &table, &from, &to, &onUpdate, &onDelete, &match)
+		err := rows.Scan(&foreignKeyID, &keyPosition, &table, &from, &to, &onUpdate, &onDelete, &match)
 		if err != nil {
 			return nil, err
 		}
 
-		foreignKey, exists := foreignKeysMap[id]
+		foreignKey, exists := foreignKeysMap[foreignKeyID]
 		if !exists {
 			foreignKey = &SQLiteForeignKey{
 				Table:    table,
@@ -726,7 +704,7 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 				OnUpdate: onUpdate,
 				OnDelete: onDelete,
 			}
-			foreignKeysMap[id] = foreignKey
+			foreignKeysMap[foreignKeyID] = foreignKey
 		}
 
 		foreignKey.From = append(foreignKey.From, from)
@@ -741,28 +719,26 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 	foreignKeysSet := lo.Values(foreignKeysMap)
 
 	sort.SliceStable(foreignKeysSet, func(i, j int) bool {
-		a := foreignKeysSet[i]
-
-		b := foreignKeysSet[j]
-
-		if a.Table != b.Table {
-			return a.Table < b.Table
+		first := foreignKeysSet[i]
+		second := foreignKeysSet[j]
+		if first.Table != second.Table {
+			return first.Table < second.Table
 		}
 
-		if !slices.Equal(a.From, b.From) {
-			return strings.Join(a.From, ",") < strings.Join(b.From, ",")
+		if !slices.Equal(first.From, second.From) {
+			return strings.Join(first.From, ",") < strings.Join(second.From, ",")
 		}
 
-		if !slices.Equal(a.To, b.To) {
-			return strings.Join(a.To, ",") < strings.Join(b.To, ",")
+		if !slices.Equal(first.To, second.To) {
+			return strings.Join(first.To, ",") < strings.Join(second.To, ",")
 		}
 
-		if a.OnUpdate != b.OnUpdate {
-			return a.OnUpdate < b.OnUpdate
+		if first.OnUpdate != second.OnUpdate {
+			return first.OnUpdate < second.OnUpdate
 		}
 
-		if a.OnDelete != b.OnDelete {
-			return a.OnDelete < b.OnDelete
+		if first.OnDelete != second.OnDelete {
+			return first.OnDelete < second.OnDelete
 		}
 
 		return false

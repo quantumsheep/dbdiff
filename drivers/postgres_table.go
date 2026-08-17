@@ -26,7 +26,6 @@ func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
 func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) (string, error) {
 	var diff strings.Builder
 
-	// Added or modified columns
 	for _, sourceColumn := range t.Columns {
 		targetColumn, found := other.ColumnByName(sourceColumn.Name)
 		if !found {
@@ -35,7 +34,6 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 
 		if !sourceColumn.HasEqualAttributes(targetColumn) {
-			// Type change
 			if sourceColumn.Type != targetColumn.Type {
 				usingClause, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
 				if err != nil {
@@ -45,7 +43,6 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s TYPE %s%s;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name), sourceColumn.Type, usingClause)
 			}
 
-			// Not Null change
 			if sourceColumn.NotNull != targetColumn.NotNull {
 				if sourceColumn.NotNull {
 					fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name))
@@ -54,7 +51,6 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				}
 			}
 
-			// Default change
 			if sourceColumn.Default != targetColumn.Default {
 				if sourceColumn.Default.Valid {
 					fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name), sourceColumn.Default.String)
@@ -65,8 +61,8 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	// Constraints. PostgreSQL drops every constraint of a column with the column, so the
-	// constraint statements come before the column removals.
+	// PostgreSQL drops every constraint and every index of a column with the column, so
+	// these two blocks come before the column removals below.
 	for _, sourceConstraint := range t.Constraints {
 		targetConstraint, found := other.ConstraintByName(sourceConstraint.Name)
 		if !found {
@@ -87,9 +83,6 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	// Indexes. This block prints before the removed columns below, because a column drop
-	// drops every index of that column too. A DROP INDEX statement of a dropped column
-	// fails when it prints after the column drop, because the index is already gone.
 	for _, sourceIndex := range t.Indexes {
 		targetIndex, found := other.IndexByName(sourceIndex.Name)
 		if !found {
@@ -110,7 +103,6 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	// Removed columns
 	for _, targetColumn := range other.Columns {
 		_, found := t.ColumnByName(targetColumn.Name)
 		if !found {
@@ -118,7 +110,6 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	// Triggers
 	for _, sourceTrigger := range t.Triggers {
 		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
 		if !found {
@@ -190,15 +181,15 @@ func (t *PostgresTable) StringCreateTable() string {
 }
 
 func (t *PostgresTable) String() string {
-	str := t.StringCreateTable()
+	statement := t.StringCreateTable()
 
 	for _, index := range t.Indexes {
-		str += "\n" + index.String()
+		statement += "\n" + index.String()
 	}
 
 	for _, trigger := range t.Triggers {
-		str += "\n" + trigger.String()
+		statement += "\n" + trigger.String()
 	}
 
-	return str
+	return statement
 }
