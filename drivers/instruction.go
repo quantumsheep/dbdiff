@@ -225,3 +225,12 @@ type SQLRenameTableAction struct {
 func (a *SQLRenameTableAction) TableActionClause() string {
 	return "RENAME TO " + quoteIdentifier(a.NewName)
 }
+
+// rowKeyCondition builds the WHERE body that selects one row by its primary key.
+func rowKeyCondition(primaryKeyColumnNames []string, row map[string]string) Condition {
+	conditions := lo.Map(primaryKeyColumnNames, func(name string, _ int) Condition {
+		return &SQLEqualityCondition{ColumnName: name, Expression: row[name]}
+	})
+
+	return &SQLConjunctionCondition{Conditions: conditions}
+}

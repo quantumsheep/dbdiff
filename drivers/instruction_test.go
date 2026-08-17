@@ -729,6 +729,22 @@ func TestInstructions(t *testing.T) {
 		}
 		require.Equal(t, `FOREIGN KEY ("team") REFERENCES "teams" ("name")`, foreignKey.Clause())
 	})
+
+	t.Run("RowKeyConditionOfOneColumn", func(t *testing.T) {
+		row := map[string]string{"id": "1"}
+
+		condition := rowKeyCondition([]string{"id"}, row)
+
+		require.Equal(t, `"id" = 1`, condition.ConditionClause())
+	})
+
+	t.Run("RowKeyConditionOfTwoColumns", func(t *testing.T) {
+		row := map[string]string{"team": "'red'", "member": "'Alice'"}
+
+		condition := rowKeyCondition([]string{"team", "member"}, row)
+
+		require.Equal(t, `"team" = 'red' AND "member" = 'Alice'`, condition.ConditionClause())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.

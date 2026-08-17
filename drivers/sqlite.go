@@ -64,25 +64,34 @@ func (d *SQLiteDriver) Close() error {
 }
 
 func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
-	sections := []func(ctx context.Context) (string, error){
-		d.DiffTables,
-		d.DiffViews,
+	var diff strings.Builder
+
+	tablesDiff, err := d.DiffTables(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if tablesDiff != "" {
+		fmt.Fprintln(&diff, tablesDiff)
+	}
+
+	viewsDiff, err := d.DiffViews(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if viewsDiff != "" {
+		fmt.Fprintln(&diff, viewsDiff)
 	}
 
 	if d.CompareData {
-		sections = append(sections, d.DiffData)
-	}
-
-	var diff strings.Builder
-
-	for _, section := range sections {
-		subDiff, err := section(ctx)
+		dataInstructions, err := d.DiffData(ctx)
 		if err != nil {
 			return "", err
 		}
 
-		if subDiff != "" {
-			fmt.Fprintln(&diff, subDiff)
+		if len(dataInstructions) > 0 {
+			fmt.Fprintln(&diff, RenderInstructions(dataInstructions))
 		}
 	}
 

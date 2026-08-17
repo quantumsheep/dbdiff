@@ -38,17 +38,17 @@ func (t *SQLiteTable) PrimaryKeyColumnNames() []string {
 
 // DiffData compares the rows of each table that both databases hold. The schema section
 // already creates or drops the other tables.
-func (d *SQLiteDriver) DiffData(ctx context.Context) (string, error) {
-	var diff strings.Builder
+func (d *SQLiteDriver) DiffData(ctx context.Context) ([]Instruction, error) {
+	var instructions []Instruction
 
 	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	for _, sourceTable := range sourceTables {
@@ -59,25 +59,26 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) (string, error) {
 			continue
 		}
 
-		subDiff, err := d.DiffTableData(ctx, sourceTable, targetTable)
+		subInstructions, err := d.DiffTableData(ctx, sourceTable, targetTable)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		if subDiff != "" {
-			fmt.Fprintln(&diff, subDiff)
-		}
+		instructions = append(instructions, subInstructions...)
 	}
 
-	return strings.TrimSpace(diff.String()), nil
+	return instructions, nil
 }
 
-func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTable, targetTable *SQLiteTable) (string, error) {
-	quotedTableName := quoteIdentifier(sourceTable.Name)
-
+func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTable, targetTable *SQLiteTable) ([]Instruction, error) {
 	primaryKeyColumnNames := sourceTable.PrimaryKeyColumnNames()
 	if len(primaryKeyColumnNames) == 0 {
-		return fmt.Sprintf("-- The table %s holds no primary key, so dbdiff compares no row of it.", quotedTableName), nil
+		comment := &SQLCommentInstruction{
+			Text: fmt.Sprintf("The table %s holds no primary key, so dbdiff compares no row of it.",
+				quoteIdentifier(sourceTable.Name)),
+		}
+
+		return []Instruction{comment}, nil
 	}
 
 	sourceColumnNames := lo.Map(sourceTable.Columns, func(column *SQLiteColumn, _ int) string {
@@ -92,7 +93,12 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 		return slices.Contains(targetColumnNames, name)
 	})
 	if !holdsEveryKeyColumn {
-		return fmt.Sprintf("-- The table %s holds another primary key in the target, so dbdiff compares no row of it.", quotedTableName), nil
+		comment := &SQLCommentInstruction{
+			Text: fmt.Sprintf("The table %s holds another primary key in the target, so dbdiff compares no row of it.",
+				quoteIdentifier(sourceTable.Name)),
+		}
+
+		return []Instruction{comment}, nil
 	}
 
 	commonColumnNames := lo.Filter(sourceColumnNames, func(name string, _ int) bool {
@@ -101,17 +107,17 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 
 	sourceData, err := d.GetTableData(ctx, d.SourceDatabaseConnection, sourceTable.Name, sourceColumnNames, primaryKeyColumnNames)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	targetData, err := d.GetTableData(ctx, d.TargetDatabaseConnection, targetTable.Name, commonColumnNames, primaryKeyColumnNames)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	var insertions strings.Builder
-	var modifications strings.Builder
-	var removals strings.Builder
+	var insertions []Instruction
+	var modifications []Instruction
+	var removals []Instruction
 
 	for _, key := range sourceData.Keys {
 		sourceRow := sourceData.Rows[key]
@@ -122,30 +128,35 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 				return sourceRow[name]
 			})
 
-			fmt.Fprintf(&insertions, "INSERT INTO %s (%s) VALUES (%s);\n",
-				quotedTableName,
-				strings.Join(quoteIdentifiers(sourceColumnNames), ", "),
-				strings.Join(values, ", "))
+			insertions = append(insertions, &SQLInsertInstruction{
+				TableName:   sourceTable.Name,
+				ColumnNames: sourceColumnNames,
+				Values:      values,
+			})
 
 			continue
 		}
 
-		var assignments []string
+		var setClauses []*SQLSetClause
 
 		for _, name := range commonColumnNames {
 			if sourceRow[name] != targetRow[name] {
-				assignments = append(assignments, fmt.Sprintf("%s = %s", quoteIdentifier(name), sourceRow[name]))
+				setClauses = append(setClauses, &SQLSetClause{
+					ColumnName: name,
+					Expression: sourceRow[name],
+				})
 			}
 		}
 
-		if len(assignments) == 0 {
+		if len(setClauses) == 0 {
 			continue
 		}
 
-		fmt.Fprintf(&modifications, "UPDATE %s SET %s WHERE %s;\n",
-			quotedTableName,
-			strings.Join(assignments, ", "),
-			sqliteRowKeyCondition(primaryKeyColumnNames, sourceRow))
+		modifications = append(modifications, &SQLUpdateInstruction{
+			TableName:  sourceTable.Name,
+			SetClauses: setClauses,
+			Condition:  rowKeyCondition(primaryKeyColumnNames, sourceRow),
+		})
 	}
 
 	for _, key := range targetData.Keys {
@@ -154,14 +165,16 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 			continue
 		}
 
-		fmt.Fprintf(&removals, "DELETE FROM %s WHERE %s;\n",
-			quotedTableName,
-			sqliteRowKeyCondition(primaryKeyColumnNames, targetData.Rows[key]))
+		removals = append(removals, &SQLDeleteInstruction{
+			TableName: targetTable.Name,
+			Condition: rowKeyCondition(primaryKeyColumnNames, targetData.Rows[key]),
+		})
 	}
 
-	diff := insertions.String() + modifications.String() + removals.String()
+	instructions := append(insertions, modifications...)
+	instructions = append(instructions, removals...)
 
-	return strings.TrimSpace(diff), nil
+	return instructions, nil
 }
 
 // GetTableData sorts the rows by the primary key, because SQLite gives no stable order.
@@ -268,12 +281,4 @@ func sqliteRowKey(primaryKeyColumnNames []string, row map[string]string) string 
 	})
 
 	return strings.Join(literals, ", ")
-}
-
-func sqliteRowKeyCondition(primaryKeyColumnNames []string, row map[string]string) string {
-	conditions := lo.Map(primaryKeyColumnNames, func(name string, _ int) string {
-		return fmt.Sprintf("%s = %s", quoteIdentifier(name), row[name])
-	})
-
-	return strings.Join(conditions, " AND ")
 }
