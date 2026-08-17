@@ -216,8 +216,16 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "users",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "name", Type: "TEXT", NotNull: true},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
 				},
 			},
 		})
@@ -249,7 +257,10 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLiteAlterTableInstruction{
 				Name: "users",
 				Action: &SQLiteAddColumnAction{
-					Column: &SQLiteColumn{Name: "email", Type: "TEXT"},
+					Column: &SQLiteColumn{
+						Name: "email",
+						Type: "TEXT",
+					},
 				},
 			},
 		})
@@ -371,13 +382,19 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLiteAlterTableInstruction{
 				Name: "users",
 				Action: &SQLiteAddColumnAction{
-					Column: &SQLiteColumn{Name: "first_name", Type: "TEXT"},
+					Column: &SQLiteColumn{
+						Name: "first_name",
+						Type: "TEXT",
+					},
 				},
 			},
 			&SQLiteAlterTableInstruction{
 				Name: "users",
 				Action: &SQLiteAddColumnAction{
-					Column: &SQLiteColumn{Name: "last_name", Type: "TEXT"},
+					Column: &SQLiteColumn{
+						Name: "last_name",
+						Type: "TEXT",
+					},
 				},
 			},
 		})
@@ -416,7 +433,10 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLiteAlterTableInstruction{
 				Name: "users",
 				Action: &SQLiteAddColumnAction{
-					Column: &SQLiteColumn{Name: "last_name", Type: "TEXT"},
+					Column: &SQLiteColumn{
+						Name: "last_name",
+						Type: "TEXT",
+					},
 				},
 			},
 		})
@@ -455,9 +475,20 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "name", Type: "TEXT", NotNull: true},
-					{Name: "age", Type: "INTEGER"},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
 				},
 			},
 			&SQLInsertSelectInstruction{
@@ -506,8 +537,16 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "name", Type: "TEXT", NotNull: true},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
 				},
 			},
 			&SQLInsertSelectInstruction{
@@ -556,8 +595,15 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "name", Type: "TEXT"},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "name",
+						Type: "TEXT",
+					},
 				},
 			},
 			&SQLInsertSelectInstruction{
@@ -614,8 +660,15 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        `order "list"`,
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "name", Type: "TEXT"},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "name",
+						Type: "TEXT",
+					},
 				},
 			},
 			&SQLiteCreateIndexInstruction{
@@ -875,9 +928,21 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "name", Type: "TEXT", NotNull: true},
-					{Name: "active", Type: "INTEGER", NotNull: true},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "active",
+						Type:    "INTEGER",
+						NotNull: true,
+					},
 				},
 			},
 			&SQLInsertSelectInstruction{
@@ -968,9 +1033,20 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "email", Type: "TEXT", Unique: true},
-					{Name: "age", Type: "INTEGER"},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:   "email",
+						Type:   "TEXT",
+						Unique: true,
+					},
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
 				},
 			},
 			&SQLInsertSelectInstruction{
@@ -1017,9 +1093,21 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "members",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "team", Type: "TEXT", NotNull: true},
-					{Name: "name", Type: "TEXT", NotNull: true},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "team",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
 				},
 				UniqueConstraints: [][]string{{"team", "name"}},
 			},
@@ -1060,9 +1148,21 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_members_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "team", Type: "TEXT", NotNull: true},
-					{Name: "name", Type: "TEXT", NotNull: true},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "team",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
 				},
 				UniqueConstraints: [][]string{{"team", "name"}},
 			},
@@ -1106,9 +1206,20 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "memberships",
 				Columns: []*SQLiteColumn{
-					{Name: "team", Type: "TEXT", NotNull: true},
-					{Name: "member", Type: "TEXT", NotNull: true},
-					{Name: "role", Type: "TEXT"},
+					{
+						Name:    "team",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "member",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name: "role",
+						Type: "TEXT",
+					},
 				},
 				PrimaryKey: []string{"member", "team"},
 			},
@@ -1138,8 +1249,15 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "counters",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "total", Type: "INTEGER"},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "total",
+						Type: "INTEGER",
+					},
 				},
 			},
 		})
@@ -1183,9 +1301,20 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_memberships_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "team", Type: "TEXT", NotNull: true},
-					{Name: "member", Type: "TEXT", NotNull: true},
-					{Name: "level", Type: "INTEGER"},
+					{
+						Name:    "team",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "member",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name: "level",
+						Type: "INTEGER",
+					},
 				},
 				PrimaryKey: []string{"team", "member"},
 			},
@@ -1240,9 +1369,21 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_memberships_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "team", Type: "TEXT", NotNull: true},
-					{Name: "member", Type: "TEXT", NotNull: true},
-					{Name: "role", Type: "TEXT", NotNull: true},
+					{
+						Name:    "team",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "member",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "role",
+						Type:    "TEXT",
+						NotNull: true,
+					},
 				},
 				PrimaryKey: []string{"team", "member"},
 			},
@@ -1294,8 +1435,15 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "email", Type: "TEXT", PrimaryKey: true},
-					{Name: "age", Type: "INTEGER"},
+					{
+						Name:       "email",
+						Type:       "TEXT",
+						PrimaryKey: true,
+					},
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
 				},
 			},
 			&SQLInsertSelectInstruction{
@@ -1369,8 +1517,15 @@ func TestSQLiteDriver(t *testing.T) {
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "users",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "name", Type: "TEXT"},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "name",
+						Type: "TEXT",
+					},
 				},
 			},
 			&SQLiteCreateTriggerInstruction{
@@ -1438,9 +1593,19 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLiteCreateTableInstruction{
 				Name: "_posts_temp",
 				Columns: []*SQLiteColumn{
-					{Name: "id", Type: "INTEGER", PrimaryKey: true},
-					{Name: "user_id", Type: "INTEGER"},
-					{Name: "title", Type: "TEXT"},
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "user_id",
+						Type: "INTEGER",
+					},
+					{
+						Name: "title",
+						Type: "TEXT",
+					},
 				},
 				ForeignKeys: []*SQLiteForeignKey{
 					{
@@ -1495,11 +1660,17 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLUpdateInstruction{
 				TableName: "users",
 				SetClauses: []*SQLSetClause{
-					{ColumnName: "name", Expression: "'Robert'"},
+					{
+						ColumnName: "name",
+						Expression: "'Robert'",
+					},
 				},
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
 					},
 				},
 			},
@@ -1507,7 +1678,10 @@ func TestSQLiteDriver(t *testing.T) {
 				TableName: "users",
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "4"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "4",
+						},
 					},
 				},
 			},
@@ -1572,22 +1746,34 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLUpdateInstruction{
 				TableName: "notes",
 				SetClauses: []*SQLSetClause{
-					{ColumnName: "body", Expression: "'it''s a note'"},
+					{
+						ColumnName: "body",
+						Expression: "'it''s a note'",
+					},
 				},
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
 					},
 				},
 			},
 			&SQLUpdateInstruction{
 				TableName: "notes",
 				SetClauses: []*SQLSetClause{
-					{ColumnName: "body", Expression: "NULL"},
+					{
+						ColumnName: "body",
+						Expression: "NULL",
+					},
 				},
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
 					},
 				},
 			},
@@ -1651,8 +1837,13 @@ func TestSQLiteDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLUpdateInstruction{
-				TableName:  "users",
-				SetClauses: []*SQLSetClause{{ColumnName: "name", Expression: "'Alice'"}},
+				TableName: "users",
+				SetClauses: []*SQLSetClause{
+					{
+						ColumnName: "name",
+						Expression: "'Alice'",
+					},
+				},
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{&SQLIsNullCondition{ColumnName: "email"}},
 				},

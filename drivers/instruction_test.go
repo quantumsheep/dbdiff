@@ -9,13 +9,19 @@ import (
 
 func TestInstructions(t *testing.T) {
 	t.Run("EqualityCondition", func(t *testing.T) {
-		condition := &SQLEqualityCondition{ColumnName: "id", Expression: "1"}
+		condition := &SQLEqualityCondition{
+			ColumnName: "id",
+			Expression: "1",
+		}
 
 		require.Equal(t, `"id" = 1`, condition.ConditionClause())
 	})
 
 	t.Run("EqualityConditionQuotesTheName", func(t *testing.T) {
-		condition := &SQLEqualityCondition{ColumnName: `we"ird`, Expression: "'a'"}
+		condition := &SQLEqualityCondition{
+			ColumnName: `we"ird`,
+			Expression: "'a'",
+		}
 
 		require.Equal(t, `"we""ird" = 'a'`, condition.ConditionClause())
 	})
@@ -29,8 +35,14 @@ func TestInstructions(t *testing.T) {
 	t.Run("ConjunctionCondition", func(t *testing.T) {
 		condition := &SQLConjunctionCondition{
 			Conditions: []Condition{
-				&SQLEqualityCondition{ColumnName: "team", Expression: "'red'"},
-				&SQLEqualityCondition{ColumnName: "member", Expression: "'Alice'"},
+				&SQLEqualityCondition{
+					ColumnName: "team",
+					Expression: "'red'",
+				},
+				&SQLEqualityCondition{
+					ColumnName: "member",
+					Expression: "'Alice'",
+				},
 			},
 		}
 
@@ -44,7 +56,10 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("SetClause", func(t *testing.T) {
-		clause := &SQLSetClause{ColumnName: "name", Expression: "'Alice'"}
+		clause := &SQLSetClause{
+			ColumnName: "name",
+			Expression: "'Alice'",
+		}
 
 		require.Equal(t, `"name" = 'Alice'`, clause.Clause())
 	})
@@ -91,9 +106,15 @@ func TestInstructions(t *testing.T) {
 		instruction := &SQLUpdateInstruction{
 			TableName: "users",
 			SetClauses: []*SQLSetClause{
-				{ColumnName: "name", Expression: "'Alice'"},
+				{
+					ColumnName: "name",
+					Expression: "'Alice'",
+				},
 			},
-			Condition: &SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+			Condition: &SQLEqualityCondition{
+				ColumnName: "id",
+				Expression: "1",
+			},
 		}
 
 		require.Equal(t,
@@ -105,10 +126,19 @@ func TestInstructions(t *testing.T) {
 		instruction := &SQLUpdateInstruction{
 			TableName: "users",
 			SetClauses: []*SQLSetClause{
-				{ColumnName: "name", Expression: "'Alice'"},
-				{ColumnName: "age", Expression: "30"},
+				{
+					ColumnName: "name",
+					Expression: "'Alice'",
+				},
+				{
+					ColumnName: "age",
+					Expression: "30",
+				},
 			},
-			Condition: &SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+			Condition: &SQLEqualityCondition{
+				ColumnName: "id",
+				Expression: "1",
+			},
 		}
 
 		require.Equal(t,
@@ -118,8 +148,13 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("UpdateWithoutACondition", func(t *testing.T) {
 		instruction := &SQLUpdateInstruction{
-			TableName:  "users",
-			SetClauses: []*SQLSetClause{{ColumnName: "name", Expression: "'Alice'"}},
+			TableName: "users",
+			SetClauses: []*SQLSetClause{
+				{
+					ColumnName: "name",
+					Expression: "'Alice'",
+				},
+			},
 		}
 
 		require.Equal(t, `UPDATE "users" SET "name" = 'Alice';`, instruction.String())
@@ -128,7 +163,10 @@ func TestInstructions(t *testing.T) {
 	t.Run("Delete", func(t *testing.T) {
 		instruction := &SQLDeleteInstruction{
 			TableName: "users",
-			Condition: &SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+			Condition: &SQLEqualityCondition{
+				ColumnName: "id",
+				Expression: "2",
+			},
 		}
 
 		require.Equal(t, `DELETE FROM "users" WHERE "id" = 2;`, instruction.String())
@@ -181,7 +219,10 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("RenameColumnAction", func(t *testing.T) {
-		action := &SQLRenameColumnAction{ColumnName: "name", NewColumnName: "full_name"}
+		action := &SQLRenameColumnAction{
+			ColumnName:    "name",
+			NewColumnName: "full_name",
+		}
 
 		require.Equal(t, `RENAME COLUMN "name" TO "full_name"`, action.TableActionClause())
 	})
@@ -196,7 +237,10 @@ func TestInstructions(t *testing.T) {
 		instruction := &SQLiteAlterTableInstruction{
 			Name: "users",
 			Action: &SQLiteAddColumnAction{
-				Column: &SQLiteColumn{Name: "email", Type: "TEXT"},
+				Column: &SQLiteColumn{
+					Name: "email",
+					Type: "TEXT",
+				},
 			},
 		}
 
@@ -205,8 +249,11 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("SQLiteAlterTableRenameColumn", func(t *testing.T) {
 		instruction := &SQLiteAlterTableInstruction{
-			Name:   "users",
-			Action: &SQLRenameColumnAction{ColumnName: "name", NewColumnName: "full_name"},
+			Name: "users",
+			Action: &SQLRenameColumnAction{
+				ColumnName:    "name",
+				NewColumnName: "full_name",
+			},
 		}
 
 		require.Equal(t,
@@ -218,8 +265,16 @@ func TestInstructions(t *testing.T) {
 		instruction := &SQLiteCreateTableInstruction{
 			Name: "users",
 			Columns: []*SQLiteColumn{
-				{Name: "id", Type: "INTEGER", PrimaryKey: true},
-				{Name: "name", Type: "TEXT", NotNull: true},
+				{
+					Name:       "id",
+					Type:       "INTEGER",
+					PrimaryKey: true,
+				},
+				{
+					Name:    "name",
+					Type:    "TEXT",
+					NotNull: true,
+				},
 			},
 		}
 
@@ -233,13 +288,25 @@ func TestInstructions(t *testing.T) {
 		instruction := &SQLiteCreateTableInstruction{
 			Name: "memberships",
 			Columns: []*SQLiteColumn{
-				{Name: "team", Type: "TEXT", NotNull: true},
-				{Name: "member", Type: "TEXT", NotNull: true},
+				{
+					Name:    "team",
+					Type:    "TEXT",
+					NotNull: true,
+				},
+				{
+					Name:    "member",
+					Type:    "TEXT",
+					NotNull: true,
+				},
 			},
 			PrimaryKey:        []string{"team", "member"},
 			UniqueConstraints: [][]string{{"member"}},
 			ForeignKeys: []*SQLiteForeignKey{
-				{Table: "teams", From: []string{"team"}, To: []string{"name"}},
+				{
+					Table: "teams",
+					From:  []string{"team"},
+					To:    []string{"name"},
+				},
 			},
 		}
 
@@ -309,7 +376,10 @@ func TestInstructions(t *testing.T) {
 			Name: "users",
 			Actions: []AlterTableAction{
 				&PostgresAddColumnAction{
-					Column: &PostgresColumn{Name: "email", Type: "text"},
+					Column: &PostgresColumn{
+						Name: "email",
+						Type: "text",
+					},
 				},
 			},
 		}
@@ -332,7 +402,10 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("PostgresAlterColumnTypeAction", func(t *testing.T) {
-		action := &PostgresAlterColumnTypeAction{ColumnName: "age", DataType: "integer"}
+		action := &PostgresAlterColumnTypeAction{
+			ColumnName: "age",
+			DataType:   "integer",
+		}
 
 		require.Equal(t, `ALTER COLUMN "age" TYPE integer`, action.TableActionClause())
 	})
@@ -362,7 +435,10 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("PostgresSetDefaultAction", func(t *testing.T) {
-		action := &PostgresSetDefaultAction{ColumnName: "age", Expression: "0"}
+		action := &PostgresSetDefaultAction{
+			ColumnName: "age",
+			Expression: "0",
+		}
 
 		require.Equal(t, `ALTER COLUMN "age" SET DEFAULT 0`, action.TableActionClause())
 	})
@@ -375,7 +451,10 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("PostgresAddConstraintAction", func(t *testing.T) {
 		action := &PostgresAddConstraintAction{
-			Constraint: &PostgresConstraint{Name: "users_pkey", Def: "PRIMARY KEY (id)"},
+			Constraint: &PostgresConstraint{
+				Name: "users_pkey",
+				Def:  "PRIMARY KEY (id)",
+			},
 		}
 
 		require.Equal(t,
@@ -393,10 +472,17 @@ func TestInstructions(t *testing.T) {
 		instruction := &PostgresCreateTableInstruction{
 			Name: "users",
 			Columns: []*PostgresColumn{
-				{Name: "id", Type: "integer", NotNull: true},
+				{
+					Name:    "id",
+					Type:    "integer",
+					NotNull: true,
+				},
 			},
 			Constraints: []*PostgresConstraint{
-				{Name: "users_pkey", Def: "PRIMARY KEY (id)"},
+				{
+					Name: "users_pkey",
+					Def:  "PRIMARY KEY (id)",
+				},
 			},
 		}
 
@@ -457,7 +543,10 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("PostgresAlterTypeAddValue", func(t *testing.T) {
-		instruction := &PostgresAlterTypeAddValueInstruction{Name: "mood", Value: "calm"}
+		instruction := &PostgresAlterTypeAddValueInstruction{
+			Name:  "mood",
+			Value: "calm",
+		}
 
 		require.Equal(t, `ALTER TYPE "mood" ADD VALUE 'calm';`, instruction.String())
 	})
@@ -472,8 +561,14 @@ func TestInstructions(t *testing.T) {
 		instruction := &PostgresCreateCompositeTypeInstruction{
 			Name: "address",
 			Attributes: []*PostgresCompositeTypeAttribute{
-				{Name: "street", Type: "text"},
-				{Name: "number", Type: "integer"},
+				{
+					Name: "street",
+					Type: "text",
+				},
+				{
+					Name: "number",
+					Type: "integer",
+				},
 			},
 		}
 
@@ -496,10 +591,16 @@ func TestInstructions(t *testing.T) {
 		instruction := &PostgresCreateDomainInstruction{
 			Name:     "positive",
 			BaseType: "integer",
-			Default:  sql.NullString{String: "1", Valid: true},
-			NotNull:  true,
+			Default: sql.NullString{
+				String: "1",
+				Valid:  true,
+			},
+			NotNull: true,
 			Constraints: []*PostgresDomainConstraint{
-				{Name: "positive_check", Def: "CHECK ((VALUE > 0))"},
+				{
+					Name: "positive_check",
+					Def:  "CHECK ((VALUE > 0))",
+				},
 			},
 		}
 
@@ -569,7 +670,10 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("PostgresDropFunction", func(t *testing.T) {
-		instruction := &PostgresDropFunctionInstruction{Name: "add", Arguments: "integer"}
+		instruction := &PostgresDropFunctionInstruction{
+			Name:      "add",
+			Arguments: "integer",
+		}
 
 		require.Equal(t, `DROP FUNCTION "add"(integer);`, instruction.String())
 	})
@@ -593,8 +697,14 @@ func TestInstructions(t *testing.T) {
 			Arguments:          "integer",
 			TransitionFunction: "int4pl",
 			StateType:          "integer",
-			FinalFunction:      sql.NullString{String: "int4out", Valid: true},
-			InitialCondition:   sql.NullString{String: "0", Valid: true},
+			FinalFunction: sql.NullString{
+				String: "int4out",
+				Valid:  true,
+			},
+			InitialCondition: sql.NullString{
+				String: "0",
+				Valid:  true,
+			},
 		}
 
 		require.Equal(t,
@@ -603,17 +713,26 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("PostgresDropAggregate", func(t *testing.T) {
-		instruction := &PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"}
+		instruction := &PostgresDropAggregateInstruction{
+			Name:      "total",
+			Arguments: "integer",
+		}
 
 		require.Equal(t, `DROP AGGREGATE "total"(integer);`, instruction.String())
 	})
 
 	t.Run("PostgresCreateOperator", func(t *testing.T) {
 		instruction := &PostgresCreateOperatorInstruction{
-			Name:          "===",
-			Function:      "int4eq",
-			LeftArgument:  sql.NullString{String: "integer", Valid: true},
-			RightArgument: sql.NullString{String: "integer", Valid: true},
+			Name:     "===",
+			Function: "int4eq",
+			LeftArgument: sql.NullString{
+				String: "integer",
+				Valid:  true,
+			},
+			RightArgument: sql.NullString{
+				String: "integer",
+				Valid:  true,
+			},
 		}
 
 		require.Equal(t,
@@ -623,8 +742,11 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("PostgresDropOperatorWithoutALeftArgument", func(t *testing.T) {
 		instruction := &PostgresDropOperatorInstruction{
-			Name:          "===",
-			RightArgument: sql.NullString{String: "integer", Valid: true},
+			Name: "===",
+			RightArgument: sql.NullString{
+				String: "integer",
+				Valid:  true,
+			},
 		}
 
 		require.Equal(t, `DROP OPERATOR === (NONE, integer);`, instruction.String())
@@ -684,8 +806,11 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("PostgresAlterSequenceOneClause", func(t *testing.T) {
 		instruction := &PostgresAlterSequenceInstruction{
-			Name:      "counter",
-			Increment: sql.NullInt64{Int64: 2, Valid: true},
+			Name: "counter",
+			Increment: sql.NullInt64{
+				Int64: 2,
+				Valid: true,
+			},
 		}
 
 		require.Equal(t, `ALTER SEQUENCE "counter" INCREMENT BY 2;`, instruction.String())
@@ -693,14 +818,35 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("PostgresAlterSequenceEveryClauseInOrder", func(t *testing.T) {
 		instruction := &PostgresAlterSequenceInstruction{
-			Name:      "counter",
-			DataType:  sql.NullString{String: "integer", Valid: true},
-			Increment: sql.NullInt64{Int64: 2, Valid: true},
-			Min:       sql.NullInt64{Int64: 5, Valid: true},
-			Max:       sql.NullInt64{Int64: 50, Valid: true},
-			Start:     sql.NullInt64{Int64: 5, Valid: true},
-			Cycle:     sql.NullBool{Bool: true, Valid: true},
-			Restart:   sql.NullInt64{Int64: 5, Valid: true},
+			Name: "counter",
+			DataType: sql.NullString{
+				String: "integer",
+				Valid:  true,
+			},
+			Increment: sql.NullInt64{
+				Int64: 2,
+				Valid: true,
+			},
+			Min: sql.NullInt64{
+				Int64: 5,
+				Valid: true,
+			},
+			Max: sql.NullInt64{
+				Int64: 50,
+				Valid: true,
+			},
+			Start: sql.NullInt64{
+				Int64: 5,
+				Valid: true,
+			},
+			Cycle: sql.NullBool{
+				Bool:  true,
+				Valid: true,
+			},
+			Restart: sql.NullInt64{
+				Int64: 5,
+				Valid: true,
+			},
 		}
 
 		require.Equal(t,
@@ -730,13 +876,24 @@ func TestInstructions(t *testing.T) {
 			require.False(t, isInstruction, name)
 		}
 
-		column := &SQLiteColumn{Name: "id", Type: "INTEGER", NotNull: true}
+		column := &SQLiteColumn{
+			Name:    "id",
+			Type:    "INTEGER",
+			NotNull: true,
+		}
 		require.Equal(t, `"id" INTEGER NOT NULL`, column.Definition())
 
-		postgresColumn := &PostgresColumn{Name: "id", Type: "integer", NotNull: true}
+		postgresColumn := &PostgresColumn{
+			Name:    "id",
+			Type:    "integer",
+			NotNull: true,
+		}
 		require.Equal(t, `"id" integer NOT NULL`, postgresColumn.Definition())
 
-		constraint := &PostgresConstraint{Name: "users_pkey", Def: "PRIMARY KEY (id)"}
+		constraint := &PostgresConstraint{
+			Name: "users_pkey",
+			Def:  "PRIMARY KEY (id)",
+		}
 		require.Equal(t, `CONSTRAINT "users_pkey" PRIMARY KEY (id)`, constraint.Clause())
 
 		foreignKey := &SQLiteForeignKey{
@@ -773,13 +930,26 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("SQLiteTableInstructions", func(t *testing.T) {
 		table := &SQLiteTable{
-			Name:    "users",
-			Columns: []*SQLiteColumn{{Name: "id", Type: "INTEGER", PrimaryKey: true}},
+			Name: "users",
+			Columns: []*SQLiteColumn{
+				{
+					Name:       "id",
+					Type:       "INTEGER",
+					PrimaryKey: true,
+				},
+			},
 			Indexes: []*SQLiteIndex{
-				{Table: "users", Name: "idx_users_id", Keys: []string{`"id"`}},
+				{
+					Table: "users",
+					Name:  "idx_users_id",
+					Keys:  []string{`"id"`},
+				},
 			},
 			Triggers: []*SQLiteTrigger{
-				{Name: "t", SQL: "CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END"},
+				{
+					Name: "t",
+					SQL:  "CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END",
+				},
 			},
 		}
 

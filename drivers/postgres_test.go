@@ -204,8 +204,14 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresCreateTableInstruction{
 				Name: "simple",
 				Columns: []*PostgresColumn{
-					{Name: "id", Type: "integer"},
-					{Name: "name", Type: "text"},
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "name",
+						Type: "text",
+					},
 				},
 			},
 		})
@@ -231,7 +237,12 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresAddColumnAction{Column: &PostgresColumn{Name: "name", Type: "text"}},
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "name",
+							Type: "text",
+						},
+					},
 				},
 			},
 		})
@@ -263,7 +274,10 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresAlterColumnTypeAction{ColumnName: "name", DataType: "text"},
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "name",
+						DataType:   "text",
+					},
 				},
 			},
 		})
@@ -281,7 +295,10 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresAlterColumnTypeAction{ColumnName: "score", DataType: "bigint"},
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "score",
+						DataType:   "bigint",
+					},
 				},
 			},
 		})
@@ -307,7 +324,11 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresAlterColumnTypeAction{ColumnName: "score", DataType: "integer", UsingCast: true},
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "score",
+						DataType:   "integer",
+						UsingCast:  true,
+					},
 				},
 			},
 		})
@@ -330,8 +351,14 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresCreateTableInstruction{
 				Name: "tags",
 				Columns: []*PostgresColumn{
-					{Name: "id", Type: "integer"},
-					{Name: "labels", Type: "text[]"},
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "labels",
+						Type: "text[]",
+					},
 				},
 			},
 		})
@@ -348,12 +375,21 @@ func TestPostgresDriver(t *testing.T) {
 		`)
 
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresCreateEnumTypeInstruction{Name: "mood", Values: []string{"sad", "ok"}},
+			&PostgresCreateEnumTypeInstruction{
+				Name:   "mood",
+				Values: []string{"sad", "ok"},
+			},
 			&PostgresCreateTableInstruction{
 				Name: "users",
 				Columns: []*PostgresColumn{
-					{Name: "id", Type: "integer"},
-					{Name: "mood", Type: "mood"},
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "mood",
+						Type: "mood",
+					},
 				},
 			},
 		})
@@ -374,7 +410,11 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresAlterColumnTypeAction{ColumnName: "tags", DataType: "bigint[]", UsingCast: true},
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "tags",
+						DataType:   "bigint[]",
+						UsingCast:  true,
+					},
 				},
 			},
 		})
@@ -414,7 +454,10 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresSetDefaultAction{ColumnName: "name", Expression: "'anon'::text"},
+					&PostgresSetDefaultAction{
+						ColumnName: "name",
+						Expression: "'anon'::text",
+					},
 				},
 			},
 		})
@@ -439,7 +482,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "users",
 				Actions: []AlterTableAction{
 					&PostgresAddConstraintAction{
-						Constraint: &PostgresConstraint{Name: "pk_users", Type: "p", Def: "PRIMARY KEY (id)"},
+						Constraint: &PostgresConstraint{
+							Name: "pk_users",
+							Type: "p",
+							Def:  "PRIMARY KEY (id)",
+						},
 					},
 				},
 			},
@@ -457,7 +504,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "users",
 				Actions: []AlterTableAction{
 					&PostgresAddConstraintAction{
-						Constraint: &PostgresConstraint{Name: "uq_email", Type: "u", Def: "UNIQUE (email)"},
+						Constraint: &PostgresConstraint{
+							Name: "uq_email",
+							Type: "u",
+							Def:  "UNIQUE (email)",
+						},
 					},
 				},
 			},
@@ -481,7 +532,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "users",
 				Actions: []AlterTableAction{
 					&PostgresAddConstraintAction{
-						Constraint: &PostgresConstraint{Name: "fk_role", Type: "f", Def: "FOREIGN KEY (role_id) REFERENCES roles(id)"},
+						Constraint: &PostgresConstraint{
+							Name: "fk_role",
+							Type: "f",
+							Def:  "FOREIGN KEY (role_id) REFERENCES roles(id)",
+						},
 					},
 				},
 			},
@@ -586,7 +641,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "users",
 				Actions: []AlterTableAction{
 					&PostgresAddConstraintAction{
-						Constraint: &PostgresConstraint{Name: "uq_users", Type: "u", Def: "UNIQUE (id)"},
+						Constraint: &PostgresConstraint{
+							Name: "uq_users",
+							Type: "u",
+							Def:  "UNIQUE (id)",
+						},
 					},
 				},
 			},
@@ -789,10 +848,19 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterSequenceInstruction{
-				Name:      "counter",
-				Increment: sql.NullInt64{Int64: 2, Valid: true},
-				Max:       sql.NullInt64{Int64: 100, Valid: true},
-				Cycle:     sql.NullBool{Bool: true, Valid: true},
+				Name: "counter",
+				Increment: sql.NullInt64{
+					Int64: 2,
+					Valid: true,
+				},
+				Max: sql.NullInt64{
+					Int64: 100,
+					Valid: true,
+				},
+				Cycle: sql.NullBool{
+					Bool:  true,
+					Valid: true,
+				},
 			},
 		})
 
@@ -810,10 +878,19 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterSequenceInstruction{
-				Name:    "counter",
-				Min:     sql.NullInt64{Int64: 100, Valid: true},
-				Start:   sql.NullInt64{Int64: 100, Valid: true},
-				Restart: sql.NullInt64{Int64: 100, Valid: true},
+				Name: "counter",
+				Min: sql.NullInt64{
+					Int64: 100,
+					Valid: true,
+				},
+				Start: sql.NullInt64{
+					Int64: 100,
+					Valid: true,
+				},
+				Restart: sql.NullInt64{
+					Int64: 100,
+					Valid: true,
+				},
 			},
 		})
 
@@ -831,9 +908,15 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterSequenceInstruction{
-				Name:    "counter",
-				Max:     sql.NullInt64{Int64: 5, Valid: true},
-				Restart: sql.NullInt64{Int64: 1, Valid: true},
+				Name: "counter",
+				Max: sql.NullInt64{
+					Int64: 5,
+					Valid: true,
+				},
+				Restart: sql.NullInt64{
+					Int64: 1,
+					Valid: true,
+				},
 			},
 		})
 
@@ -851,10 +934,19 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterSequenceInstruction{
-				Name:      "counter",
-				Increment: sql.NullInt64{Int64: 2, Valid: true},
-				Max:       sql.NullInt64{Int64: 100, Valid: true},
-				Cycle:     sql.NullBool{Bool: true, Valid: true},
+				Name: "counter",
+				Increment: sql.NullInt64{
+					Int64: 2,
+					Valid: true,
+				},
+				Max: sql.NullInt64{
+					Int64: 100,
+					Valid: true,
+				},
+				Cycle: sql.NullBool{
+					Bool:  true,
+					Valid: true,
+				},
 			},
 		})
 
@@ -875,7 +967,10 @@ func TestPostgresDriver(t *testing.T) {
 						Name:    "id",
 						Type:    "integer",
 						NotNull: true,
-						Default: sql.NullString{String: "nextval('users_id_seq'::regclass)", Valid: true},
+						Default: sql.NullString{
+							String: "nextval('users_id_seq'::regclass)",
+							Valid:  true,
+						},
 					},
 				},
 			},
@@ -888,7 +983,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
 
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresCreateEnumTypeInstruction{Name: "mood", Values: []string{"sad", "ok"}},
+			&PostgresCreateEnumTypeInstruction{
+				Name:   "mood",
+				Values: []string{"sad", "ok"},
+			},
 		})
 
 		driver.ExecOnTarget(diff)
@@ -901,7 +999,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
 
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresAlterTypeAddValueInstruction{Name: "mood", Value: "happy"},
+			&PostgresAlterTypeAddValueInstruction{
+				Name:  "mood",
+				Value: "happy",
+			},
 		})
 
 		driver.ExecOnTarget(diff)
@@ -916,7 +1017,10 @@ func TestPostgresDriver(t *testing.T) {
 		// PostgreSQL removes no value from an enum. The type needs a recreation.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropTypeInstruction{Name: "mood"},
-			&PostgresCreateEnumTypeInstruction{Name: "mood", Values: []string{"sad"}},
+			&PostgresCreateEnumTypeInstruction{
+				Name:   "mood",
+				Values: []string{"sad"},
+			},
 		})
 
 		driver.ExecOnTarget(diff)
@@ -943,10 +1047,16 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresCreateDomainInstruction{
 				Name:     "positive_int",
 				BaseType: "integer",
-				Default:  sql.NullString{String: "1", Valid: true},
-				NotNull:  true,
+				Default: sql.NullString{
+					String: "1",
+					Valid:  true,
+				},
+				NotNull: true,
 				Constraints: []*PostgresDomainConstraint{
-					{Name: "positive_int_check", Def: "CHECK ((VALUE > 0))"},
+					{
+						Name: "positive_int_check",
+						Def:  "CHECK ((VALUE > 0))",
+					},
 				},
 			},
 		})
@@ -1020,8 +1130,14 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresCreateCompositeTypeInstruction{
 				Name: "address",
 				Attributes: []*PostgresCompositeTypeAttribute{
-					{Name: "street", Type: "text"},
-					{Name: "city", Type: "character varying(10)"},
+					{
+						Name: "street",
+						Type: "text",
+					},
+					{
+						Name: "city",
+						Type: "character varying(10)",
+					},
 				},
 			},
 		})
@@ -1040,8 +1156,14 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresCreateCompositeTypeInstruction{
 				Name: "address",
 				Attributes: []*PostgresCompositeTypeAttribute{
-					{Name: "street", Type: "text"},
-					{Name: "city", Type: "text"},
+					{
+						Name: "street",
+						Type: "text",
+					},
+					{
+						Name: "city",
+						Type: "text",
+					},
 				},
 			},
 		})
@@ -1076,7 +1198,10 @@ func TestPostgresDriver(t *testing.T) {
 				Arguments:          "integer",
 				TransitionFunction: "int_add",
 				StateType:          "integer",
-				InitialCondition:   sql.NullString{String: "0", Valid: true},
+				InitialCondition: sql.NullString{
+					String: "0",
+					Valid:  true,
+				},
 			},
 		})
 
@@ -1095,13 +1220,19 @@ func TestPostgresDriver(t *testing.T) {
 
 		// PostgreSQL changes no option of an aggregate, so the diff recreates it.
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"},
+			&PostgresDropAggregateInstruction{
+				Name:      "total",
+				Arguments: "integer",
+			},
 			&PostgresCreateAggregateInstruction{
 				Name:               "total",
 				Arguments:          "integer",
 				TransitionFunction: "int_add",
 				StateType:          "integer",
-				InitialCondition:   sql.NullString{String: "0", Valid: true},
+				InitialCondition: sql.NullString{
+					String: "0",
+					Valid:  true,
+				},
 			},
 		})
 
@@ -1118,7 +1249,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"},
+			&PostgresDropAggregateInstruction{
+				Name:      "total",
+				Arguments: "integer",
+			},
 		})
 
 		driver.ExecOnTarget(diff)
@@ -1131,8 +1265,14 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"},
-			&PostgresDropFunctionInstruction{Name: "int_add", Arguments: "integer, integer"},
+			&PostgresDropAggregateInstruction{
+				Name:      "total",
+				Arguments: "integer",
+			},
+			&PostgresDropFunctionInstruction{
+				Name:      "int_add",
+				Arguments: "integer, integer",
+			},
 		})
 
 		driver.ExecOnTarget(diff)
@@ -1146,11 +1286,20 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropOperatorInstruction{
-				Name:          "===",
-				LeftArgument:  sql.NullString{String: "integer", Valid: true},
-				RightArgument: sql.NullString{String: "integer", Valid: true},
+				Name: "===",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
 			},
-			&PostgresDropFunctionInstruction{Name: "int_add", Arguments: "integer, integer"},
+			&PostgresDropFunctionInstruction{
+				Name:      "int_add",
+				Arguments: "integer, integer",
+			},
 		})
 
 		driver.ExecOnTarget(diff)
@@ -1167,10 +1316,16 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresCreateOperatorInstruction{
-				Name:          "===",
-				Function:      "int_add",
-				LeftArgument:  sql.NullString{String: "integer", Valid: true},
-				RightArgument: sql.NullString{String: "integer", Valid: true},
+				Name:     "===",
+				Function: "int_add",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
 			},
 		})
 
@@ -1193,15 +1348,27 @@ func TestPostgresDriver(t *testing.T) {
 		// PostgreSQL changes no function of an operator, so the diff recreates it.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropOperatorInstruction{
-				Name:          "===",
-				LeftArgument:  sql.NullString{String: "integer", Valid: true},
-				RightArgument: sql.NullString{String: "integer", Valid: true},
+				Name: "===",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
 			},
 			&PostgresCreateOperatorInstruction{
-				Name:          "===",
-				Function:      "int_add",
-				LeftArgument:  sql.NullString{String: "integer", Valid: true},
-				RightArgument: sql.NullString{String: "integer", Valid: true},
+				Name:     "===",
+				Function: "int_add",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
 			},
 		})
 
@@ -1219,9 +1386,15 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropOperatorInstruction{
-				Name:          "===",
-				LeftArgument:  sql.NullString{String: "integer", Valid: true},
-				RightArgument: sql.NullString{String: "integer", Valid: true},
+				Name: "===",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
 			},
 		})
 
@@ -1286,7 +1459,10 @@ func TestPostgresDriver(t *testing.T) {
 
 		// PostgreSQL refuses CREATE OR REPLACE FUNCTION when the return type changes.
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresDropFunctionInstruction{Name: "calculate", Arguments: "a integer"},
+			&PostgresDropFunctionInstruction{
+				Name:      "calculate",
+				Arguments: "a integer",
+			},
 			&PostgresCreateFunctionInstruction{
 				Definition: "CREATE OR REPLACE FUNCTION calculate(a integer)\n RETURNS text\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN a::text; END; $function$",
 			},
@@ -1301,7 +1477,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
 
 		diff := driver.RequireInstructions([]Instruction{
-			&PostgresDropFunctionInstruction{Name: "increment", Arguments: "a integer"},
+			&PostgresDropFunctionInstruction{
+				Name:      "increment",
+				Arguments: "a integer",
+			},
 		})
 
 		driver.ExecOnTarget(diff)
@@ -1406,7 +1585,10 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresAlterColumnTypeAction{ColumnName: "label", DataType: "character varying"},
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "label",
+						DataType:   "character varying",
+					},
 				},
 			},
 			&PostgresCreateViewInstruction{
@@ -1483,11 +1665,17 @@ func TestPostgresDriver(t *testing.T) {
 			&SQLUpdateInstruction{
 				TableName: "users",
 				SetClauses: []*SQLSetClause{
-					{ColumnName: "name", Expression: "'Robert'"},
+					{
+						ColumnName: "name",
+						Expression: "'Robert'",
+					},
 				},
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
 					},
 				},
 			},
@@ -1495,7 +1683,10 @@ func TestPostgresDriver(t *testing.T) {
 				TableName: "users",
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "4"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "4",
+						},
 					},
 				},
 			},
@@ -1560,22 +1751,34 @@ func TestPostgresDriver(t *testing.T) {
 			&SQLUpdateInstruction{
 				TableName: "notes",
 				SetClauses: []*SQLSetClause{
-					{ColumnName: "body", Expression: "'it''s a note'"},
+					{
+						ColumnName: "body",
+						Expression: "'it''s a note'",
+					},
 				},
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
 					},
 				},
 			},
 			&SQLUpdateInstruction{
 				TableName: "notes",
 				SetClauses: []*SQLSetClause{
-					{ColumnName: "body", Expression: "NULL"},
+					{
+						ColumnName: "body",
+						Expression: "NULL",
+					},
 				},
 				Condition: &SQLConjunctionCondition{
 					Conditions: []Condition{
-						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
 					},
 				},
 			},
@@ -1608,7 +1811,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "items",
 				Actions: []AlterTableAction{
 					&PostgresAddColumnAction{
-						Column: &PostgresColumn{Name: "code", Type: "integer", NotNull: true},
+						Column: &PostgresColumn{
+							Name:    "code",
+							Type:    "integer",
+							NotNull: true,
+						},
 					},
 				},
 			},
@@ -1616,7 +1823,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "items",
 				Actions: []AlterTableAction{
 					&PostgresAddConstraintAction{
-						Constraint: &PostgresConstraint{Name: "items_pkey", Type: "p", Def: "PRIMARY KEY (code)"},
+						Constraint: &PostgresConstraint{
+							Name: "items_pkey",
+							Type: "p",
+							Def:  "PRIMARY KEY (code)",
+						},
 					},
 				},
 			},
@@ -1663,7 +1874,11 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresCreateTableInstruction{
 				Name: `order "list"`,
 				Columns: []*PostgresColumn{
-					{Name: "id", Type: "integer", NotNull: true},
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
 				},
 			},
 		})
