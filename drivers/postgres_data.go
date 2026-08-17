@@ -259,7 +259,7 @@ const postgresTimeLayout = "2006-01-02 15:04:05.999999-07:00"
 // through these literals, so NULL never equals the text 'NULL'.
 func formatPostgresValue(value any) string {
 	if value == nil {
-		return "NULL"
+		return sqlNullLiteral
 	}
 
 	textValue, isText := value.(string)

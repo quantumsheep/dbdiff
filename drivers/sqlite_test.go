@@ -1637,6 +1637,35 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("NullPrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE users (email TEXT PRIMARY KEY, name TEXT);`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO users (email, name) VALUES (NULL, 'Alice');`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO users (email, name) VALUES (NULL, 'Bob');`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLUpdateInstruction{
+				TableName:  "users",
+				SetClauses: []*SQLSetClause{{ColumnName: "name", Expression: "'Alice'"}},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{&SQLIsNullCondition{ColumnName: "email"}},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("users", "")
+
+		require.Equal(t, []map[string]any{{"email": nil, "name": "Alice"}}, rows)
+	})
+
 	t.Run("CompareNoRowWithoutTheDataFlag", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

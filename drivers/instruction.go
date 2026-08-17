@@ -226,9 +226,14 @@ func (a *SQLRenameTableAction) TableActionClause() string {
 	return "RENAME TO " + quoteIdentifier(a.NewName)
 }
 
-// rowKeyCondition builds the WHERE body that selects one row by its primary key.
+// rowKeyCondition builds the WHERE body that selects one row by its primary key. A NULL
+// value needs IS NULL, because a comparison with NULL matches no row.
 func rowKeyCondition(primaryKeyColumnNames []string, row map[string]string) Condition {
 	conditions := lo.Map(primaryKeyColumnNames, func(name string, _ int) Condition {
+		if row[name] == sqlNullLiteral {
+			return &SQLIsNullCondition{ColumnName: name}
+		}
+
 		return &SQLEqualityCondition{ColumnName: name, Expression: row[name]}
 	})
 
