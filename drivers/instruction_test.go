@@ -60,6 +60,112 @@ func TestInstructions(t *testing.T) {
 	t.Run("RenderInstructionsOfAnEmptyList", func(t *testing.T) {
 		require.Equal(t, "", RenderInstructions(nil))
 	})
+
+	t.Run("Insert", func(t *testing.T) {
+		instruction := &SQLInsertInstruction{
+			TableName:   "users",
+			ColumnNames: []string{"id", "name"},
+			Values:      []string{"1", "'Alice'"},
+		}
+
+		require.Equal(t,
+			`INSERT INTO "users" ("id", "name") VALUES (1, 'Alice');`,
+			instruction.String())
+	})
+
+	t.Run("InsertSelect", func(t *testing.T) {
+		instruction := &SQLInsertSelectInstruction{
+			TableName:         "_users_temp",
+			ColumnNames:       []string{"id", "email"},
+			SelectExpressions: []string{`"id"`, "NULL"},
+			SourceTableName:   "users",
+		}
+
+		require.Equal(t,
+			`INSERT INTO "_users_temp" ("id", "email") SELECT "id", NULL FROM "users";`,
+			instruction.String())
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		instruction := &SQLUpdateInstruction{
+			TableName: "users",
+			SetClauses: []*SQLSetClause{
+				{ColumnName: "name", Expression: "'Alice'"},
+			},
+			Condition: &SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+		}
+
+		require.Equal(t,
+			`UPDATE "users" SET "name" = 'Alice' WHERE "id" = 1;`,
+			instruction.String())
+	})
+
+	t.Run("UpdateTwoColumns", func(t *testing.T) {
+		instruction := &SQLUpdateInstruction{
+			TableName: "users",
+			SetClauses: []*SQLSetClause{
+				{ColumnName: "name", Expression: "'Alice'"},
+				{ColumnName: "age", Expression: "30"},
+			},
+			Condition: &SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+		}
+
+		require.Equal(t,
+			`UPDATE "users" SET "name" = 'Alice', "age" = 30 WHERE "id" = 1;`,
+			instruction.String())
+	})
+
+	t.Run("UpdateWithoutACondition", func(t *testing.T) {
+		instruction := &SQLUpdateInstruction{
+			TableName:  "users",
+			SetClauses: []*SQLSetClause{{ColumnName: "name", Expression: "'Alice'"}},
+		}
+
+		require.Equal(t, `UPDATE "users" SET "name" = 'Alice';`, instruction.String())
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		instruction := &SQLDeleteInstruction{
+			TableName: "users",
+			Condition: &SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+		}
+
+		require.Equal(t, `DELETE FROM "users" WHERE "id" = 2;`, instruction.String())
+	})
+
+	t.Run("DeleteWithoutACondition", func(t *testing.T) {
+		instruction := &SQLDeleteInstruction{TableName: "users"}
+
+		require.Equal(t, `DELETE FROM "users";`, instruction.String())
+	})
+
+	t.Run("DropTable", func(t *testing.T) {
+		instruction := &SQLDropTableInstruction{Name: "users"}
+
+		require.Equal(t, `DROP TABLE "users";`, instruction.String())
+	})
+
+	t.Run("DropView", func(t *testing.T) {
+		instruction := &SQLDropViewInstruction{Name: "user_ids"}
+
+		require.Equal(t, `DROP VIEW "user_ids";`, instruction.String())
+	})
+
+	t.Run("DropIndex", func(t *testing.T) {
+		instruction := &SQLDropIndexInstruction{Name: "idx_users_name"}
+
+		require.Equal(t, `DROP INDEX "idx_users_name";`, instruction.String())
+	})
+
+	t.Run("Comment", func(t *testing.T) {
+		instruction := &SQLCommentInstruction{
+			Text: `The table "logs" holds no primary key, so dbdiff compares no row of it.`,
+		}
+
+		require.Equal(t,
+			`-- The table "logs" holds no primary key, so dbdiff compares no row of it.`,
+			instruction.String())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.

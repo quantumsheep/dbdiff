@@ -91,3 +91,108 @@ type SQLSetClause struct {
 func (c *SQLSetClause) Clause() string {
 	return fmt.Sprintf("%s = %s", quoteIdentifier(c.ColumnName), c.Expression)
 }
+
+// INSERT INTO table_name ( column_name [, ...] ) VALUES ( expression [, ...] )
+type SQLInsertInstruction struct {
+	TableName   string
+	ColumnNames []string
+	Values      []string
+}
+
+func (i *SQLInsertInstruction) String() string {
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
+		quoteIdentifier(i.TableName),
+		strings.Join(quoteIdentifiers(i.ColumnNames), ", "),
+		strings.Join(i.Values, ", "))
+}
+
+// INSERT INTO table_name ( column_name [, ...] ) SELECT expression [, ...] FROM table_name
+// An expression holds the text of a quoted column, of a default value, or of NULL.
+type SQLInsertSelectInstruction struct {
+	TableName         string
+	ColumnNames       []string
+	SelectExpressions []string
+	SourceTableName   string
+}
+
+func (i *SQLInsertSelectInstruction) String() string {
+	return fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM %s;",
+		quoteIdentifier(i.TableName),
+		strings.Join(quoteIdentifiers(i.ColumnNames), ", "),
+		strings.Join(i.SelectExpressions, ", "),
+		quoteIdentifier(i.SourceTableName))
+}
+
+// UPDATE table_name SET { column_name = expression } [, ...] [ WHERE condition ]
+type SQLUpdateInstruction struct {
+	TableName  string
+	SetClauses []*SQLSetClause
+	Condition  Condition
+}
+
+func (i *SQLUpdateInstruction) String() string {
+	clauses := lo.Map(i.SetClauses, func(clause *SQLSetClause, _ int) string {
+		return clause.Clause()
+	})
+
+	statement := fmt.Sprintf("UPDATE %s SET %s",
+		quoteIdentifier(i.TableName), strings.Join(clauses, ", "))
+
+	if i.Condition != nil {
+		statement += " WHERE " + i.Condition.ConditionClause()
+	}
+
+	return statement + ";"
+}
+
+// DELETE FROM table_name [ WHERE condition ]
+type SQLDeleteInstruction struct {
+	TableName string
+	Condition Condition
+}
+
+func (i *SQLDeleteInstruction) String() string {
+	statement := "DELETE FROM " + quoteIdentifier(i.TableName)
+
+	if i.Condition != nil {
+		statement += " WHERE " + i.Condition.ConditionClause()
+	}
+
+	return statement + ";"
+}
+
+// DROP TABLE name
+type SQLDropTableInstruction struct {
+	Name string
+}
+
+func (i *SQLDropTableInstruction) String() string {
+	return "DROP TABLE " + quoteIdentifier(i.Name) + ";"
+}
+
+// DROP VIEW name
+type SQLDropViewInstruction struct {
+	Name string
+}
+
+func (i *SQLDropViewInstruction) String() string {
+	return "DROP VIEW " + quoteIdentifier(i.Name) + ";"
+}
+
+// DROP INDEX name
+type SQLDropIndexInstruction struct {
+	Name string
+}
+
+func (i *SQLDropIndexInstruction) String() string {
+	return "DROP INDEX " + quoteIdentifier(i.Name) + ";"
+}
+
+// A comment line of the output. The text carries no leading dashes.
+type SQLCommentInstruction struct {
+	Text string
+}
+
+func (i *SQLCommentInstruction) String() string {
+	return "-- " + i.Text
+}
