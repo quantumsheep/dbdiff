@@ -34,7 +34,10 @@ func (a *PostgresAggregate) CreateInstruction() *PostgresCreateAggregateInstruct
 }
 
 func (a *PostgresAggregate) DropInstruction() *PostgresDropAggregateInstruction {
-	return &PostgresDropAggregateInstruction{Name: a.Name, Arguments: a.Arguments}
+	return &PostgresDropAggregateInstruction{
+		Name:      a.Name,
+		Arguments: a.Arguments,
+	}
 }
 
 // PostgreSQL changes the name and the owner of an aggregate only, so every other change

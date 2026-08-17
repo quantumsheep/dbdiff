@@ -25,7 +25,10 @@ func (t *PostgresCompositeType) Equal(other *PostgresCompositeType) bool {
 }
 
 func (t *PostgresCompositeType) CreateInstruction() *PostgresCreateCompositeTypeInstruction {
-	return &PostgresCreateCompositeTypeInstruction{Name: t.Name, Attributes: t.Attributes}
+	return &PostgresCreateCompositeTypeInstruction{
+		Name:       t.Name,
+		Attributes: t.Attributes,
+	}
 }
 
 func (t *PostgresCompositeType) DropInstruction() *PostgresDropTypeInstruction {

@@ -570,6 +570,27 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 }
 ```
 
+## Struct literals
+
+**A struct literal declares one field per line.** A literal that sets one field or more
+splits every field onto its own line, with the closing brace on its own line. This rule
+covers a type of this repository and a standard-library type such as `sql.NullString`,
+with no exception.
+
+**An empty literal stays on one line.** It sets no field, so it has nothing to split:
+`&PostgresDropDomainDefaultAction{}`.
+
+```go
+// Before
+return &PostgresDropAggregateInstruction{Name: a.Name, Arguments: a.Arguments}
+
+// After
+return &PostgresDropAggregateInstruction{
+	Name:      a.Name,
+	Arguments: a.Arguments,
+}
+```
+
 # Writing style
 
 Write every text in ASD-STE100 Simplified Technical English. This rule covers code

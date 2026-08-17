@@ -10,7 +10,10 @@ func (e *PostgresExtension) CreateInstruction() *PostgresCreateExtensionInstruct
 }
 
 func (e *PostgresExtension) UpdateInstruction() *PostgresAlterExtensionInstruction {
-	return &PostgresAlterExtensionInstruction{Name: e.Name, NewVersion: e.Version}
+	return &PostgresAlterExtensionInstruction{
+		Name:       e.Name,
+		NewVersion: e.Version,
+	}
 }
 
 func (e *PostgresExtension) DropInstruction() *PostgresDropExtensionInstruction {

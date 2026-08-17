@@ -18,5 +18,8 @@ func (f *PostgresFunction) CreateInstruction() *PostgresCreateFunctionInstructio
 }
 
 func (f *PostgresFunction) DropInstruction() *PostgresDropFunctionInstruction {
-	return &PostgresDropFunctionInstruction{Name: f.Name, Arguments: f.Arguments}
+	return &PostgresDropFunctionInstruction{
+		Name:      f.Name,
+		Arguments: f.Arguments,
+	}
 }

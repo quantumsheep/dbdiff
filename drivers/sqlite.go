@@ -373,7 +373,10 @@ func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, table
 			continue
 		}
 
-		keyColumns = append(keyColumns, primaryKeyColumn{Name: name, Position: primaryKeyPosition})
+		keyColumns = append(keyColumns, primaryKeyColumn{
+			Name:     name,
+			Position: primaryKeyPosition,
+		})
 	}
 
 	err = rows.Err()

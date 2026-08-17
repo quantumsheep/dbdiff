@@ -239,8 +239,11 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 
 	for oldName, newName := range columnsDiff.Renamed {
 		instructions = append(instructions, &SQLiteAlterTableInstruction{
-			Name:   t.Name,
-			Action: &SQLRenameColumnAction{ColumnName: oldName, NewColumnName: newName},
+			Name: t.Name,
+			Action: &SQLRenameColumnAction{
+				ColumnName:    oldName,
+				NewColumnName: newName,
+			},
 		})
 	}
 

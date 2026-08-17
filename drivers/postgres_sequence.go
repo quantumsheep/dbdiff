@@ -38,32 +38,50 @@ func (s *PostgresSequence) Diff(other *PostgresSequence) []Instruction {
 	changed := false
 
 	if s.DataType != other.DataType {
-		instruction.DataType = sql.NullString{String: s.DataType, Valid: true}
+		instruction.DataType = sql.NullString{
+			String: s.DataType,
+			Valid:  true,
+		}
 		changed = true
 	}
 
 	if s.Increment != other.Increment {
-		instruction.Increment = sql.NullInt64{Int64: s.Increment, Valid: true}
+		instruction.Increment = sql.NullInt64{
+			Int64: s.Increment,
+			Valid: true,
+		}
 		changed = true
 	}
 
 	if s.Min != other.Min {
-		instruction.Min = sql.NullInt64{Int64: s.Min, Valid: true}
+		instruction.Min = sql.NullInt64{
+			Int64: s.Min,
+			Valid: true,
+		}
 		changed = true
 	}
 
 	if s.Max != other.Max {
-		instruction.Max = sql.NullInt64{Int64: s.Max, Valid: true}
+		instruction.Max = sql.NullInt64{
+			Int64: s.Max,
+			Valid: true,
+		}
 		changed = true
 	}
 
 	if s.Start != other.Start {
-		instruction.Start = sql.NullInt64{Int64: s.Start, Valid: true}
+		instruction.Start = sql.NullInt64{
+			Int64: s.Start,
+			Valid: true,
+		}
 		changed = true
 	}
 
 	if s.Cycle != other.Cycle {
-		instruction.Cycle = sql.NullBool{Bool: s.Cycle, Valid: true}
+		instruction.Cycle = sql.NullBool{
+			Bool:  s.Cycle,
+			Valid: true,
+		}
 		changed = true
 	}
 
@@ -74,7 +92,10 @@ func (s *PostgresSequence) Diff(other *PostgresSequence) []Instruction {
 	if other.CurrentValue.Valid {
 		currentValue := other.CurrentValue.Int64
 		if currentValue < s.Min || currentValue > s.Max {
-			instruction.Restart = sql.NullInt64{Int64: s.RestartValue(), Valid: true}
+			instruction.Restart = sql.NullInt64{
+				Int64: s.RestartValue(),
+				Valid: true,
+			}
 		}
 	}
 

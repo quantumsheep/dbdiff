@@ -236,7 +236,10 @@ func rowKeyCondition(primaryKeyColumnNames []string, row map[string]string) Cond
 			return &SQLIsNullCondition{ColumnName: name}
 		}
 
-		return &SQLEqualityCondition{ColumnName: name, Expression: row[name]}
+		return &SQLEqualityCondition{
+			ColumnName: name,
+			Expression: row[name],
+		}
 	})
 
 	return &SQLConjunctionCondition{Conditions: conditions}

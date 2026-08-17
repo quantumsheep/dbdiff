@@ -10,7 +10,10 @@ type PostgresType struct {
 }
 
 func (t *PostgresType) CreateInstruction() *PostgresCreateEnumTypeInstruction {
-	return &PostgresCreateEnumTypeInstruction{Name: t.Name, Values: t.Values}
+	return &PostgresCreateEnumTypeInstruction{
+		Name:   t.Name,
+		Values: t.Values,
+	}
 }
 
 func (t *PostgresType) StartsWith(other *PostgresType) bool {

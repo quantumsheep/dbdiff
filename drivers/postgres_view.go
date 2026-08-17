@@ -29,5 +29,8 @@ func (v *PostgresView) HasEqualColumns(other *PostgresView) bool {
 }
 
 func (v *PostgresView) CreateInstruction() *PostgresCreateViewInstruction {
-	return &PostgresCreateViewInstruction{Name: v.Name, Query: v.Def}
+	return &PostgresCreateViewInstruction{
+		Name:  v.Name,
+		Query: v.Def,
+	}
 }

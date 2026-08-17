@@ -141,7 +141,10 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 
 		if sourceTrigger.Def != targetTrigger.Def {
 			instructions = append(instructions,
-				&PostgresDropTriggerInstruction{Name: targetTrigger.Name, TableName: t.Name},
+				&PostgresDropTriggerInstruction{
+					Name:      targetTrigger.Name,
+					TableName: t.Name,
+				},
 				sourceTrigger.CreateInstruction())
 		}
 	}
@@ -150,7 +153,10 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		_, found := t.TriggerByName(targetTrigger.Name)
 		if !found {
 			instructions = append(instructions,
-				&PostgresDropTriggerInstruction{Name: targetTrigger.Name, TableName: t.Name})
+				&PostgresDropTriggerInstruction{
+					Name:      targetTrigger.Name,
+					TableName: t.Name,
+				})
 		}
 	}
 
