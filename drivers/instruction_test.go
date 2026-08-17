@@ -296,6 +296,149 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t, `DROP TRIGGER "set_timestamp";`, instruction.String())
 	})
+
+	t.Run("PostgresAlterTableAddColumn", func(t *testing.T) {
+		instruction := &PostgresAlterTableInstruction{
+			Name: "users",
+			Actions: []AlterTableAction{
+				&PostgresAddColumnAction{
+					Column: &PostgresColumn{Name: "email", Type: "text"},
+				},
+			},
+		}
+
+		require.Equal(t, `ALTER TABLE "users" ADD COLUMN "email" text;`, instruction.String())
+	})
+
+	t.Run("PostgresAlterTableTwoActions", func(t *testing.T) {
+		instruction := &PostgresAlterTableInstruction{
+			Name: "users",
+			Actions: []AlterTableAction{
+				&PostgresDropConstraintAction{ConstraintName: "users_pkey"},
+				&PostgresSetNotNullAction{ColumnName: "id"},
+			},
+		}
+
+		require.Equal(t,
+			`ALTER TABLE "users" DROP CONSTRAINT "users_pkey", ALTER COLUMN "id" SET NOT NULL;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresAlterColumnTypeAction", func(t *testing.T) {
+		action := &PostgresAlterColumnTypeAction{ColumnName: "age", DataType: "integer"}
+
+		require.Equal(t, `ALTER COLUMN "age" TYPE integer`, action.TableActionClause())
+	})
+
+	t.Run("PostgresAlterColumnTypeActionWithACast", func(t *testing.T) {
+		action := &PostgresAlterColumnTypeAction{
+			ColumnName: "age",
+			DataType:   "integer",
+			UsingCast:  true,
+		}
+
+		require.Equal(t,
+			`ALTER COLUMN "age" TYPE integer USING "age"::integer`,
+			action.TableActionClause())
+	})
+
+	t.Run("PostgresSetNotNullAction", func(t *testing.T) {
+		action := &PostgresSetNotNullAction{ColumnName: "name"}
+
+		require.Equal(t, `ALTER COLUMN "name" SET NOT NULL`, action.TableActionClause())
+	})
+
+	t.Run("PostgresDropNotNullAction", func(t *testing.T) {
+		action := &PostgresDropNotNullAction{ColumnName: "name"}
+
+		require.Equal(t, `ALTER COLUMN "name" DROP NOT NULL`, action.TableActionClause())
+	})
+
+	t.Run("PostgresSetDefaultAction", func(t *testing.T) {
+		action := &PostgresSetDefaultAction{ColumnName: "age", Expression: "0"}
+
+		require.Equal(t, `ALTER COLUMN "age" SET DEFAULT 0`, action.TableActionClause())
+	})
+
+	t.Run("PostgresDropDefaultAction", func(t *testing.T) {
+		action := &PostgresDropDefaultAction{ColumnName: "age"}
+
+		require.Equal(t, `ALTER COLUMN "age" DROP DEFAULT`, action.TableActionClause())
+	})
+
+	t.Run("PostgresAddConstraintAction", func(t *testing.T) {
+		action := &PostgresAddConstraintAction{
+			Constraint: &PostgresConstraint{Name: "users_pkey", Def: "PRIMARY KEY (id)"},
+		}
+
+		require.Equal(t,
+			`ADD CONSTRAINT "users_pkey" PRIMARY KEY (id)`,
+			action.TableActionClause())
+	})
+
+	t.Run("PostgresDropConstraintAction", func(t *testing.T) {
+		action := &PostgresDropConstraintAction{ConstraintName: "users_pkey"}
+
+		require.Equal(t, `DROP CONSTRAINT "users_pkey"`, action.TableActionClause())
+	})
+
+	t.Run("PostgresCreateTable", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "users",
+			Columns: []*PostgresColumn{
+				{Name: "id", Type: "integer", NotNull: true},
+			},
+			Constraints: []*PostgresConstraint{
+				{Name: "users_pkey", Def: "PRIMARY KEY (id)"},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "users" (
+	"id" integer NOT NULL,
+	CONSTRAINT "users_pkey" PRIMARY KEY (id)
+);`, instruction.String())
+	})
+
+	t.Run("PostgresCreateIndex", func(t *testing.T) {
+		instruction := &PostgresCreateIndexInstruction{
+			Definition: `CREATE INDEX idx_users_name ON users USING btree (name)`,
+		}
+
+		require.Equal(t,
+			`CREATE INDEX idx_users_name ON users USING btree (name);`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateTrigger", func(t *testing.T) {
+		instruction := &PostgresCreateTriggerInstruction{
+			Definition: "CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp()",
+		}
+
+		require.Equal(t,
+			"CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();",
+			instruction.String())
+	})
+
+	t.Run("PostgresDropTrigger", func(t *testing.T) {
+		instruction := &PostgresDropTriggerInstruction{
+			Name:      "set_timestamp",
+			TableName: "users",
+		}
+
+		require.Equal(t,
+			`DROP TRIGGER "set_timestamp" ON "users";`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateView", func(t *testing.T) {
+		instruction := &PostgresCreateViewInstruction{
+			Name:  "user_ids",
+			Query: " SELECT id\n   FROM users;",
+		}
+
+		require.Equal(t, "CREATE VIEW \"user_ids\" AS  SELECT id\n   FROM users;",
+			instruction.String())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.
