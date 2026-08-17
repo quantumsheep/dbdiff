@@ -77,6 +77,9 @@ func writeSQLiteDatabase(tb testing.TB, path string, sqlStatements string) {
 	require.NoError(tb, err)
 }
 
+// TestDbdiffCommand covers the binary. Two subtests compare the whole standard output. They
+// are the one check of the render path from end to end, because the driver tests compare
+// instructions and not text.
 func TestDbdiffCommand(t *testing.T) {
 	binaryPath := buildDbdiff(t)
 
