@@ -197,7 +197,7 @@ This command finds a violation of the rule. It matches a `String() string` metho
 the instruction files, so it must return nothing:
 
 ```bash
-rg -n 'func \([a-z]+ \*[A-Za-z]+\) String\(\) string' drivers/ --glob '!drivers/instruction*.go'
+rg -n 'func \([a-z][A-Za-z0-9]* \*?[A-Za-z]+\) String\(\) string' drivers/ --glob '!drivers/instruction*.go'
 ```
 
 A nested part renders through a method that names what the method returns. Each part

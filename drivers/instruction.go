@@ -7,8 +7,8 @@ import (
 	"github.com/samber/lo"
 )
 
-// An Instruction is one complete SQL statement, or one comment line. A pointer type
-// implements this interface. A value type never does.
+// An Instruction is one complete SQL statement, or one comment line. Every type of the
+// catalogue uses a pointer receiver, so only a pointer implements this interface.
 type Instruction interface {
 	String() string
 }
@@ -194,7 +194,9 @@ type SQLCommentInstruction struct {
 }
 
 func (i *SQLCommentInstruction) String() string {
-	return "-- " + i.Text
+	// A newline in the text would end the comment, so the rest of the line would run as
+	// SQL. One space replaces every newline.
+	return "-- " + strings.ReplaceAll(i.Text, "\n", " ")
 }
 
 // DROP COLUMN column_name

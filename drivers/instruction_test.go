@@ -168,6 +168,12 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("CommentWithANewline", func(t *testing.T) {
+		instruction := &SQLCommentInstruction{Text: "first\nDROP TABLE users;"}
+
+		require.Equal(t, "-- first DROP TABLE users;", instruction.String())
+	})
+
 	t.Run("DropColumnAction", func(t *testing.T) {
 		action := &SQLDropColumnAction{ColumnName: "email"}
 
@@ -709,9 +715,20 @@ func TestInstructions(t *testing.T) {
 	})
 
 	t.Run("ColumnDefinitionIsNotAnInstruction", func(t *testing.T) {
-		// A fragment must not satisfy Instruction. This assertion fails to compile if a
-		// fragment type gains a String method again.
-		var _ Instruction = &SQLiteCreateTableInstruction{}
+		// A fragment must never satisfy Instruction. Go cannot express that negatively at
+		// compile time, so this check runs at run time.
+		fragments := map[string]any{
+			"SQLiteColumn":       &SQLiteColumn{},
+			"PostgresColumn":     &PostgresColumn{},
+			"PostgresConstraint": &PostgresConstraint{},
+			"SQLiteForeignKey":   &SQLiteForeignKey{},
+			"SQLSetClause":       &SQLSetClause{},
+		}
+
+		for name, fragment := range fragments {
+			_, isInstruction := fragment.(Instruction)
+			require.False(t, isInstruction, name)
+		}
 
 		column := &SQLiteColumn{Name: "id", Type: "INTEGER", NotNull: true}
 		require.Equal(t, `"id" INTEGER NOT NULL`, column.Definition())
@@ -744,6 +761,14 @@ func TestInstructions(t *testing.T) {
 		condition := rowKeyCondition([]string{"team", "member"}, row)
 
 		require.Equal(t, `"team" = 'red' AND "member" = 'Alice'`, condition.ConditionClause())
+	})
+
+	t.Run("RowKeyConditionOfANullValue", func(t *testing.T) {
+		row := map[string]string{"id": "1", "email": sqlNullLiteral}
+
+		condition := rowKeyCondition([]string{"id", "email"}, row)
+
+		require.Equal(t, `"id" = 1 AND "email" IS NULL`, condition.ConditionClause())
 	})
 
 	t.Run("SQLiteTableInstructions", func(t *testing.T) {
