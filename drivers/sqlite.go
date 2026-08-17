@@ -63,19 +63,19 @@ func (d *SQLiteDriver) Close() error {
 	return nil
 }
 
-func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
+func (d *SQLiteDriver) Diff(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
 
 	tableInstructions, err := d.DiffTables(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	instructions = append(instructions, tableInstructions...)
 
 	viewInstructions, err := d.DiffViews(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	instructions = append(instructions, viewInstructions...)
@@ -83,13 +83,13 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 	if d.CompareData {
 		dataInstructions, err := d.DiffData(ctx)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		instructions = append(instructions, dataInstructions...)
 	}
 
-	return RenderInstructions(instructions), nil
+	return instructions, nil
 }
 
 func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {

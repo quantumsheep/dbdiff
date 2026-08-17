@@ -113,12 +113,12 @@ func action(ctx context.Context, command *cli.Command) error {
 
 	defer driver.Close()
 
-	diff, err := driver.Diff(ctx)
+	instructions, err := driver.Diff(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to diff databases: %w", err)
 	}
 
-	fmt.Println(diff)
+	fmt.Println(drivers.RenderInstructions(instructions))
 
 	return nil
 }

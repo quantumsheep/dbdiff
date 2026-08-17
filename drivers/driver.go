@@ -6,7 +6,7 @@ import (
 
 type Driver interface {
 	Close() error
-	Diff(ctx context.Context) (string, error)
+	Diff(ctx context.Context) ([]Instruction, error)
 }
 
 // A SectionDiff holds the instructions of one kind of schema object. A driver prints the

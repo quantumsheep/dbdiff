@@ -146,8 +146,10 @@ func (d *TestingPostgresDriver) ExecOnTarget(sqlStatements string) {
 func (d *TestingPostgresDriver) RequireDiff(expectedDiff string) string {
 	d.tb.Helper()
 
-	diff, err := d.Diff(context.Background())
+	instructions, err := d.Diff(context.Background())
 	require.NoError(d.tb, err)
+
+	diff := RenderInstructions(instructions)
 	require.Equal(d.tb, expectedDiff, diff)
 
 	return diff
@@ -1242,8 +1244,10 @@ ALTER TABLE "items" ADD CONSTRAINT "items_pkey" PRIMARY KEY (code);
 			require.NoError(t, driver.Close())
 		})
 
-		diff, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
+
+		diff := RenderInstructions(instructions)
 		require.Equal(t, `CREATE TABLE "users" (
 	"id" integer NOT NULL
 );`, diff)

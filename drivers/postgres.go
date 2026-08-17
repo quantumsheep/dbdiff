@@ -104,15 +104,15 @@ func (d *PostgresDriver) Close() error {
 	return nil
 }
 
-func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
+func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 	err := d.VerifySchema(ctx, d.SourceDatabaseConnection, d.SourceSchema, "source")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	err = d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "target")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// A table uses an extension, a type, a domain, a composite type, a sequence, or a
@@ -135,7 +135,7 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 	for _, section := range sections {
 		sectionDiff, err := section(ctx)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		sectionDiffs = append(sectionDiffs, sectionDiff)
@@ -161,13 +161,13 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 	if d.CompareData {
 		dataInstructions, err := d.DiffData(ctx)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		instructions = append(instructions, dataInstructions...)
 	}
 
-	return RenderInstructions(instructions), nil
+	return instructions, nil
 }
 
 func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, error) {

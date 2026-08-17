@@ -40,8 +40,10 @@ func (d *TestingSQLiteDriver) ExecOnTarget(sqlStatements string) {
 func (d *TestingSQLiteDriver) RequireDiff(expectedDiff string) string {
 	d.tb.Helper()
 
-	diff, err := d.Diff(d.tb.Context())
+	instructions, err := d.Diff(d.tb.Context())
 	require.NoError(d.tb, err)
+
+	diff := RenderInstructions(instructions)
 	require.Equal(d.tb, expectedDiff, diff)
 
 	return diff
