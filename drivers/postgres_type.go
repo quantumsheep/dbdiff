@@ -1,9 +1,7 @@
 package drivers
 
 import (
-	"fmt"
 	"slices"
-	"strings"
 )
 
 type PostgresType struct {
@@ -11,14 +9,8 @@ type PostgresType struct {
 	Values []string
 }
 
-func (t *PostgresType) String() string {
-	quotedValues := make([]string, len(t.Values))
-
-	for i, value := range t.Values {
-		quotedValues[i] = quoteLiteral(value)
-	}
-
-	return fmt.Sprintf("CREATE TYPE %s AS ENUM (%s);", quoteIdentifier(t.Name), strings.Join(quotedValues, ", "))
+func (t *PostgresType) CreateInstruction() *PostgresCreateEnumTypeInstruction {
+	return &PostgresCreateEnumTypeInstruction{Name: t.Name, Values: t.Values}
 }
 
 func (t *PostgresType) StartsWith(other *PostgresType) bool {
@@ -29,24 +21,27 @@ func (t *PostgresType) StartsWith(other *PostgresType) bool {
 	return slices.Equal(t.Values[:len(other.Values)], other.Values)
 }
 
-func (t *PostgresType) Diff(other *PostgresType) string {
+// PostgreSQL adds a value to an enum, but it removes none and it moves none.
+func (t *PostgresType) Diff(other *PostgresType) []Instruction {
 	if slices.Equal(t.Values, other.Values) {
-		return ""
+		return nil
 	}
 
-	var diff strings.Builder
-
-	// PostgreSQL adds a value to an enum, but it removes none and it moves none.
 	if t.StartsWith(other) {
+		var instructions []Instruction
+
 		for _, value := range t.Values[len(other.Values):] {
-			fmt.Fprintf(&diff, "ALTER TYPE %s ADD VALUE %s;\n", quoteIdentifier(t.Name), quoteLiteral(value))
+			instructions = append(instructions, &PostgresAlterTypeAddValueInstruction{
+				Name:  t.Name,
+				Value: value,
+			})
 		}
 
-		return strings.TrimSpace(diff.String())
+		return instructions
 	}
 
-	fmt.Fprintf(&diff, "DROP TYPE %s;\n", quoteIdentifier(t.Name))
-	fmt.Fprintf(&diff, "%s\n", t.String())
-
-	return strings.TrimSpace(diff.String())
+	return []Instruction{
+		&PostgresDropTypeInstruction{Name: t.Name},
+		t.CreateInstruction(),
+	}
 }

@@ -219,8 +219,8 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 }
 
 func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceTypes, err := d.GetTypes(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -237,14 +237,12 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
 			return enumType.Name == sourceType.Name
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceType.String())
+			additions = append(additions, sourceType.CreateInstruction())
 			continue
 		}
 
-		subDiff := sourceType.Diff(targetType)
-		if subDiff != "" {
-			fmt.Fprintf(&additions, "%s\n", subDiff)
-		}
+		subInstructions := sourceType.Diff(targetType)
+		additions = append(additions, subInstructions...)
 	}
 
 	for _, targetType := range targetTypes {
@@ -252,16 +250,16 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
 			return enumType.Name == targetType.Name
 		})
 		if !found {
-			fmt.Fprintf(&removals, "DROP TYPE %s;\n", quoteIdentifier(targetType.Name))
+			removals = append(removals, &PostgresDropTypeInstruction{Name: targetType.Name})
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceDomains, err := d.GetDomains(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -278,14 +276,12 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 			return domain.Name == sourceDomain.Name
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceDomain.String())
+			additions = append(additions, sourceDomain.CreateInstruction())
 			continue
 		}
 
-		subDiff := sourceDomain.Diff(targetDomain)
-		if subDiff != "" {
-			fmt.Fprintf(&additions, "%s\n", subDiff)
-		}
+		subInstructions := sourceDomain.Diff(targetDomain)
+		additions = append(additions, subInstructions...)
 	}
 
 	for _, targetDomain := range targetDomains {
@@ -293,16 +289,16 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 			return domain.Name == targetDomain.Name
 		})
 		if !found {
-			fmt.Fprintf(&removals, "%s\n", targetDomain.StringDrop())
+			removals = append(removals, targetDomain.DropInstruction())
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceCompositeTypes, err := d.GetCompositeTypes(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -319,14 +315,12 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 			return compositeType.Name == sourceCompositeType.Name
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceCompositeType.String())
+			additions = append(additions, sourceCompositeType.CreateInstruction())
 			continue
 		}
 
-		subDiff := sourceCompositeType.Diff(targetCompositeType)
-		if subDiff != "" {
-			fmt.Fprintf(&additions, "%s\n", subDiff)
-		}
+		subInstructions := sourceCompositeType.Diff(targetCompositeType)
+		additions = append(additions, subInstructions...)
 	}
 
 	for _, targetCompositeType := range targetCompositeTypes {
@@ -334,11 +328,11 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 			return compositeType.Name == targetCompositeType.Name
 		})
 		if !found {
-			fmt.Fprintf(&removals, "%s\n", targetCompositeType.StringDrop())
+			removals = append(removals, targetCompositeType.DropInstruction())
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, error) {

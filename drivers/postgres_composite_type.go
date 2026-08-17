@@ -1,9 +1,7 @@
 package drivers
 
 import (
-	"fmt"
 	"slices"
-	"strings"
 )
 
 type PostgresCompositeTypeAttribute struct {
@@ -26,31 +24,20 @@ func (t *PostgresCompositeType) Equal(other *PostgresCompositeType) bool {
 	})
 }
 
-func (t *PostgresCompositeType) String() string {
-	attributeLines := make([]string, len(t.Attributes))
-
-	for i, attribute := range t.Attributes {
-		attributeLines[i] = fmt.Sprintf("\t%s %s", quoteIdentifier(attribute.Name), attribute.Type)
-	}
-
-	return fmt.Sprintf("CREATE TYPE %s AS (\n%s\n);", quoteIdentifier(t.Name), strings.Join(attributeLines, ",\n"))
+func (t *PostgresCompositeType) CreateInstruction() *PostgresCreateCompositeTypeInstruction {
+	return &PostgresCreateCompositeTypeInstruction{Name: t.Name, Attributes: t.Attributes}
 }
 
-func (t *PostgresCompositeType) StringDrop() string {
-	return fmt.Sprintf("DROP TYPE %s;", quoteIdentifier(t.Name))
+func (t *PostgresCompositeType) DropInstruction() *PostgresDropTypeInstruction {
+	return &PostgresDropTypeInstruction{Name: t.Name}
 }
 
 // One ALTER TYPE statement changes one attribute only, and the order of the attributes
 // stays fixed. A recreation gives the wanted attribute list in every case.
-func (t *PostgresCompositeType) Diff(other *PostgresCompositeType) string {
+func (t *PostgresCompositeType) Diff(other *PostgresCompositeType) []Instruction {
 	if t.Equal(other) {
-		return ""
+		return nil
 	}
 
-	var diff strings.Builder
-
-	fmt.Fprintf(&diff, "%s\n", other.StringDrop())
-	fmt.Fprintf(&diff, "%s\n", t.String())
-
-	return strings.TrimSpace(diff.String())
+	return []Instruction{other.DropInstruction(), t.CreateInstruction()}
 }
