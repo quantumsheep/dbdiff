@@ -194,7 +194,7 @@ type SQLCommentInstruction struct {
 }
 
 func (i *SQLCommentInstruction) String() string {
-	// A newline in the text would end the comment, so the rest of the line would run as
+	// If the text holds a newline, the comment ends there and the rest of the line runs as
 	// SQL. One space replaces every newline.
 	return "-- " + strings.ReplaceAll(i.Text, "\n", " ")
 }
