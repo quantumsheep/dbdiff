@@ -551,6 +551,78 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t, `DROP CONSTRAINT "positive_check"`, action.DomainActionClause())
 	})
+
+	t.Run("PostgresCreateFunction", func(t *testing.T) {
+		instruction := &PostgresCreateFunctionInstruction{
+			Definition: "CREATE FUNCTION add(integer) RETURNS integer AS $$ SELECT 1 $$ LANGUAGE sql",
+		}
+
+		require.Equal(t,
+			"CREATE FUNCTION add(integer) RETURNS integer AS $$ SELECT 1 $$ LANGUAGE sql;",
+			instruction.String())
+	})
+
+	t.Run("PostgresDropFunction", func(t *testing.T) {
+		instruction := &PostgresDropFunctionInstruction{Name: "add", Arguments: "integer"}
+
+		require.Equal(t, `DROP FUNCTION "add"(integer);`, instruction.String())
+	})
+
+	t.Run("PostgresCreateAggregate", func(t *testing.T) {
+		instruction := &PostgresCreateAggregateInstruction{
+			Name:               "total",
+			Arguments:          "integer",
+			TransitionFunction: "int4pl",
+			StateType:          "integer",
+		}
+
+		require.Equal(t,
+			`CREATE AGGREGATE "total"(integer) (SFUNC = "int4pl", STYPE = integer);`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateAggregateWithEveryOption", func(t *testing.T) {
+		instruction := &PostgresCreateAggregateInstruction{
+			Name:               "total",
+			Arguments:          "integer",
+			TransitionFunction: "int4pl",
+			StateType:          "integer",
+			FinalFunction:      sql.NullString{String: "int4out", Valid: true},
+			InitialCondition:   sql.NullString{String: "0", Valid: true},
+		}
+
+		require.Equal(t,
+			`CREATE AGGREGATE "total"(integer) (SFUNC = "int4pl", STYPE = integer, FINALFUNC = "int4out", INITCOND = '0');`,
+			instruction.String())
+	})
+
+	t.Run("PostgresDropAggregate", func(t *testing.T) {
+		instruction := &PostgresDropAggregateInstruction{Name: "total", Arguments: "integer"}
+
+		require.Equal(t, `DROP AGGREGATE "total"(integer);`, instruction.String())
+	})
+
+	t.Run("PostgresCreateOperator", func(t *testing.T) {
+		instruction := &PostgresCreateOperatorInstruction{
+			Name:          "===",
+			Function:      "int4eq",
+			LeftArgument:  sql.NullString{String: "integer", Valid: true},
+			RightArgument: sql.NullString{String: "integer", Valid: true},
+		}
+
+		require.Equal(t,
+			`CREATE OPERATOR === (FUNCTION = "int4eq", LEFTARG = integer, RIGHTARG = integer);`,
+			instruction.String())
+	})
+
+	t.Run("PostgresDropOperatorWithoutALeftArgument", func(t *testing.T) {
+		instruction := &PostgresDropOperatorInstruction{
+			Name:          "===",
+			RightArgument: sql.NullString{String: "integer", Valid: true},
+		}
+
+		require.Equal(t, `DROP OPERATOR === (NONE, integer);`, instruction.String())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.
