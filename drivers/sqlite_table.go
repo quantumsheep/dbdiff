@@ -2,14 +2,34 @@ package drivers
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/samber/lo"
 )
 
+// equalColumnGroups compares two lists of column groups. The two lists hold their groups in
+// the same order, because each read method sorts them.
+func equalColumnGroups(first [][]string, second [][]string) bool {
+	return slices.EqualFunc(first, second, func(a []string, b []string) bool {
+		return slices.Equal(a, b)
+	})
+}
+
 type SQLiteTable struct {
-	Name        string
-	Columns     []*SQLiteColumn
+	Name    string
+	Columns []*SQLiteColumn
+
+	// PrimaryKey holds the columns of a primary key of two or more columns, in the order of
+	// the key. A primary key of one column stays a column constraint, so this field is
+	// empty for such a key.
+	PrimaryKey []string
+
+	// UniqueConstraints holds the columns of each UNIQUE constraint of two or more columns.
+	// A UNIQUE constraint of one column stays a column constraint, so this field holds no
+	// entry for such a constraint.
+	UniqueConstraints [][]string
+
 	Indexes     []*SQLiteIndex
 	Triggers    []*SQLiteTrigger
 	ForeignKeys []*SQLiteForeignKey
@@ -55,6 +75,16 @@ func (t *SQLiteTable) StringCreateTable() string {
 
 	for _, column := range t.Columns {
 		line := "\t" + column.String()
+		columnLines = append(columnLines, line)
+	}
+
+	if len(t.PrimaryKey) > 0 {
+		line := fmt.Sprintf("\tPRIMARY KEY (%s)", strings.Join(quoteIdentifiers(t.PrimaryKey), ", "))
+		columnLines = append(columnLines, line)
+	}
+
+	for _, constraint := range t.UniqueConstraints {
+		line := fmt.Sprintf("\tUNIQUE (%s)", strings.Join(quoteIdentifiers(constraint), ", "))
 		columnLines = append(columnLines, line)
 	}
 
@@ -110,6 +140,11 @@ type SQLiteTableColumnsDiff struct {
 	Renamed  map[string]string // oldName -> newName
 
 	ForeignKeysChanged bool
+
+	// ConstraintsChanged is true when the primary key of two or more columns changes, or
+	// when a UNIQUE constraint of two or more columns changes. SQLite adds no such
+	// constraint to a table, so the change needs a recreation of the table.
+	ConstraintsChanged bool
 }
 
 func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
@@ -119,6 +154,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		Removed:            []string{},
 		Renamed:            make(map[string]string),
 		ForeignKeysChanged: false,
+		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) || !equalColumnGroups(t.UniqueConstraints, other.UniqueConstraints),
 	}
 
 	for _, sourceColumn := range t.Columns {
@@ -195,7 +231,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 	var diff strings.Builder
 
 	// Modified columns or Foreign Keys need to be handled via table recreation
-	if len(columnsDiff.Modified) > 0 || columnsDiff.ForeignKeysChanged {
+	if len(columnsDiff.Modified) > 0 || columnsDiff.ForeignKeysChanged || columnsDiff.ConstraintsChanged {
 		tempTable := t.Copy()
 		tempTable.Name = "_" + t.Name + "_temp"
 

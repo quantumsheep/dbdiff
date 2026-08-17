@@ -6,11 +6,21 @@ import (
 )
 
 type SQLiteColumn struct {
-	Name       string
-	Type       string
-	NotNull    bool
+	Name string
+	Type string
+
+	NotNull bool
+
+	// PrimaryKey is true for a primary key of this column only. A primary key of two or
+	// more columns is a table constraint, and the PrimaryKey field of SQLiteTable holds it.
 	PrimaryKey bool
-	Default    sql.NullString
+
+	// Unique is true for a UNIQUE constraint of this column only. A UNIQUE constraint of
+	// two or more columns is a table constraint, and the UniqueConstraints field of
+	// SQLiteTable holds it.
+	Unique bool
+
+	Default sql.NullString
 }
 
 func (c *SQLiteColumn) Copy() *SQLiteColumn {
@@ -34,6 +44,10 @@ func (c *SQLiteColumn) String() string {
 
 	if c.PrimaryKey {
 		value += " PRIMARY KEY"
+	}
+
+	if c.Unique {
+		value += " UNIQUE"
 	}
 
 	if c.Default.Valid {

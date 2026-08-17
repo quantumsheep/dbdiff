@@ -609,7 +609,9 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		return nil, err
 	}
 
-	// Added or modified views
+	// Added or modified views. sourceViews holds a view after every view that it reads, so
+	// a forward walk writes a CREATE VIEW statement after the statement of every view that
+	// it depends on.
 	for _, sourceView := range sourceViews {
 		targetView, found := lo.Find(targetViews, func(v *PostgresView) bool {
 			return v.Name == sourceView.Name
@@ -623,18 +625,25 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		// A column that the view reads can change its type. The definition text stays
 		// equal in that case, so the columns give the second condition.
 		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
-			fmt.Fprintf(&earlyRemovals, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
 			fmt.Fprintf(&additions, "%s\n", sourceView.String())
 		}
 	}
 
-	// Removed views
-	for _, targetView := range targetViews {
-		_, found := lo.Find(sourceViews, func(v *PostgresView) bool {
+	// Removed or modified views. targetViews holds a view after every view that it reads,
+	// so a backward walk writes a DROP VIEW statement of a dependent view before the
+	// statement of the view that it reads. PostgreSQL refuses a DROP VIEW statement while
+	// another view still reads the view.
+	for _, targetView := range slices.Backward(targetViews) {
+		sourceView, found := lo.Find(sourceViews, func(v *PostgresView) bool {
 			return v.Name == targetView.Name
 		})
 
 		if !found {
+			fmt.Fprintf(&earlyRemovals, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
+			continue
+		}
+
+		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
 			fmt.Fprintf(&earlyRemovals, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
 		}
 	}
@@ -1047,6 +1056,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 		SELECT table_name, view_definition
 		FROM information_schema.views
 		WHERE table_schema = current_schema()
+		ORDER BY table_name
 	`)
 	if err != nil {
 		return nil, err
@@ -1079,7 +1089,45 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 		}
 	}
 
-	return views, nil
+	return sortViewsByDependency(views), nil
+}
+
+// sortViewsByDependency orders the views so that a view comes after every view that it
+// reads. Two views with no dependency between them keep the order that the query gives.
+func sortViewsByDependency(views []*PostgresView) []*PostgresView {
+	viewByName := make(map[string]*PostgresView, len(views))
+
+	for _, view := range views {
+		viewByName[view.Name] = view
+	}
+
+	sorted := make([]*PostgresView, 0, len(views))
+	visited := make(map[string]bool, len(views))
+
+	var visit func(view *PostgresView)
+
+	visit = func(view *PostgresView) {
+		if visited[view.Name] {
+			return
+		}
+
+		visited[view.Name] = true
+
+		for _, column := range view.Columns {
+			dependency, isView := viewByName[column.Table]
+			if isView {
+				visit(dependency)
+			}
+		}
+
+		sorted = append(sorted, view)
+	}
+
+	for _, view := range views {
+		visit(view)
+	}
+
+	return sorted
 }
 
 // GetViewColumns returns the columns of the tables and of the views that one view reads.
@@ -1255,9 +1303,17 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	// Get indexes
+	// The definition names the schema of the table. The diff compares two schemas, so the
+	// query removes the prefix of the current schema. The statement then builds the index
+	// in the schema of the target.
 	indexRows, err := db.QueryContext(ctx, `
-			SELECT indexname, indexdef
+			SELECT
+				indexname,
+				regexp_replace(
+					indexdef,
+					' ON ' || quote_ident(current_schema()) || '\.',
+					' ON '
+				)
 			FROM pg_indexes
 			WHERE schemaname = current_schema() AND tablename = $1
 			AND indexname NOT IN (
@@ -1286,9 +1342,17 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	// Get triggers
+	// The definition names the schema of the table. The diff compares two schemas, so the
+	// query removes the prefix of the current schema. The statement then builds the
+	// trigger on the table of the target. A table of a second schema keeps its prefix.
 	triggerRows, err := db.QueryContext(ctx, `
-			SELECT tgname, pg_get_triggerdef(oid)
+			SELECT
+				tgname,
+				regexp_replace(
+					pg_get_triggerdef(oid),
+					' ON ' || quote_ident(current_schema()) || '\.',
+					' ON '
+				)
 			FROM pg_trigger
 			WHERE tgrelid = $1::regclass AND tgisinternal = false
 		`, quoteIdentifier(tableName))

@@ -20,9 +20,14 @@ type SQLiteTableData struct {
 	Rows map[string]map[string]string
 }
 
-// PrimaryKeyColumnNames returns the columns of the primary key, in the order of the
-// table. The list is empty when the table holds no primary key.
+// PrimaryKeyColumnNames returns the columns of the primary key. A key of two or more
+// columns keeps the order of the key. A key of one column comes from the definition of that
+// column. The list is empty when the table holds no primary key.
 func (t *SQLiteTable) PrimaryKeyColumnNames() []string {
+	if len(t.PrimaryKey) > 0 {
+		return t.PrimaryKey
+	}
+
 	var names []string
 
 	for _, column := range t.Columns {

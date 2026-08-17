@@ -65,15 +65,8 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	// Removed columns
-	for _, targetColumn := range other.Columns {
-		_, found := t.ColumnByName(targetColumn.Name)
-		if !found {
-			fmt.Fprintf(&diff, "ALTER TABLE %s DROP COLUMN %s;\n", quoteIdentifier(t.Name), quoteIdentifier(targetColumn.Name))
-		}
-	}
-
-	// Constraints
+	// Constraints. PostgreSQL drops every constraint of a column with the column, so the
+	// constraint statements come before the column removals.
 	for _, sourceConstraint := range t.Constraints {
 		targetConstraint, found := other.ConstraintByName(sourceConstraint.Name)
 		if !found {
@@ -94,7 +87,9 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	// Indexes
+	// Indexes. This block prints before the removed columns below, because a column drop
+	// drops every index of that column too. A DROP INDEX statement of a dropped column
+	// fails when it prints after the column drop, because the index is already gone.
 	for _, sourceIndex := range t.Indexes {
 		targetIndex, found := other.IndexByName(sourceIndex.Name)
 		if !found {
@@ -112,6 +107,14 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		_, found := t.IndexByName(targetIndex.Name)
 		if !found {
 			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
+		}
+	}
+
+	// Removed columns
+	for _, targetColumn := range other.Columns {
+		_, found := t.ColumnByName(targetColumn.Name)
+		if !found {
+			fmt.Fprintf(&diff, "ALTER TABLE %s DROP COLUMN %s;\n", quoteIdentifier(t.Name), quoteIdentifier(targetColumn.Name))
 		}
 	}
 

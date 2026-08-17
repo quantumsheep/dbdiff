@@ -214,6 +214,18 @@ statement.
 `GetTableForeignKeys` sorts the foreign keys with `sort.SliceStable`, because SQLite gives
 no stable order. Keep that sort. Without it the output changes between two runs.
 
+`PRAGMA index_list` gives an `origin` value for each index. `GetTableIndexes` keeps the
+origin `c`, which is an index that a `CREATE INDEX` statement built. `GetTableUniqueKeys`
+reads the origin `u`, which is an index that a `UNIQUE` constraint built. A key of one
+column sets the `Unique` field of that column. A key of two or more columns becomes a
+table constraint of `SQLiteTable`. Without this the recreation of a table loses the
+constraint.
+
+The `pk` value of `PRAGMA table_info` is a position, not a flag. SQLite numbers the
+columns of a composite primary key 1, 2, 3 in the key order. A key of one column keeps the
+column constraint form, which keeps `INTEGER PRIMARY KEY` as the rowid alias. A key of two
+or more columns becomes a table constraint.
+
 `SQLiteIndex` holds a `Keys` field and a `Where` field. A key is the SQL text of one key
 part, so an expression key keeps its text. `PRAGMA index_info` gives a NULL name for an
 expression, and `parseIndexDefinition` reads the text of that key from the `sql` column of
@@ -309,9 +321,27 @@ trigger becomes a `DROP` statement and a `CREATE` statement.
 An index and a trigger keep the definition text that PostgreSQL returns. `String()` adds
 the semicolon.
 
+PostgreSQL writes the name of the schema into the definition text of a function, of an
+index, and of a trigger. Each of the three queries removes the prefix of
+`current_schema()` with `regexp_replace` and `quote_ident`. Without that step the text of
+two equal objects differs, because the source schema and the target schema hold a
+different name. The diff then prints a `DROP` statement and a `CREATE` statement for an
+object that did not change, and the `CREATE` statement builds the object in the SOURCE
+schema. Keep that step in every new query that reads a definition text.
+
 A query that casts a name to `regclass` takes the name from `quoteIdentifier`. A query
 that compares a name to a text column takes the raw name. `GetTable` passes both forms to
 the index query.
+
+PostgreSQL drops every constraint and every index of a column with the column. `DiffTable`
+prints the constraint block and the index block BEFORE the column removals. Keep that
+order. A `DROP CONSTRAINT` statement after a `DROP COLUMN` statement of the same column
+fails, because the column removal dropped the constraint already.
+
+`GetViews` sorts the views with `sortViewsByDependency`. A view can read a second view, so
+a `CREATE VIEW` statement needs the views that it reads first, and a `DROP VIEW` statement
+takes the reverse order. `DiffViews` walks the source views forward and the target views
+backward.
 
 ## Data comparison
 
@@ -556,23 +586,12 @@ rule here during a session, repeat that rule in the spawn prompt.
 
 # Known gaps
 
-This section records the state of the repo on 2026-08-16. It is not a rule set. Correct an
+This section records the state of the repo on 2026-08-17. It is not a rule set. Correct an
 item when your task touches it.
 
 - The data comparison prints no row of a table that the source only holds. The schema
   section creates that table, and the table stays empty.
-- An `ALTER TABLE ... DROP COLUMN` statement of PostgreSQL drops the primary key
-  constraint of that column too. The `DROP CONSTRAINT` statement of the same diff then
-  fails, because the constraint is gone.
-- The PostgreSQL driver compares one schema at a time. The `--schema` flag selects it. The
-  driver compares no object of a second schema, and it prints no `CREATE SCHEMA`
-  statement.
-- `SQLiteColumn` holds no `Unique` field, and `PRAGMA table_info` gives no `UNIQUE` flag
-  for a column. A table recreation writes the new table without the `UNIQUE` constraint of
-  the column, so the recreation loses that constraint without a message.
-- `GetTableColumns` of SQLite marks a column as `PrimaryKey` when the `pk` value of
-  `PRAGMA table_info` is 1. SQLite numbers the columns of a composite primary key 1, 2, 3
-  in the key order, so the driver reads the first column of such a key only.
-- `GetViews` has no `ORDER BY` clause, so the order of the views is not stable. A schema
-  with a view that reads a second view can print the two `DROP VIEW` statements in the
-  wrong order.
+- The PostgreSQL driver compares one schema for each run. The `--schema` flag selects that
+  schema. This item is a boundary of the tool, not a defect. To compare two schemas, run
+  dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
+  object that moved from one schema to another schema.

@@ -387,13 +387,129 @@ CREATE TABLE "users" (
 		driver.RequireDiff(`ALTER TABLE "users" ADD CONSTRAINT "fk_role" FOREIGN KEY (role_id) REFERENCES roles(id);`)
 	})
 
+	t.Run("DropColumnWithPrimaryKey", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT, code INT, CONSTRAINT pk_users PRIMARY KEY (code));`)
+
+		// PostgreSQL drops the constraint with the column, so the DROP CONSTRAINT
+		// statement comes first.
+		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "pk_users";
+ALTER TABLE "users" DROP COLUMN "code";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropColumnWithUniqueConstraint", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
+
+		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "uq_email";
+ALTER TABLE "users" DROP COLUMN "email";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropColumnKeepsOtherConstraint", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT NOT NULL, CONSTRAINT pk_users PRIMARY KEY (id));`)
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INT NOT NULL,
+				email TEXT,
+				CONSTRAINT pk_users PRIMARY KEY (id),
+				CONSTRAINT uq_email UNIQUE (email)
+			);
+		`)
+
+		// The primary key covers no removed column, so the diff keeps it.
+		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "uq_email";
+ALTER TABLE "users" DROP COLUMN "email";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropColumnOfCompositeConstraint", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT, CONSTRAINT uq_users UNIQUE (id));`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_users UNIQUE (id, email));`)
+
+		diff := driver.RequireDiff(`ALTER TABLE "users" DROP CONSTRAINT "uq_users";
+ALTER TABLE "users" ADD CONSTRAINT "uq_users" UNIQUE (id);
+ALTER TABLE "users" DROP COLUMN "email";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("Indexes", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		driver.ExecOnSource(`CREATE TABLE users (name TEXT); CREATE INDEX idx_name ON users(name);`)
 		driver.ExecOnTarget(`CREATE TABLE users (name TEXT);`)
 
-		driver.RequireDiff(`CREATE INDEX idx_name ON ` + driver.sourceSchema + `.users USING btree (name);`)
+		diff := driver.RequireDiff(`CREATE INDEX idx_name ON users USING btree (name);`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("EqualIndexes", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `CREATE TABLE users (name TEXT); CREATE INDEX idx_name ON users(name);`
+		driver.ExecOnSource(schema)
+		driver.ExecOnTarget(schema)
+
+		driver.RequireDiff("")
+	})
+
+	t.Run("DropColumnDropsItsIndex", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT); CREATE INDEX idx_email ON users(email);`)
+
+		// The DROP INDEX statement must print before the DROP COLUMN statement. A DROP
+		// COLUMN statement drops every index of that column too, so a DROP INDEX statement
+		// that prints after it fails, because the index is already gone.
+		diff := driver.RequireDiff(`DROP INDEX "idx_email";
+ALTER TABLE "users" DROP COLUMN "email";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropColumnKeepsAnotherIndex", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT); CREATE INDEX idx_name ON users(name);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email);`)
+
+		diff := driver.RequireDiff(`CREATE INDEX idx_name ON users USING btree (name);
+DROP INDEX "idx_email";
+ALTER TABLE "users" DROP COLUMN "email";`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropColumnAndModifyAnotherIndex", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT); CREATE UNIQUE INDEX idx_name ON users(name);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email); CREATE INDEX idx_name ON users(name);`)
+
+		// The DROP INDEX statement and the CREATE INDEX statement of the modified index
+		// must stay adjacent. Neither the unrelated index drop nor the column drop can
+		// print between them.
+		diff := driver.RequireDiff(`DROP INDEX "idx_name";
+CREATE UNIQUE INDEX idx_name ON users USING btree (name);
+DROP INDEX "idx_email";
+ALTER TABLE "users" DROP COLUMN "email";`)
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("Triggers", func(t *testing.T) {
@@ -416,7 +532,29 @@ CREATE TABLE "users" (
 		`)
 		driver.ExecOnTarget(`CREATE TABLE users (updated_at TIMESTAMP);`)
 
-		driver.RequireDiff(fmt.Sprintf(`CREATE TRIGGER set_timestamp BEFORE UPDATE ON %s.users FOR EACH ROW EXECUTE FUNCTION update_timestamp();`, driver.sourceSchema))
+		diff := driver.RequireDiff(`CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("EqualTriggers", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE OR REPLACE FUNCTION update_timestamp() RETURNS TRIGGER AS $$
+			BEGIN
+				NEW.updated_at = NOW();
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+
+			CREATE TABLE users (updated_at TIMESTAMP);
+			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+		`
+		driver.ExecOnSource(schema)
+		driver.ExecOnTarget(schema)
+
+		driver.RequireDiff("")
 	})
 
 	t.Run("Views", func(t *testing.T) {
@@ -923,6 +1061,44 @@ ALTER TABLE "users" DROP COLUMN "label";`)
 ALTER TABLE "users" ALTER COLUMN "label" TYPE character varying;
 CREATE VIEW "user_labels" AS  SELECT label
    FROM users;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateViewsInDependencyOrder", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users;
+			CREATE VIEW view_a AS SELECT id FROM view_b;
+		`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+
+		// view_a reads view_b, so the diff must create view_b first, even if the name of
+		// view_a sorts before the name of view_b.
+		diff := driver.RequireDiff(`CREATE VIEW "view_b" AS  SELECT id
+   FROM users;
+CREATE VIEW "view_a" AS  SELECT id
+   FROM view_b;`)
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropViewsInDependencyOrder", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users;
+			CREATE VIEW view_a AS SELECT id FROM view_b;
+		`)
+
+		// view_a reads view_b, so the diff must drop view_a first. PostgreSQL refuses to
+		// drop view_b while view_a still reads it.
+		diff := driver.RequireDiff(`DROP VIEW "view_a";
+DROP VIEW "view_b";
+DROP TABLE "users";`)
 
 		driver.ExecOnTarget(diff)
 	})

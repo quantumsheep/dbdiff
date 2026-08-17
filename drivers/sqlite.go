@@ -243,6 +243,34 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
+	primaryKey, err := d.GetTablePrimaryKey(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	uniqueKeys, err := d.GetTableUniqueKeys(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	// A UNIQUE constraint of one column belongs to the definition of that column. A UNIQUE
+	// constraint of two or more columns is a table constraint.
+	var uniqueConstraints [][]string
+
+	for _, key := range uniqueKeys {
+		if len(key) != 1 {
+			uniqueConstraints = append(uniqueConstraints, key)
+			continue
+		}
+
+		column, found := lo.Find(columns, func(c *SQLiteColumn) bool {
+			return c.Name == key[0]
+		})
+		if found {
+			column.Unique = true
+		}
+	}
+
 	indexes, err := d.GetTableIndexes(ctx, db, tableName)
 	if err != nil {
 		return nil, err
@@ -259,11 +287,13 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 	}
 
 	return &SQLiteTable{
-		Name:        tableName,
-		Columns:     columns,
-		Indexes:     indexes,
-		Triggers:    triggers,
-		ForeignKeys: foreignKeys,
+		Name:              tableName,
+		Columns:           columns,
+		PrimaryKey:        primaryKey,
+		UniqueConstraints: uniqueConstraints,
+		Indexes:           indexes,
+		Triggers:          triggers,
+		ForeignKeys:       foreignKeys,
 	}, nil
 }
 
@@ -276,6 +306,7 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 	defer rows.Close()
 
 	var columns []*SQLiteColumn
+	var primaryKeyColumns []*SQLiteColumn
 
 	for rows.Next() {
 		var cid int
@@ -283,20 +314,25 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		var ctype string
 		var isNotNull int
 		var defaultValue sql.NullString
-		var isPrimaryKey int
+		var primaryKeyPosition int
 
-		err := rows.Scan(&cid, &name, &ctype, &isNotNull, &defaultValue, &isPrimaryKey)
+		err := rows.Scan(&cid, &name, &ctype, &isNotNull, &defaultValue, &primaryKeyPosition)
 		if err != nil {
 			return nil, err
 		}
 
-		columns = append(columns, &SQLiteColumn{
-			Name:       name,
-			Type:       ctype,
-			NotNull:    isNotNull == 1,
-			PrimaryKey: isPrimaryKey == 1,
-			Default:    defaultValue,
-		})
+		column := &SQLiteColumn{
+			Name:    name,
+			Type:    ctype,
+			NotNull: isNotNull == 1,
+			Default: defaultValue,
+		}
+
+		columns = append(columns, column)
+
+		if primaryKeyPosition > 0 {
+			primaryKeyColumns = append(primaryKeyColumns, column)
+		}
 	}
 
 	err = rows.Err()
@@ -304,7 +340,165 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		return nil, err
 	}
 
+	// SQLite numbers the columns of a primary key 1, 2, 3 in the order of the key. A key of
+	// one column stays a column constraint. A key of two or more columns is a table
+	// constraint, and GetTablePrimaryKey reads it.
+	if len(primaryKeyColumns) == 1 {
+		primaryKeyColumns[0].PrimaryKey = true
+	}
+
 	return columns, nil
+}
+
+// GetTablePrimaryKey returns the columns of a primary key of two or more columns, in the
+// order of the key. It returns an empty list for a table with a key of one column, because
+// the definition of that column holds the key.
+func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdentifier(tableName)+");")
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	type primaryKeyColumn struct {
+		Name     string
+		Position int
+	}
+
+	var keyColumns []primaryKeyColumn
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var ctype string
+		var isNotNull int
+		var defaultValue sql.NullString
+		var primaryKeyPosition int
+
+		err := rows.Scan(&cid, &name, &ctype, &isNotNull, &defaultValue, &primaryKeyPosition)
+		if err != nil {
+			return nil, err
+		}
+
+		if primaryKeyPosition == 0 {
+			continue
+		}
+
+		keyColumns = append(keyColumns, primaryKeyColumn{Name: name, Position: primaryKeyPosition})
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(keyColumns) < 2 {
+		return nil, nil
+	}
+
+	sort.SliceStable(keyColumns, func(i, j int) bool {
+		return keyColumns[i].Position < keyColumns[j].Position
+	})
+
+	names := lo.Map(keyColumns, func(keyColumn primaryKeyColumn, _ int) string {
+		return keyColumn.Name
+	})
+
+	return names, nil
+}
+
+// GetTableUniqueKeys returns the columns of each UNIQUE constraint of a table. PRAGMA
+// index_list gives the origin "u" to the index of such a constraint. The function sorts the
+// keys, because SQLite gives no stable order.
+func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, tableName string) ([][]string, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+quoteIdentifier(tableName)+");")
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var indexNames []string
+
+	for rows.Next() {
+		var seq int
+		var name string
+		var isUnique int
+		var origin string
+		var partial int
+
+		err := rows.Scan(&seq, &name, &isUnique, &origin, &partial)
+		if err != nil {
+			return nil, err
+		}
+
+		if origin != "u" {
+			continue
+		}
+
+		indexNames = append(indexNames, name)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	var keys [][]string
+
+	for _, indexName := range indexNames {
+		columnNames, err := d.GetIndexColumnNames(ctx, db, indexName)
+		if err != nil {
+			return nil, err
+		}
+
+		keys = append(keys, columnNames)
+	}
+
+	sort.SliceStable(keys, func(i, j int) bool {
+		return strings.Join(keys[i], ",") < strings.Join(keys[j], ",")
+	})
+
+	return keys, nil
+}
+
+// GetIndexColumnNames returns the name of each column of an index. SQLite refuses an
+// expression in a UNIQUE constraint and in a PRIMARY KEY, so every key of the index of such
+// a constraint holds a name.
+func (d *SQLiteDriver) GetIndexColumnNames(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var names []string
+
+	for rows.Next() {
+		var seqno int
+		var cid int
+		var name sql.NullString
+
+		err := rows.Scan(&seqno, &cid, &name)
+		if err != nil {
+			return nil, err
+		}
+
+		if !name.Valid {
+			return nil, fmt.Errorf("the index %s holds a key at the position %d that is no column", indexName, seqno)
+		}
+
+		names = append(names, name.String)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return names, nil
 }
 
 func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteIndex, error) {

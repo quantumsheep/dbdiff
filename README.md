@@ -52,12 +52,12 @@ The data section comes after the schema section, because a new row needs its tab
 
 | Name       | Tables | Indexes | Constraints | Triggers | Views | Sequences | Enum types | Domains | Composite types | Functions | Aggregates | Operators | Extensions | Data |
 |------------|--------|---------|-------------|----------|-------|-----------|------------|---------|-----------------|-----------|------------|-----------|------------|------|
-| SQLite     | ✅      | ✅       | ✅ (foreign keys) | ✅        | ✅     | ➖         | ➖          | ➖       | ➖               | ➖         | ➖          | ➖         | ➖          | ✅    |
+| SQLite     | ✅      | ✅       | ✅ (foreign keys, primary keys, unique) | ✅        | ✅     | ➖         | ➖          | ➖       | ➖               | ➖         | ➖          | ➖         | ➖          | ✅    |
 | PostgreSQL | ✅      | ✅       | ✅           | ✅        | ✅     | ✅         | ✅          | ✅       | ✅               | ✅         | ✅          | ✅         | ✅          | ✅    |
 | MySQL      | ❌      | ❌       | ❌           | ❌        | ❌     | ❌         | ❌          | ❌       | ❌               | ❌         | ❌          | ❌         | ❌          | ❌    |
 
 ✅ supported, ❌ not supported, ➖ the engine holds no such object. A table covers its columns.
 
-The SQLite driver compares a partial index and an index that an expression builds.
+The SQLite driver compares a partial index and an index that an expression builds. It prints a primary key of one column and a UNIQUE constraint of one column in the definition of that column. It prints a primary key of two or more columns and a UNIQUE constraint of two or more columns as a table constraint.
 
 The PostgreSQL driver compares one schema. The `--schema` flag selects it. Without that flag, the search path of the connection string selects it, and the default schema is `public`.

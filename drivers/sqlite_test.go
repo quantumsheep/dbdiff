@@ -792,11 +792,12 @@ CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
 		`)
 
 		// The UNIQUE constraint builds an index of the origin "u". The recreation of the
-		// table must not print a CREATE INDEX statement for that index. SQLite refuses a
-		// CREATE INDEX statement with the name of such an index.
+		// table keeps the constraint in the definition of the column. It must not print a
+		// CREATE INDEX statement for that index, because SQLite refuses a CREATE INDEX
+		// statement with the name of such an index.
 		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
 	"id" INTEGER PRIMARY KEY,
-	"email" TEXT,
+	"email" TEXT UNIQUE,
 	"age" INTEGER
 );
 INSERT INTO "_users_temp" ("id", "email", "age") SELECT "id", "email", "age" FROM "users";
@@ -809,6 +810,224 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "email": "alice@example.com", "age": int64(30)},
 			{"id": int64(2), "email": "bob@example.com", "age": int64(25)},
+		}, rows)
+
+		// The new table refuses a second row with the email of the first row.
+		_, err := driver.TargetDatabaseConnection.Exec(`INSERT INTO users (id, email, age) VALUES (3, 'alice@example.com', 40);`)
+		require.ErrorContains(t, err, "UNIQUE constraint failed: users.email")
+	})
+
+	t.Run("CreateTableWithUniqueConstraint", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE members (
+				id INTEGER PRIMARY KEY,
+				team TEXT NOT NULL,
+				name TEXT NOT NULL,
+				UNIQUE (team, name)
+			);
+		`)
+
+		// A UNIQUE constraint of two or more columns is a table constraint. It keeps the
+		// order of the columns of the constraint.
+		diff := driver.RequireDiff(`CREATE TABLE "members" (
+	"id" INTEGER PRIMARY KEY,
+	"team" TEXT NOT NULL,
+	"name" TEXT NOT NULL,
+	UNIQUE ("team", "name")
+);`)
+
+		driver.ExecOnTarget(diff)
+		driver.ExecOnTarget(`INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice');`)
+
+		_, err := driver.TargetDatabaseConnection.Exec(`INSERT INTO members (id, team, name) VALUES (2, 'red', 'Alice');`)
+		require.ErrorContains(t, err, "UNIQUE constraint failed: members.team, members.name")
+	})
+
+	t.Run("AddUniqueConstraint", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE members (
+				id INTEGER PRIMARY KEY,
+				team TEXT NOT NULL,
+				name TEXT NOT NULL,
+				UNIQUE (team, name)
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE members (
+				id INTEGER PRIMARY KEY,
+				team TEXT NOT NULL,
+				name TEXT NOT NULL
+			);
+
+			INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice'), (2, 'blue', 'Bob');
+		`)
+
+		// SQLite adds no table constraint to a table, so the new constraint needs a
+		// recreation of the table.
+		diff := driver.RequireDiff(`CREATE TABLE "_members_temp" (
+	"id" INTEGER PRIMARY KEY,
+	"team" TEXT NOT NULL,
+	"name" TEXT NOT NULL,
+	UNIQUE ("team", "name")
+);
+INSERT INTO "_members_temp" ("id", "team", "name") SELECT "id", "team", "name" FROM "members";
+DROP TABLE "members";
+ALTER TABLE "_members_temp" RENAME TO "members";`)
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("members", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "team": "red", "name": "Alice"},
+			{"id": int64(2), "team": "blue", "name": "Bob"},
+		}, rows)
+	})
+
+	t.Run("CreateTableWithCompositePrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				role TEXT,
+				PRIMARY KEY (member, team)
+			);
+		`)
+
+		// A primary key of two or more columns is a table constraint. It keeps the order of
+		// the key, and that order differs from the order of the columns of the table.
+		diff := driver.RequireDiff(`CREATE TABLE "memberships" (
+	"team" TEXT NOT NULL,
+	"member" TEXT NOT NULL,
+	"role" TEXT,
+	PRIMARY KEY ("member", "team")
+);`)
+
+		driver.ExecOnTarget(diff)
+		driver.ExecOnTarget(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');`)
+
+		_, err := driver.TargetDatabaseConnection.Exec(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'guest');`)
+		require.ErrorContains(t, err, "UNIQUE constraint failed: memberships.member, memberships.team")
+	})
+
+	t.Run("CreateTableWithIntegerPrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE counters (
+				id INTEGER PRIMARY KEY,
+				total INTEGER
+			);
+		`)
+
+		// An INTEGER PRIMARY KEY is the alias of the rowid of SQLite. It keeps the form of a
+		// column constraint, because the form of a table constraint changes the type of the
+		// key.
+		diff := driver.RequireDiff(`CREATE TABLE "counters" (
+	"id" INTEGER PRIMARY KEY,
+	"total" INTEGER
+);`)
+
+		driver.ExecOnTarget(diff)
+		driver.ExecOnTarget(`INSERT INTO counters (total) VALUES (5);`)
+
+		rows := driver.FetchAllFromTarget("counters", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "total": int64(5)},
+		}, rows)
+	})
+
+	t.Run("RecreateTableWithCompositePrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				level INTEGER,
+				PRIMARY KEY (team, member)
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				level TEXT,
+				PRIMARY KEY (team, member)
+			);
+
+			INSERT INTO memberships (team, member, level) VALUES ('red', 'Alice', '3'), ('blue', 'Bob', '1');
+		`)
+
+		// The type of the column "level" changes, so the driver recreates the table. The new
+		// table keeps the whole primary key.
+		diff := driver.RequireDiff(`CREATE TABLE "_memberships_temp" (
+	"team" TEXT NOT NULL,
+	"member" TEXT NOT NULL,
+	"level" INTEGER,
+	PRIMARY KEY ("team", "member")
+);
+INSERT INTO "_memberships_temp" ("team", "member", "level") SELECT "team", "member", "level" FROM "memberships";
+DROP TABLE "memberships";
+ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("memberships", "ORDER BY team, member")
+
+		require.Equal(t, []map[string]any{
+			{"team": "blue", "member": "Bob", "level": int64(1)},
+			{"team": "red", "member": "Alice", "level": int64(3)},
+		}, rows)
+	})
+
+	t.Run("ModifyCompositePrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				role TEXT NOT NULL,
+				PRIMARY KEY (team, member)
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				role TEXT NOT NULL,
+				PRIMARY KEY (team, role)
+			);
+
+			INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');
+		`)
+
+		// The primary key of the target holds another column, so the driver recreates the
+		// table.
+		diff := driver.RequireDiff(`CREATE TABLE "_memberships_temp" (
+	"team" TEXT NOT NULL,
+	"member" TEXT NOT NULL,
+	"role" TEXT NOT NULL,
+	PRIMARY KEY ("team", "member")
+);
+INSERT INTO "_memberships_temp" ("team", "member", "role") SELECT "team", "member", "role" FROM "memberships";
+DROP TABLE "memberships";
+ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("memberships", "ORDER BY team, member")
+
+		require.Equal(t, []map[string]any{
+			{"team": "red", "member": "Alice", "role": "lead"},
 		}, rows)
 	})
 
