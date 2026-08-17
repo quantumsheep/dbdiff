@@ -5,6 +5,6 @@ type PostgresTrigger struct {
 	Def  string
 }
 
-func (t *PostgresTrigger) String() string {
-	return t.Def + ";"
+func (t *PostgresTrigger) CreateInstruction() *PostgresCreateTriggerInstruction {
+	return &PostgresCreateTriggerInstruction{Definition: t.Def}
 }

@@ -500,8 +500,8 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 }
 
 func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -522,18 +522,16 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 			return table.Name == sourceTable.Name
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceTable.String())
+			additions = append(additions, sourceTable.Instructions()...)
 			continue
 		}
 
-		subDiff, err := sourceTable.DiffTable(targetTable, hasAutomaticCast)
+		subInstructions, err := sourceTable.DiffTable(targetTable, hasAutomaticCast)
 		if err != nil {
 			return nil, err
 		}
 
-		if subDiff != "" {
-			fmt.Fprintf(&additions, "%s\n", subDiff)
-		}
+		additions = append(additions, subInstructions...)
 	}
 
 	for _, targetTable := range targetTables {
@@ -541,18 +539,18 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 			return table.Name == targetTable.Name
 		})
 		if !found {
-			fmt.Fprintf(&removals, "DROP TABLE %s;\n", quoteIdentifier(targetTable.Name))
+			removals = append(removals, &SQLDropTableInstruction{Name: targetTable.Name})
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 // DiffViews writes every DROP VIEW statement into the early removals. PostgreSQL refuses a
 // change of a column while a view that reads it exists.
 func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
-	var earlyRemovals strings.Builder
-	var additions strings.Builder
+	var earlyRemovals []Instruction
+	var additions []Instruction
 
 	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -571,14 +569,14 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 			return view.Name == sourceView.Name
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceView.String())
+			additions = append(additions, sourceView.CreateInstruction())
 			continue
 		}
 
 		// A type change of a column that the view reads keeps the definition text equal,
 		// so the columns give the second condition.
 		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
-			fmt.Fprintf(&additions, "%s\n", sourceView.String())
+			additions = append(additions, sourceView.CreateInstruction())
 		}
 	}
 
@@ -589,21 +587,19 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 			return view.Name == targetView.Name
 		})
 		if !found {
-			fmt.Fprintf(&earlyRemovals, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
+			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: targetView.Name})
 			continue
 		}
 
 		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
-			fmt.Fprintf(&earlyRemovals, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
+			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: targetView.Name})
 		}
 	}
 
-	sectionDiff := &SectionDiff{
-		EarlyRemovals: strings.TrimSpace(earlyRemovals.String()),
-		Additions:     strings.TrimSpace(additions.String()),
-	}
-
-	return sectionDiff, nil
+	return &SectionDiff{
+		EarlyRemovals: RenderInstructions(earlyRemovals),
+		Additions:     RenderInstructions(additions),
+	}, nil
 }
 
 func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*PostgresExtension, error) {

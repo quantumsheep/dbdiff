@@ -1,10 +1,5 @@
 package drivers
 
-import (
-	"fmt"
-	"strings"
-)
-
 type PostgresTable struct {
 	Name        string
 	Columns     []*PostgresColumn
@@ -23,40 +18,61 @@ func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
 	return nil, false
 }
 
-func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) (string, error) {
-	var diff strings.Builder
+func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) ([]Instruction, error) {
+	var instructions []Instruction
+
+	alterTable := func(action AlterTableAction) Instruction {
+		return &PostgresAlterTableInstruction{
+			Name:    t.Name,
+			Actions: []AlterTableAction{action},
+		}
+	}
 
 	for _, sourceColumn := range t.Columns {
 		targetColumn, found := other.ColumnByName(sourceColumn.Name)
 		if !found {
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", quoteIdentifier(t.Name), sourceColumn.Definition())
+			instructions = append(instructions,
+				alterTable(&PostgresAddColumnAction{Column: sourceColumn}))
+
 			continue
 		}
 
-		if !sourceColumn.HasEqualAttributes(targetColumn) {
-			if sourceColumn.Type != targetColumn.Type {
-				usingClause, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
-				if err != nil {
-					return "", err
-				}
+		if sourceColumn.HasEqualAttributes(targetColumn) {
+			continue
+		}
 
-				fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s TYPE %s%s;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name), sourceColumn.Type, usingClause)
+		if sourceColumn.Type != targetColumn.Type {
+			usingCast, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
+			if err != nil {
+				return nil, err
 			}
 
-			if sourceColumn.NotNull != targetColumn.NotNull {
-				if sourceColumn.NotNull {
-					fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s SET NOT NULL;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name))
-				} else {
-					fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s DROP NOT NULL;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name))
-				}
-			}
+			instructions = append(instructions, alterTable(&PostgresAlterColumnTypeAction{
+				ColumnName: sourceColumn.Name,
+				DataType:   sourceColumn.Type,
+				UsingCast:  usingCast,
+			}))
+		}
 
-			if sourceColumn.Default != targetColumn.Default {
-				if sourceColumn.Default.Valid {
-					fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s SET DEFAULT %s;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name), sourceColumn.Default.String)
-				} else {
-					fmt.Fprintf(&diff, "ALTER TABLE %s ALTER COLUMN %s DROP DEFAULT;\n", quoteIdentifier(t.Name), quoteIdentifier(sourceColumn.Name))
-				}
+		if sourceColumn.NotNull != targetColumn.NotNull {
+			if sourceColumn.NotNull {
+				instructions = append(instructions,
+					alterTable(&PostgresSetNotNullAction{ColumnName: sourceColumn.Name}))
+			} else {
+				instructions = append(instructions,
+					alterTable(&PostgresDropNotNullAction{ColumnName: sourceColumn.Name}))
+			}
+		}
+
+		if sourceColumn.Default != targetColumn.Default {
+			if sourceColumn.Default.Valid {
+				instructions = append(instructions, alterTable(&PostgresSetDefaultAction{
+					ColumnName: sourceColumn.Name,
+					Expression: sourceColumn.Default.String,
+				}))
+			} else {
+				instructions = append(instructions,
+					alterTable(&PostgresDropDefaultAction{ColumnName: sourceColumn.Name}))
 			}
 		}
 	}
@@ -66,71 +82,79 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	for _, sourceConstraint := range t.Constraints {
 		targetConstraint, found := other.ConstraintByName(sourceConstraint.Name)
 		if !found {
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.Clause())
+			instructions = append(instructions,
+				alterTable(&PostgresAddConstraintAction{Constraint: sourceConstraint}))
+
 			continue
 		}
 
 		if sourceConstraint.Def != targetConstraint.Def {
-			fmt.Fprintf(&diff, "ALTER TABLE %s DROP CONSTRAINT %s;\n", quoteIdentifier(t.Name), quoteIdentifier(targetConstraint.Name))
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.Clause())
+			instructions = append(instructions,
+				alterTable(&PostgresDropConstraintAction{ConstraintName: targetConstraint.Name}),
+				alterTable(&PostgresAddConstraintAction{Constraint: sourceConstraint}))
 		}
 	}
 
 	for _, targetConstraint := range other.Constraints {
 		_, found := t.ConstraintByName(targetConstraint.Name)
 		if !found {
-			fmt.Fprintf(&diff, "ALTER TABLE %s DROP CONSTRAINT %s;\n", quoteIdentifier(t.Name), quoteIdentifier(targetConstraint.Name))
+			instructions = append(instructions,
+				alterTable(&PostgresDropConstraintAction{ConstraintName: targetConstraint.Name}))
 		}
 	}
 
 	for _, sourceIndex := range t.Indexes {
 		targetIndex, found := other.IndexByName(sourceIndex.Name)
 		if !found {
-			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
+			instructions = append(instructions, sourceIndex.CreateInstruction())
 			continue
 		}
 
 		if sourceIndex.Def != targetIndex.Def {
-			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
-			fmt.Fprintf(&diff, "%s\n", sourceIndex.String())
+			instructions = append(instructions,
+				&SQLDropIndexInstruction{Name: targetIndex.Name},
+				sourceIndex.CreateInstruction())
 		}
 	}
 
 	for _, targetIndex := range other.Indexes {
 		_, found := t.IndexByName(targetIndex.Name)
 		if !found {
-			fmt.Fprintf(&diff, "DROP INDEX %s;\n", quoteIdentifier(targetIndex.Name))
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: targetIndex.Name})
 		}
 	}
 
 	for _, targetColumn := range other.Columns {
 		_, found := t.ColumnByName(targetColumn.Name)
 		if !found {
-			fmt.Fprintf(&diff, "ALTER TABLE %s DROP COLUMN %s;\n", quoteIdentifier(t.Name), quoteIdentifier(targetColumn.Name))
+			instructions = append(instructions,
+				alterTable(&SQLDropColumnAction{ColumnName: targetColumn.Name}))
 		}
 	}
 
 	for _, sourceTrigger := range t.Triggers {
 		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
 		if !found {
-			fmt.Fprintf(&diff, "%s\n", sourceTrigger.String())
+			instructions = append(instructions, sourceTrigger.CreateInstruction())
 			continue
 		}
 
 		if sourceTrigger.Def != targetTrigger.Def {
-			fmt.Fprintf(&diff, "DROP TRIGGER %s ON %s;\n", quoteIdentifier(targetTrigger.Name), quoteIdentifier(t.Name))
-			fmt.Fprintf(&diff, "%s\n", sourceTrigger.String())
+			instructions = append(instructions,
+				&PostgresDropTriggerInstruction{Name: targetTrigger.Name, TableName: t.Name},
+				sourceTrigger.CreateInstruction())
 		}
 	}
 
 	for _, targetTrigger := range other.Triggers {
 		_, found := t.TriggerByName(targetTrigger.Name)
 		if !found {
-			fmt.Fprintf(&diff, "DROP TRIGGER %s ON %s;\n", quoteIdentifier(targetTrigger.Name), quoteIdentifier(t.Name))
+			instructions = append(instructions,
+				&PostgresDropTriggerInstruction{Name: targetTrigger.Name, TableName: t.Name})
 		}
 	}
 
-	return strings.TrimSpace(diff.String()), nil
+	return instructions, nil
 }
 
 func (t *PostgresTable) ConstraintByName(name string) (*PostgresConstraint, bool) {
@@ -163,33 +187,26 @@ func (t *PostgresTable) TriggerByName(name string) (*PostgresTrigger, bool) {
 	return nil, false
 }
 
-func (t *PostgresTable) StringCreateTable() string {
-	var columnLines []string
-
-	for _, column := range t.Columns {
-		line := "\t" + column.Definition()
-		columnLines = append(columnLines, line)
+func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction {
+	return &PostgresCreateTableInstruction{
+		Name:        t.Name,
+		Columns:     t.Columns,
+		Constraints: t.Constraints,
 	}
-
-	for _, constraint := range t.Constraints {
-		line := "\t" + constraint.Clause()
-		columnLines = append(columnLines, line)
-	}
-
-	createTableColumns := strings.Join(columnLines, ",\n")
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);", quoteIdentifier(t.Name), createTableColumns)
 }
 
-func (t *PostgresTable) String() string {
-	statement := t.StringCreateTable()
+// Instructions returns the statement that creates the table, then the statements of its
+// indexes, then the statements of its triggers.
+func (t *PostgresTable) Instructions() []Instruction {
+	instructions := []Instruction{t.CreateTableInstruction()}
 
 	for _, index := range t.Indexes {
-		statement += "\n" + index.String()
+		instructions = append(instructions, index.CreateInstruction())
 	}
 
 	for _, trigger := range t.Triggers {
-		statement += "\n" + trigger.String()
+		instructions = append(instructions, trigger.CreateInstruction())
 	}
 
-	return statement
+	return instructions
 }

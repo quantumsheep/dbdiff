@@ -3,22 +3,19 @@ package drivers
 import (
 	"context"
 	"database/sql"
-	"fmt"
 )
 
 type AutomaticCastLookup func(oldType string, newType string) (bool, error)
 
-func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, hasAutomaticCast AutomaticCastLookup) (string, error) {
+// columnUsingClause reports whether the type change needs a USING cast. PostgreSQL casts
+// automatically in the assignment context, and a cast of another kind needs the clause.
+func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, hasAutomaticCast AutomaticCastLookup) (bool, error) {
 	automatic, err := hasAutomaticCast(oldColumn.Type, newColumn.Type)
 	if err != nil {
-		return "", err
+		return false, err
 	}
 
-	if automatic {
-		return "", nil
-	}
-
-	return fmt.Sprintf(" USING %s::%s", quoteIdentifier(newColumn.Name), newColumn.Type), nil
+	return !automatic, nil
 }
 
 // HasAutomaticCast asks the database, because the rules of pg_cast are long. ALTER TABLE

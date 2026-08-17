@@ -28,6 +28,6 @@ func (v *PostgresView) HasEqualColumns(other *PostgresView) bool {
 	return true
 }
 
-func (v *PostgresView) String() string {
-	return "CREATE VIEW " + quoteIdentifier(v.Name) + " AS " + v.Def
+func (v *PostgresView) CreateInstruction() *PostgresCreateViewInstruction {
+	return &PostgresCreateViewInstruction{Name: v.Name, Query: v.Def}
 }

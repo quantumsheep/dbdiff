@@ -5,6 +5,6 @@ type PostgresIndex struct {
 	Def  string
 }
 
-func (i *PostgresIndex) String() string {
-	return i.Def + ";"
+func (i *PostgresIndex) CreateInstruction() *PostgresCreateIndexInstruction {
+	return &PostgresCreateIndexInstruction{Definition: i.Def}
 }
