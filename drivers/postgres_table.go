@@ -29,7 +29,7 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	for _, sourceColumn := range t.Columns {
 		targetColumn, found := other.ColumnByName(sourceColumn.Name)
 		if !found {
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", quoteIdentifier(t.Name), sourceColumn.String())
+			fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", quoteIdentifier(t.Name), sourceColumn.Definition())
 			continue
 		}
 
@@ -66,13 +66,13 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	for _, sourceConstraint := range t.Constraints {
 		targetConstraint, found := other.ConstraintByName(sourceConstraint.Name)
 		if !found {
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.String())
+			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.Clause())
 			continue
 		}
 
 		if sourceConstraint.Def != targetConstraint.Def {
 			fmt.Fprintf(&diff, "ALTER TABLE %s DROP CONSTRAINT %s;\n", quoteIdentifier(t.Name), quoteIdentifier(targetConstraint.Name))
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.String())
+			fmt.Fprintf(&diff, "ALTER TABLE %s ADD %s;\n", quoteIdentifier(t.Name), sourceConstraint.Clause())
 		}
 	}
 
@@ -167,12 +167,12 @@ func (t *PostgresTable) StringCreateTable() string {
 	var columnLines []string
 
 	for _, column := range t.Columns {
-		line := "\t" + column.String()
+		line := "\t" + column.Definition()
 		columnLines = append(columnLines, line)
 	}
 
 	for _, constraint := range t.Constraints {
-		line := "\t" + constraint.String()
+		line := "\t" + constraint.Clause()
 		columnLines = append(columnLines, line)
 	}
 

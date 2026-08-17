@@ -30,7 +30,7 @@ func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
 	return *copy == *other
 }
 
-func (c *SQLiteColumn) String() string {
+func (c *SQLiteColumn) Definition() string {
 	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
 
 	if c.NotNull {

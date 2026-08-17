@@ -707,6 +707,28 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t, `DROP SEQUENCE "counter";`, instruction.String())
 	})
+
+	t.Run("ColumnDefinitionIsNotAnInstruction", func(t *testing.T) {
+		// A fragment must not satisfy Instruction. This assertion fails to compile if a
+		// fragment type gains a String method again.
+		var _ Instruction = &SQLiteCreateTableInstruction{}
+
+		column := &SQLiteColumn{Name: "id", Type: "INTEGER", NotNull: true}
+		require.Equal(t, `"id" INTEGER NOT NULL`, column.Definition())
+
+		postgresColumn := &PostgresColumn{Name: "id", Type: "integer", NotNull: true}
+		require.Equal(t, `"id" integer NOT NULL`, postgresColumn.Definition())
+
+		constraint := &PostgresConstraint{Name: "users_pkey", Def: "PRIMARY KEY (id)"}
+		require.Equal(t, `CONSTRAINT "users_pkey" PRIMARY KEY (id)`, constraint.Clause())
+
+		foreignKey := &SQLiteForeignKey{
+			Table: "teams",
+			From:  []string{"team"},
+			To:    []string{"name"},
+		}
+		require.Equal(t, `FOREIGN KEY ("team") REFERENCES "teams" ("name")`, foreignKey.Clause())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.

@@ -8,6 +8,6 @@ type PostgresConstraint struct {
 	Def  string
 }
 
-func (c *PostgresConstraint) String() string {
+func (c *PostgresConstraint) Clause() string {
 	return fmt.Sprintf("CONSTRAINT %s %s", quoteIdentifier(c.Name), c.Def)
 }

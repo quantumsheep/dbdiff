@@ -24,7 +24,7 @@ func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 	return *copy == *other
 }
 
-func (c *PostgresColumn) String() string {
+func (c *PostgresColumn) Definition() string {
 	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
 
 	if c.NotNull {

@@ -13,7 +13,7 @@ type SQLiteForeignKey struct {
 	OnDelete string
 }
 
-func (fk *SQLiteForeignKey) String() string {
+func (fk *SQLiteForeignKey) Clause() string {
 	fromColumns := strings.Join(quoteIdentifiers(fk.From), ", ")
 	toColumns := strings.Join(quoteIdentifiers(fk.To), ", ")
 

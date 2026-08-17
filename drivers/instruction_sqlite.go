@@ -23,7 +23,7 @@ type SQLiteAddColumnAction struct {
 }
 
 func (a *SQLiteAddColumnAction) TableActionClause() string {
-	return "ADD COLUMN " + a.Column.String()
+	return "ADD COLUMN " + a.Column.Definition()
 }
 
 // CREATE TABLE name ( column_definition [, ...] [, table_constraint [, ...] ] )
@@ -41,7 +41,7 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	var lines []string
 
 	for _, column := range i.Columns {
-		lines = append(lines, "\t"+column.String())
+		lines = append(lines, "\t"+column.Definition())
 	}
 
 	if len(i.PrimaryKey) > 0 {
@@ -55,7 +55,7 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	}
 
 	for _, foreignKey := range i.ForeignKeys {
-		lines = append(lines, "\t"+foreignKey.String())
+		lines = append(lines, "\t"+foreignKey.Clause())
 	}
 
 	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);",

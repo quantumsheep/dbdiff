@@ -29,7 +29,7 @@ type PostgresAddColumnAction struct {
 }
 
 func (a *PostgresAddColumnAction) TableActionClause() string {
-	return "ADD COLUMN " + a.Column.String()
+	return "ADD COLUMN " + a.Column.Definition()
 }
 
 // ALTER COLUMN column_name TYPE data_type [ USING expression ]
@@ -95,7 +95,7 @@ type PostgresAddConstraintAction struct {
 }
 
 func (a *PostgresAddConstraintAction) TableActionClause() string {
-	return "ADD " + a.Constraint.String()
+	return "ADD " + a.Constraint.Clause()
 }
 
 // DROP CONSTRAINT constraint_name
@@ -118,11 +118,11 @@ func (i *PostgresCreateTableInstruction) String() string {
 	var lines []string
 
 	for _, column := range i.Columns {
-		lines = append(lines, "\t"+column.String())
+		lines = append(lines, "\t"+column.Definition())
 	}
 
 	for _, constraint := range i.Constraints {
-		lines = append(lines, "\t"+constraint.String())
+		lines = append(lines, "\t"+constraint.Clause())
 	}
 
 	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);",

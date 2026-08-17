@@ -67,7 +67,7 @@ func (t *SQLiteTable) StringCreateTable() string {
 	var columnLines []string
 
 	for _, column := range t.Columns {
-		line := "\t" + column.String()
+		line := "\t" + column.Definition()
 		columnLines = append(columnLines, line)
 	}
 
@@ -82,7 +82,7 @@ func (t *SQLiteTable) StringCreateTable() string {
 	}
 
 	for _, foreignKey := range t.ForeignKeys {
-		line := "\t" + foreignKey.String()
+		line := "\t" + foreignKey.Clause()
 		columnLines = append(columnLines, line)
 	}
 
@@ -279,7 +279,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) (string, error) {
 				return "", fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
 			}
 
-			fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", quoteIdentifier(t.Name), column.String())
+			fmt.Fprintf(&diff, "ALTER TABLE %s ADD COLUMN %s;\n", quoteIdentifier(t.Name), column.Definition())
 		}
 
 	}
