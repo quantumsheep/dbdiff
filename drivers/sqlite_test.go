@@ -37,16 +37,17 @@ func (d *TestingSQLiteDriver) ExecOnTarget(sqlStatements string) {
 	require.NoError(d.tb, err)
 }
 
-func (d *TestingSQLiteDriver) RequireDiff(expectedDiff string) string {
+// RequireInstructions compares the instructions of the diff. The SQL text of each kind
+// belongs to instruction_test.go, so this method compares no text. It returns the rendered
+// diff, so the caller applies it to the target.
+func (d *TestingSQLiteDriver) RequireInstructions(expected []Instruction) string {
 	d.tb.Helper()
 
 	instructions, err := d.Diff(d.tb.Context())
 	require.NoError(d.tb, err)
+	require.Equal(d.tb, expected, instructions)
 
-	diff := RenderInstructions(instructions)
-	require.Equal(d.tb, expectedDiff, diff)
-
-	return diff
+	return RenderInstructions(instructions)
 }
 
 func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules string) []map[string]any {
@@ -197,7 +198,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("NoChanges", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.RequireDiff(``)
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("CreateTables", func(t *testing.T) {
@@ -210,10 +211,16 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		diff := driver.RequireDiff(`CREATE TABLE "users" (
-	"id" INTEGER PRIMARY KEY,
-	"name" TEXT NOT NULL
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "users",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "name", Type: "TEXT", NotNull: true},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -238,7 +245,14 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		diff := driver.RequireDiff(`ALTER TABLE "users" ADD COLUMN "email" TEXT;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{Name: "email", Type: "TEXT"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -269,7 +283,14 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
 		`)
 
-		diff := driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "email";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLDropColumnAction{
+					ColumnName: "email",
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -299,7 +320,15 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		diff := driver.RequireDiff(`ALTER TABLE "users" RENAME COLUMN "name" TO "full_name";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLRenameColumnAction{
+					ColumnName:    "name",
+					NewColumnName: "full_name",
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -330,10 +359,28 @@ func TestSQLiteDriver(t *testing.T) {
 		`)
 
 		// Two target columns hold the same attributes, so the rename guess is unsafe.
-		diff := driver.RequireDiff(`ALTER TABLE "users" DROP COLUMN "name_a";
-ALTER TABLE "users" DROP COLUMN "name_b";
-ALTER TABLE "users" ADD COLUMN "first_name" TEXT;
-ALTER TABLE "users" ADD COLUMN "last_name" TEXT;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name:   "users",
+				Action: &SQLDropColumnAction{ColumnName: "name_a"},
+			},
+			&SQLiteAlterTableInstruction{
+				Name:   "users",
+				Action: &SQLDropColumnAction{ColumnName: "name_b"},
+			},
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{Name: "first_name", Type: "TEXT"},
+				},
+			},
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{Name: "last_name", Type: "TEXT"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -358,8 +405,21 @@ ALTER TABLE "users" ADD COLUMN "last_name" TEXT;`)
 			INSERT INTO users (id, name_a) VALUES (1, 'Alice');
 		`)
 
-		diff := driver.RequireDiff(`ALTER TABLE "users" RENAME COLUMN "name_a" TO "first_name";
-ALTER TABLE "users" ADD COLUMN "last_name" TEXT;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLRenameColumnAction{
+					ColumnName:    "name_a",
+					NewColumnName: "first_name",
+				},
+			},
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{Name: "last_name", Type: "TEXT"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -390,14 +450,28 @@ ALTER TABLE "users" ADD COLUMN "last_name" TEXT;`)
 			INSERT INTO users (id, name, age) VALUES (1, 'Alice', '30'), (2, 'Bob', '25');
 		`)
 
-		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
-	"id" INTEGER PRIMARY KEY,
-	"name" TEXT NOT NULL,
-	"age" INTEGER
-);
-INSERT INTO "_users_temp" ("id", "name", "age") SELECT "id", "name", "age" FROM "users";
-DROP TABLE "users";
-ALTER TABLE "_users_temp" RENAME TO "users";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "name", Type: "TEXT", NotNull: true},
+					{Name: "age", Type: "INTEGER"},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "name", "age"},
+				SelectExpressions: []string{`"id"`, `"name"`, `"age"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -427,13 +501,27 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
-	"id" INTEGER PRIMARY KEY,
-	"name" TEXT NOT NULL
-);
-INSERT INTO "_users_temp" ("id", "name") SELECT "id", "name" FROM "users";
-DROP TABLE "users";
-ALTER TABLE "_users_temp" RENAME TO "users";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "name", Type: "TEXT", NotNull: true},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "name"},
+				SelectExpressions: []string{`"id"`, `"name"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -463,13 +551,27 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
-		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
-	"id" INTEGER PRIMARY KEY,
-	"name" TEXT
-);
-INSERT INTO "_users_temp" ("id", "name") SELECT "id", "name" FROM "users";
-DROP TABLE "users";
-ALTER TABLE "_users_temp" RENAME TO "users";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "name", Type: "TEXT"},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "name"},
+				SelectExpressions: []string{`"id"`, `"name"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -491,7 +593,9 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			);
 		`)
 
-		driver.RequireDiff(`DROP TABLE "users";`)
+		driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "users"},
+		})
 	})
 
 	t.Run("TableNameThatNeedsQuotes", func(t *testing.T) {
@@ -505,11 +609,21 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 			CREATE INDEX "idx name" ON "order ""list""" (name);
 		`)
 
-		diff := driver.RequireDiff(`CREATE TABLE "order ""list""" (
-	"id" INTEGER PRIMARY KEY,
-	"name" TEXT
-);
-CREATE INDEX "idx name" ON "order ""list""" ("name");`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        `order "list"`,
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "name", Type: "TEXT"},
+				},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx name",
+				TableName: `order "list"`,
+				Keys:      []string{`"name"`},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -532,7 +646,14 @@ CREATE INDEX "idx name" ON "order ""list""" ("name");`)
 			);
 		`)
 
-		diff := driver.RequireDiff(`CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name");`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateIndexInstruction{
+				Unique:    true,
+				Name:      "idx_users_name",
+				TableName: "users",
+				Keys:      []string{`"name"`},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -555,7 +676,9 @@ CREATE INDEX "idx name" ON "order ""list""" ("name");`)
 			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
 
-		diff := driver.RequireDiff(`DROP INDEX "idx_users_name";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropIndexInstruction{Name: "idx_users_name"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -583,8 +706,15 @@ CREATE INDEX "idx name" ON "order ""list""" ("name");`)
 			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
 		`)
 
-		diff := driver.RequireDiff(`DROP INDEX "idx_users_name";
-CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropIndexInstruction{Name: "idx_users_name"},
+			&SQLiteCreateIndexInstruction{
+				Unique:    true,
+				Name:      "idx_users_name",
+				TableName: "users",
+				Keys:      []string{`"name"`, `"email"`},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -609,7 +739,14 @@ CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
 			);
 		`)
 
-		diff := driver.RequireDiff(`CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx_users_active",
+				TableName: "users",
+				Keys:      []string{`"name"`},
+				Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -635,8 +772,15 @@ CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name", "email");`)
 			CREATE INDEX idx_users_active ON users (name) WHERE active = 0;
 		`)
 
-		diff := driver.RequireDiff(`DROP INDEX "idx_users_active";
-CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropIndexInstruction{Name: "idx_users_active"},
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx_users_active",
+				TableName: "users",
+				Keys:      []string{`"name"`},
+				Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -659,7 +803,14 @@ CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
 			);
 		`)
 
-		diff := driver.RequireDiff(`CREATE UNIQUE INDEX "idx_users_name" ON "users" (lower(name), "id");`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateIndexInstruction{
+				Unique:    true,
+				Name:      "idx_users_name",
+				TableName: "users",
+				Keys:      []string{"lower(name)", `"id"`},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -683,8 +834,14 @@ CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
 			CREATE INDEX idx_users_name ON users (upper(name));
 		`)
 
-		diff := driver.RequireDiff(`DROP INDEX "idx_users_name";
-CREATE INDEX "idx_users_name" ON "users" (lower(name));`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropIndexInstruction{Name: "idx_users_name"},
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx_users_name",
+				TableName: "users",
+				Keys:      []string{"lower(name)"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -713,15 +870,34 @@ CREATE INDEX "idx_users_name" ON "users" (lower(name));`)
 		`)
 
 		// The recreation of the table drops the index. The last statement builds it again.
-		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
-	"id" INTEGER PRIMARY KEY,
-	"name" TEXT NOT NULL,
-	"active" INTEGER NOT NULL
-);
-INSERT INTO "_users_temp" ("id", "name", "active") SELECT "id", "name", "active" FROM "users";
-DROP TABLE "users";
-ALTER TABLE "_users_temp" RENAME TO "users";
-CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "name", Type: "TEXT", NotNull: true},
+					{Name: "active", Type: "INTEGER", NotNull: true},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "name", "active"},
+				SelectExpressions: []string{`"id"`, `"name"`, `"active"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx_users_active",
+				TableName: "users",
+				Keys:      []string{`"name"`},
+				Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -753,7 +929,13 @@ CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
 		`)
 
 		// The UNIQUE constraint builds an index. That index stays out of the diff.
-		diff := driver.RequireDiff(`CREATE INDEX "idx_users_name" ON "users" ("name");`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx_users_name",
+				TableName: "users",
+				Keys:      []string{`"name"`},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -781,14 +963,28 @@ CREATE INDEX "idx_users_active" ON "users" ("name") WHERE active = 1;`)
 
 		// The recreation keeps the constraint in the definition of the column. SQLite
 		// refuses a CREATE INDEX statement with the name of the index of a constraint.
-		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
-	"id" INTEGER PRIMARY KEY,
-	"email" TEXT UNIQUE,
-	"age" INTEGER
-);
-INSERT INTO "_users_temp" ("id", "email", "age") SELECT "id", "email", "age" FROM "users";
-DROP TABLE "users";
-ALTER TABLE "_users_temp" RENAME TO "users";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "email", Type: "TEXT", Unique: true},
+					{Name: "age", Type: "INTEGER"},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "email", "age"},
+				SelectExpressions: []string{`"id"`, `"email"`, `"age"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
@@ -816,12 +1012,18 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 		`)
 
 		// A UNIQUE constraint of two or more columns keeps the order of its columns.
-		diff := driver.RequireDiff(`CREATE TABLE "members" (
-	"id" INTEGER PRIMARY KEY,
-	"team" TEXT NOT NULL,
-	"name" TEXT NOT NULL,
-	UNIQUE ("team", "name")
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "members",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "team", Type: "TEXT", NotNull: true},
+					{Name: "name", Type: "TEXT", NotNull: true},
+				},
+				UniqueConstraints: [][]string{{"team", "name"}},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		driver.ExecOnTarget(`INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice');`)
@@ -853,15 +1055,29 @@ ALTER TABLE "_users_temp" RENAME TO "users";`)
 		`)
 
 		// SQLite adds no table constraint, so the new constraint needs a recreation.
-		diff := driver.RequireDiff(`CREATE TABLE "_members_temp" (
-	"id" INTEGER PRIMARY KEY,
-	"team" TEXT NOT NULL,
-	"name" TEXT NOT NULL,
-	UNIQUE ("team", "name")
-);
-INSERT INTO "_members_temp" ("id", "team", "name") SELECT "id", "team", "name" FROM "members";
-DROP TABLE "members";
-ALTER TABLE "_members_temp" RENAME TO "members";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_members_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "team", Type: "TEXT", NotNull: true},
+					{Name: "name", Type: "TEXT", NotNull: true},
+				},
+				UniqueConstraints: [][]string{{"team", "name"}},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_members_temp",
+				ColumnNames:       []string{"id", "team", "name"},
+				SelectExpressions: []string{`"id"`, `"team"`, `"name"`},
+				SourceTableName:   "members",
+			},
+			&SQLDropTableInstruction{Name: "members"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_members_temp",
+				Action: &SQLRenameTableAction{NewName: "members"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("members", "ORDER BY id")
@@ -885,12 +1101,18 @@ ALTER TABLE "_members_temp" RENAME TO "members";`)
 		`)
 
 		// The key order differs from the column order of the table.
-		diff := driver.RequireDiff(`CREATE TABLE "memberships" (
-	"team" TEXT NOT NULL,
-	"member" TEXT NOT NULL,
-	"role" TEXT,
-	PRIMARY KEY ("member", "team")
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "memberships",
+				Columns: []*SQLiteColumn{
+					{Name: "team", Type: "TEXT", NotNull: true},
+					{Name: "member", Type: "TEXT", NotNull: true},
+					{Name: "role", Type: "TEXT"},
+				},
+				PrimaryKey: []string{"member", "team"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		driver.ExecOnTarget(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');`)
@@ -911,10 +1133,16 @@ ALTER TABLE "_members_temp" RENAME TO "members";`)
 
 		// An INTEGER PRIMARY KEY is the alias of the rowid. The form of a table constraint
 		// changes the type of the key, so the key keeps the column constraint form.
-		diff := driver.RequireDiff(`CREATE TABLE "counters" (
-	"id" INTEGER PRIMARY KEY,
-	"total" INTEGER
-);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "counters",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "total", Type: "INTEGER"},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		driver.ExecOnTarget(`INSERT INTO counters (total) VALUES (5);`)
@@ -950,15 +1178,29 @@ ALTER TABLE "_members_temp" RENAME TO "members";`)
 		`)
 
 		// The type of the column "level" changes, so the new table keeps the whole key.
-		diff := driver.RequireDiff(`CREATE TABLE "_memberships_temp" (
-	"team" TEXT NOT NULL,
-	"member" TEXT NOT NULL,
-	"level" INTEGER,
-	PRIMARY KEY ("team", "member")
-);
-INSERT INTO "_memberships_temp" ("team", "member", "level") SELECT "team", "member", "level" FROM "memberships";
-DROP TABLE "memberships";
-ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_memberships_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "team", Type: "TEXT", NotNull: true},
+					{Name: "member", Type: "TEXT", NotNull: true},
+					{Name: "level", Type: "INTEGER"},
+				},
+				PrimaryKey: []string{"team", "member"},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_memberships_temp",
+				ColumnNames:       []string{"team", "member", "level"},
+				SelectExpressions: []string{`"team"`, `"member"`, `"level"`},
+				SourceTableName:   "memberships",
+			},
+			&SQLDropTableInstruction{Name: "memberships"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_memberships_temp",
+				Action: &SQLRenameTableAction{NewName: "memberships"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("memberships", "ORDER BY team, member")
@@ -993,15 +1235,29 @@ ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
 		`)
 
 		// The primary key of the target holds another column.
-		diff := driver.RequireDiff(`CREATE TABLE "_memberships_temp" (
-	"team" TEXT NOT NULL,
-	"member" TEXT NOT NULL,
-	"role" TEXT NOT NULL,
-	PRIMARY KEY ("team", "member")
-);
-INSERT INTO "_memberships_temp" ("team", "member", "role") SELECT "team", "member", "role" FROM "memberships";
-DROP TABLE "memberships";
-ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_memberships_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "team", Type: "TEXT", NotNull: true},
+					{Name: "member", Type: "TEXT", NotNull: true},
+					{Name: "role", Type: "TEXT", NotNull: true},
+				},
+				PrimaryKey: []string{"team", "member"},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_memberships_temp",
+				ColumnNames:       []string{"team", "member", "role"},
+				SelectExpressions: []string{`"team"`, `"member"`, `"role"`},
+				SourceTableName:   "memberships",
+			},
+			&SQLDropTableInstruction{Name: "memberships"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_memberships_temp",
+				Action: &SQLRenameTableAction{NewName: "memberships"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("memberships", "ORDER BY team, member")
@@ -1033,14 +1289,32 @@ ALTER TABLE "_memberships_temp" RENAME TO "memberships";`)
 		`)
 
 		// The recreation prints the explicit index only, and no index of the PRIMARY KEY.
-		diff := driver.RequireDiff(`CREATE TABLE "_users_temp" (
-	"email" TEXT PRIMARY KEY,
-	"age" INTEGER
-);
-INSERT INTO "_users_temp" ("email", "age") SELECT "email", "age" FROM "users";
-DROP TABLE "users";
-ALTER TABLE "_users_temp" RENAME TO "users";
-CREATE INDEX "idx_users_age" ON "users" ("age");`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "email", Type: "TEXT", PrimaryKey: true},
+					{Name: "age", Type: "INTEGER"},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"email", "age"},
+				SelectExpressions: []string{`"email"`, `"age"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx_users_age",
+				TableName: "users",
+				Keys:      []string{`"age"`},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("users", "ORDER BY email")
@@ -1068,12 +1342,16 @@ CREATE INDEX "idx_users_age" ON "users" ("age");`)
 			CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN SELECT 4; END;
 		`)
 
-		expected := `CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
-DROP TRIGGER "users_update";
-CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
-DROP TRIGGER "users_audit";`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END",
+			},
+			&SQLiteDropTriggerInstruction{Name: "users_update"},
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END",
+			},
+			&SQLiteDropTriggerInstruction{Name: "users_audit"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1086,13 +1364,19 @@ DROP TRIGGER "users_audit";`
 			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 		`)
 
-		expected := `CREATE TABLE "users" (
-	"id" INTEGER PRIMARY KEY,
-	"name" TEXT
-);
-CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "users",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "name", Type: "TEXT"},
+				},
+			},
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END",
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1112,12 +1396,16 @@ CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;`
 			CREATE VIEW old_view AS SELECT id FROM users;
 		`)
 
-		expected := `CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin';
-DROP VIEW "users_view";
-CREATE VIEW users_view AS SELECT name FROM users;
-DROP VIEW "old_view";`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateViewInstruction{
+				Definition: "CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin'",
+			},
+			&SQLDropViewInstruction{Name: "users_view"},
+			&SQLiteCreateViewInstruction{
+				Definition: "CREATE VIEW users_view AS SELECT name FROM users",
+			},
+			&SQLDropViewInstruction{Name: "old_view"},
+		})
 
 		driver.ExecOnTarget(diff)
 	})
@@ -1146,17 +1434,36 @@ DROP VIEW "old_view";`
 			INSERT INTO posts (id, user_id, title) VALUES (1, 1, 'First Post'), (2, 1, 'Second Post');
 		`)
 
-		expected := `CREATE TABLE "_posts_temp" (
-	"id" INTEGER PRIMARY KEY,
-	"user_id" INTEGER,
-	"title" TEXT,
-	FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE
-);
-INSERT INTO "_posts_temp" ("id", "user_id", "title") SELECT "id", "user_id", "title" FROM "posts";
-DROP TABLE "posts";
-ALTER TABLE "_posts_temp" RENAME TO "posts";`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				Name: "_posts_temp",
+				Columns: []*SQLiteColumn{
+					{Name: "id", Type: "INTEGER", PrimaryKey: true},
+					{Name: "user_id", Type: "INTEGER"},
+					{Name: "title", Type: "TEXT"},
+				},
+				ForeignKeys: []*SQLiteForeignKey{
+					{
+						Table:    "users",
+						From:     []string{"user_id"},
+						To:       []string{"id"},
+						OnUpdate: "NO ACTION",
+						OnDelete: "CASCADE",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_posts_temp",
+				ColumnNames:       []string{"id", "user_id", "title"},
+				SelectExpressions: []string{`"id"`, `"user_id"`, `"title"`},
+				SourceTableName:   "posts",
+			},
+			&SQLDropTableInstruction{Name: "posts"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_posts_temp",
+				Action: &SQLRenameTableAction{NewName: "posts"},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 		rows := driver.FetchAllFromTarget("posts", "ORDER BY id")
@@ -1179,11 +1486,32 @@ ALTER TABLE "_posts_temp" RENAME TO "posts";`
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');`)
 
-		expected := `INSERT INTO "users" ("id", "name") VALUES (3, 'Carol');
-UPDATE "users" SET "name" = 'Robert' WHERE "id" = 2;
-DELETE FROM "users" WHERE "id" = 4;`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Values:      []string{"3", "'Carol'"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*SQLSetClause{
+					{ColumnName: "name", Expression: "'Robert'"},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+					},
+				},
+			},
+			&SQLDeleteInstruction{
+				TableName: "users",
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "4"},
+					},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1208,7 +1536,11 @@ DELETE FROM "users" WHERE "id" = 4;`
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO logs (message) VALUES ('stop');`)
 
-		diff := driver.RequireDiff(`-- The table "logs" holds no primary key, so dbdiff compares no row of it.`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLCommentInstruction{
+				Text: `The table "logs" holds no primary key, so dbdiff compares no row of it.`,
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1231,11 +1563,35 @@ DELETE FROM "users" WHERE "id" = 4;`
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO notes (id, body) VALUES (1, 'plain'), (2, 'not empty');`)
 
-		expected := `INSERT INTO "notes" ("id", "body") VALUES (3, NULL);
-UPDATE "notes" SET "body" = 'it''s a note' WHERE "id" = 1;
-UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "notes",
+				ColumnNames: []string{"id", "body"},
+				Values:      []string{"3", "NULL"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "notes",
+				SetClauses: []*SQLSetClause{
+					{ColumnName: "body", Expression: "'it''s a note'"},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "1"},
+					},
+				},
+			},
+			&SQLUpdateInstruction{
+				TableName: "notes",
+				SetClauses: []*SQLSetClause{
+					{ColumnName: "body", Expression: "NULL"},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{ColumnName: "id", Expression: "2"},
+					},
+				},
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1259,10 +1615,18 @@ UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
 		driver.ExecOnTarget(`INSERT INTO items (identifier, label) VALUES (1, 'old');`)
 
 		// The target holds no column with the name of the key.
-		expected := `ALTER TABLE "items" RENAME COLUMN "identifier" TO "code";
--- The table "items" holds another primary key in the target, so dbdiff compares no row of it.`
-
-		diff := driver.RequireDiff(expected)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "items",
+				Action: &SQLRenameColumnAction{
+					ColumnName:    "identifier",
+					NewColumnName: "code",
+				},
+			},
+			&SQLCommentInstruction{
+				Text: `The table "items" holds another primary key in the target, so dbdiff compares no row of it.`,
+			},
+		})
 
 		driver.ExecOnTarget(diff)
 
@@ -1284,7 +1648,7 @@ UPDATE "notes" SET "body" = NULL WHERE "id" = 2;`
 		driver.ExecOnTarget(schema)
 		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (2, 'Bob');`)
 
-		diff := driver.RequireDiff("")
+		diff := driver.RequireInstructions(nil)
 
 		driver.ExecOnTarget(diff)
 
