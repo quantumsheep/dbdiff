@@ -535,6 +535,8 @@ is a free download at asd-ste100.org.
   Omit the scope for a change that crosses several parts.
 - Mark a breaking change with `!`: `feat(cli)!: rename the driver flag`.
 - Write the subject in lowercase, in the imperative, with no final period.
+- Write the subject only. The subject gives enough information, so a commit takes no body.
+  A trailer, for example `Claude-Session:`, is not a body.
 - Update the support table of `README.md` in the same commit as the feature.
 - A tag with the form `v*.*.*` starts the release workflow. It builds five binaries and
   publishes them.
