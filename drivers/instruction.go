@@ -37,7 +37,8 @@ func RenderInstructions(instructions []Instruction) string {
 	return strings.Join(statements, "\n")
 }
 
-// The literal of a NULL value. formatSQLiteValue and formatPostgresValue return it.
+// sqlNullLiteral holds the literal of a NULL value. formatSQLiteValue and
+// formatPostgresValue return it.
 const sqlNullLiteral = "NULL"
 
 // column_name = expression
