@@ -2,8 +2,6 @@ package drivers
 
 import (
 	"database/sql"
-	"fmt"
-	"strings"
 )
 
 type PostgresSequence struct {
@@ -18,70 +16,69 @@ type PostgresSequence struct {
 	CurrentValue sql.NullInt64
 }
 
-func (s *PostgresSequence) StringCycle() string {
-	if s.Cycle {
-		return "CYCLE"
+func (s *PostgresSequence) CreateInstruction() *PostgresCreateSequenceInstruction {
+	return &PostgresCreateSequenceInstruction{
+		Name:      s.Name,
+		DataType:  s.DataType,
+		Increment: s.Increment,
+		Min:       s.Min,
+		Max:       s.Max,
+		Start:     s.Start,
+		Cycle:     s.Cycle,
 	}
-
-	return "NO CYCLE"
 }
 
-func (s *PostgresSequence) String() string {
-	return fmt.Sprintf(
-		"CREATE SEQUENCE %s AS %s INCREMENT BY %d MINVALUE %d MAXVALUE %d START WITH %d %s;",
-		quoteIdentifier(s.Name),
-		s.DataType,
-		s.Increment,
-		s.Min,
-		s.Max,
-		s.Start,
-		s.StringCycle(),
-	)
-}
-
-// Diff returns one ALTER SEQUENCE statement with every attribute that changes. Separate
+// Diff returns one ALTER SEQUENCE instruction with every attribute that changes. Separate
 // statements can fail, because a new minimum above the current value is invalid. A RESTART
 // WITH clause comes only when the current value falls outside the new range, because a
 // restart changes data.
-func (s *PostgresSequence) Diff(other *PostgresSequence) string {
-	var changes []string
+func (s *PostgresSequence) Diff(other *PostgresSequence) []Instruction {
+	instruction := &PostgresAlterSequenceInstruction{Name: s.Name}
+
+	changed := false
 
 	if s.DataType != other.DataType {
-		changes = append(changes, "AS "+s.DataType)
+		instruction.DataType = sql.NullString{String: s.DataType, Valid: true}
+		changed = true
 	}
 
 	if s.Increment != other.Increment {
-		changes = append(changes, fmt.Sprintf("INCREMENT BY %d", s.Increment))
+		instruction.Increment = sql.NullInt64{Int64: s.Increment, Valid: true}
+		changed = true
 	}
 
 	if s.Min != other.Min {
-		changes = append(changes, fmt.Sprintf("MINVALUE %d", s.Min))
+		instruction.Min = sql.NullInt64{Int64: s.Min, Valid: true}
+		changed = true
 	}
 
 	if s.Max != other.Max {
-		changes = append(changes, fmt.Sprintf("MAXVALUE %d", s.Max))
+		instruction.Max = sql.NullInt64{Int64: s.Max, Valid: true}
+		changed = true
 	}
 
 	if s.Start != other.Start {
-		changes = append(changes, fmt.Sprintf("START WITH %d", s.Start))
+		instruction.Start = sql.NullInt64{Int64: s.Start, Valid: true}
+		changed = true
 	}
 
 	if s.Cycle != other.Cycle {
-		changes = append(changes, s.StringCycle())
+		instruction.Cycle = sql.NullBool{Bool: s.Cycle, Valid: true}
+		changed = true
 	}
 
-	if len(changes) == 0 {
-		return ""
+	if !changed {
+		return nil
 	}
 
 	if other.CurrentValue.Valid {
 		currentValue := other.CurrentValue.Int64
 		if currentValue < s.Min || currentValue > s.Max {
-			changes = append(changes, fmt.Sprintf("RESTART WITH %d", s.RestartValue()))
+			instruction.Restart = sql.NullInt64{Int64: s.RestartValue(), Valid: true}
 		}
 	}
 
-	return fmt.Sprintf("ALTER SEQUENCE %s %s;", quoteIdentifier(s.Name), strings.Join(changes, " "))
+	return []Instruction{instruction}
 }
 
 // RestartValue returns the start value of the sequence when that value fits the new range.

@@ -27,3 +27,12 @@ func newSectionDiff(additions *strings.Builder, removals *strings.Builder) *Sect
 
 	return sectionDiff
 }
+
+// newSectionDiffFromInstructions renders two instruction lists into a SectionDiff. The
+// helper exists while some sections build instructions and others build text.
+func newSectionDiffFromInstructions(additions []Instruction, removals []Instruction) *SectionDiff {
+	return &SectionDiff{
+		Additions: RenderInstructions(additions),
+		Removals:  RenderInstructions(removals),
+	}
+}

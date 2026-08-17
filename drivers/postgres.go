@@ -179,8 +179,8 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 }
 
 func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceExtensions, err := d.GetExtensions(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -197,12 +197,12 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 			return extension.Name == sourceExtension.Name
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceExtension.String())
+			additions = append(additions, sourceExtension.CreateInstruction())
 			continue
 		}
 
 		if sourceExtension.Version != targetExtension.Version {
-			fmt.Fprintf(&additions, "%s\n", sourceExtension.StringUpdate())
+			additions = append(additions, sourceExtension.UpdateInstruction())
 		}
 	}
 
@@ -211,11 +211,11 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 			return extension.Name == targetExtension.Name
 		})
 		if !found {
-			fmt.Fprintf(&removals, "%s\n", targetExtension.StringDrop())
+			removals = append(removals, targetExtension.DropInstruction())
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
@@ -424,8 +424,8 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 }
 
 func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error) {
-	var additions strings.Builder
-	var removals strings.Builder
+	var additions []Instruction
+	var removals []Instruction
 
 	sourceSequences, err := d.GetSequences(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -442,14 +442,12 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 			return sequence.Name == sourceSequence.Name
 		})
 		if !found {
-			fmt.Fprintf(&additions, "%s\n", sourceSequence.String())
+			additions = append(additions, sourceSequence.CreateInstruction())
 			continue
 		}
 
-		subDiff := sourceSequence.Diff(targetSequence)
-		if subDiff != "" {
-			fmt.Fprintf(&additions, "%s\n", subDiff)
-		}
+		subInstructions := sourceSequence.Diff(targetSequence)
+		additions = append(additions, subInstructions...)
 	}
 
 	for _, targetSequence := range targetSequences {
@@ -457,11 +455,11 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 			return sequence.Name == targetSequence.Name
 		})
 		if !found {
-			fmt.Fprintf(&removals, "DROP SEQUENCE %s;\n", quoteIdentifier(targetSequence.Name))
+			removals = append(removals, &PostgresDropSequenceInstruction{Name: targetSequence.Name})
 		}
 	}
 
-	return newSectionDiff(&additions, &removals), nil
+	return newSectionDiffFromInstructions(additions, removals), nil
 }
 
 func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error) {
