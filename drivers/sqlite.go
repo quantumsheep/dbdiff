@@ -75,13 +75,13 @@ func (d *SQLiteDriver) Diff(ctx context.Context) (string, error) {
 		fmt.Fprintln(&diff, tablesDiff)
 	}
 
-	viewsDiff, err := d.DiffViews(ctx)
+	viewInstructions, err := d.DiffViews(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	if viewsDiff != "" {
-		fmt.Fprintln(&diff, viewsDiff)
+	if len(viewInstructions) > 0 {
+		fmt.Fprintln(&diff, RenderInstructions(viewInstructions))
 	}
 
 	if d.CompareData {
@@ -157,17 +157,17 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) (string, error) {
 	return strings.TrimSpace(diff.String()), nil
 }
 
-func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
-	var diff strings.Builder
+func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]Instruction, error) {
+	var instructions []Instruction
 
 	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	targetViews, err := d.GetViews(ctx, d.TargetDatabaseConnection)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	for _, sourceView := range sourceViews {
@@ -175,16 +175,19 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 			return view.Name == sourceView.Name
 		})
 		if !found {
-			fmt.Fprintf(&diff, "%s;\n", sourceView.SQL)
+			instructions = append(instructions, &SQLiteCreateViewInstruction{
+				Definition: sourceView.SQL,
+			})
+
 			continue
 		}
 
-		subDiff, err := sourceView.Diff(targetView)
+		subInstructions, err := sourceView.Diff(targetView)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		fmt.Fprintln(&diff, subDiff)
+		instructions = append(instructions, subInstructions...)
 	}
 
 	for _, targetView := range targetViews {
@@ -192,11 +195,11 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) (string, error) {
 			return view.Name == targetView.Name
 		})
 		if !found {
-			fmt.Fprintf(&diff, "DROP VIEW %s;\n", quoteIdentifier(targetView.Name))
+			instructions = append(instructions, &SQLDropViewInstruction{Name: targetView.Name})
 		}
 	}
 
-	return strings.TrimSpace(diff.String()), nil
+	return instructions, nil
 }
 
 func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
