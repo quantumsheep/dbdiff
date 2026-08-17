@@ -165,13 +165,13 @@ func (d *PostgresDriver) Diff(ctx context.Context) (string, error) {
 	}
 
 	if d.CompareData {
-		dataDiff, err := d.DiffData(ctx)
+		dataInstructions, err := d.DiffData(ctx)
 		if err != nil {
 			return "", err
 		}
 
-		if dataDiff != "" {
-			fmt.Fprintln(&diff, dataDiff)
+		if len(dataInstructions) > 0 {
+			fmt.Fprintln(&diff, RenderInstructions(dataInstructions))
 		}
 	}
 
