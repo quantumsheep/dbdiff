@@ -196,3 +196,32 @@ type SQLCommentInstruction struct {
 func (i *SQLCommentInstruction) String() string {
 	return "-- " + i.Text
 }
+
+// DROP COLUMN column_name
+type SQLDropColumnAction struct {
+	ColumnName string
+}
+
+func (a *SQLDropColumnAction) TableActionClause() string {
+	return "DROP COLUMN " + quoteIdentifier(a.ColumnName)
+}
+
+// RENAME COLUMN column_name TO new_column_name
+type SQLRenameColumnAction struct {
+	ColumnName    string
+	NewColumnName string
+}
+
+func (a *SQLRenameColumnAction) TableActionClause() string {
+	return fmt.Sprintf("RENAME COLUMN %s TO %s",
+		quoteIdentifier(a.ColumnName), quoteIdentifier(a.NewColumnName))
+}
+
+// RENAME TO new_name
+type SQLRenameTableAction struct {
+	NewName string
+}
+
+func (a *SQLRenameTableAction) TableActionClause() string {
+	return "RENAME TO " + quoteIdentifier(a.NewName)
+}

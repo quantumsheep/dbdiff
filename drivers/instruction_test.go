@@ -166,6 +166,24 @@ func TestInstructions(t *testing.T) {
 			`-- The table "logs" holds no primary key, so dbdiff compares no row of it.`,
 			instruction.String())
 	})
+
+	t.Run("DropColumnAction", func(t *testing.T) {
+		action := &SQLDropColumnAction{ColumnName: "email"}
+
+		require.Equal(t, `DROP COLUMN "email"`, action.TableActionClause())
+	})
+
+	t.Run("RenameColumnAction", func(t *testing.T) {
+		action := &SQLRenameColumnAction{ColumnName: "name", NewColumnName: "full_name"}
+
+		require.Equal(t, `RENAME COLUMN "name" TO "full_name"`, action.TableActionClause())
+	})
+
+	t.Run("RenameTableAction", func(t *testing.T) {
+		action := &SQLRenameTableAction{NewName: "users"}
+
+		require.Equal(t, `RENAME TO "users"`, action.TableActionClause())
+	})
 }
 
 // testInstruction covers RenderInstructions without a statement type of the catalogue.
