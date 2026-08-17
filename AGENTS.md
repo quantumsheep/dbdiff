@@ -124,7 +124,7 @@ undefined symbol, set `CGO_ENABLED=1` before the build.
 ```go
 type Driver interface {
 	Close() error
-	Diff(ctx context.Context) (string, error)
+	Diff(ctx context.Context) ([]Instruction, error)
 }
 ```
 
@@ -142,7 +142,12 @@ to the switch in `cmd/dbdiff/main.go` and a value to the flag validator.
 | Compare method  | `Diff<Object>s(other)`             | `DiffIndexes`                 |
 | Lookup method   | `<Object>ByName(name) (*T, bool)`  | `ColumnByName`                |
 | Equality method | `Equal(other *T) bool`             | `SQLiteIndex.Equal`           |
-| SQL method      | `String() string`                  | `SQLiteColumn.String`         |
+| Statement method   | `String() string`                  | `SQLUpdateInstruction.String` |
+| Fragment method    | `Definition()` or `Clause()`       | `SQLiteColumn.Definition`     |
+| Instruction list   | `Instructions() []Instruction`     | `SQLiteTable.Instructions`    |
+| Instruction maker  | `CreateInstruction()`, `DropInstruction()`, `UpdateInstruction()` | `PostgresDomain.CreateInstruction` |
+| Instruction type   | `<Prefix><Statement>Instruction`   | `SQLUpdateInstruction`        |
+| Action type        | `<Prefix><Action>Action`           | `PostgresSetNotNullAction`    |
 
 `HasEqualAttributes` compares two objects and ignores the name. The rename detection of
 SQLite uses this method.
@@ -161,17 +166,75 @@ statement.
 In the third step, the function prints a `DROP` statement for each target object that the
 source does not hold.
 
-Rules for the SQL output:
+Rules for the output:
 
-- Build the output with a `strings.Builder` and `fmt.Fprintf`.
-- Return `strings.TrimSpace(diff.String())` at the end of the function.
-- Pass every identifier through `quoteIdentifier`: `DROP TABLE %s;`. Never write
-  `\"%s\"` in a format string. A name can hold a space or a double quote.
-- End every statement with a semicolon and a newline.
+- Build the output as `[]Instruction`. Append a value, and never format a string.
+- Return the list at the end of the function. A section returns a `*SectionDiff`.
+- An instruction type holds one field for each part of its PostgreSQL synopsis. The type
+  quotes every identifier, so no call site holds a format string.
 - Print the additions and the modifications first. Print the removals last.
-- `String()` returns the complete statement that creates the object.
+- `Instructions()` returns the list that creates the object and its dependants.
 
 Use `lo.Find`, `lo.Map`, and `lo.Values` from `samber/lo` for the list operations.
+
+## Instructions
+
+A diff is a list of instructions. An `Instruction` is one complete SQL statement, or one
+comment line.
+
+```go
+type Instruction interface {
+	String() string
+}
+```
+
+In this package, `String() string` belongs to an instruction type only. A model type
+answers with an instruction, with a fragment, or with a list of instructions. That rule
+stops a fragment from reaching the output, because a bare column definition is not a
+statement.
+
+This command finds a violation of the rule. It matches a `String() string` method outside
+the instruction files, so it must return nothing:
+
+```bash
+rg -n 'func \([a-z]+ \*[A-Za-z]+\) String\(\) string' drivers/ --glob '!drivers/instruction*.go'
+```
+
+A nested part renders through a method that names what the method returns. Each part
+interface takes a different method name, so no part satisfies another part:
+
+```go
+type AlterTableAction interface  { TableActionClause() string }
+type AlterDomainAction interface { DomainActionClause() string }
+type Condition interface         { ConditionClause() string }
+```
+
+The prefix of a type name reports the portability of the syntax, and not the driver that
+emits the statement:
+
+| Prefix     | Meaning                                                              |
+| ---------- | --------------------------------------------------------------------- |
+| `SQL`      | Both engines accept the same syntax                                   |
+| `SQLite`   | The syntax of SQLite differs, or SQLite alone holds the form           |
+| `Postgres` | The syntax of PostgreSQL differs, or PostgreSQL alone holds the form   |
+
+`ALTER TABLE` takes one type for each engine, because SQLite accepts one action and
+PostgreSQL accepts a list.
+
+The types live in six files:
+
+| File                                      | Content                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------- |
+| `drivers/instruction.go`                  | The interfaces, the shared statements and actions, the conditions   |
+| `drivers/instruction_sqlite.go`           | The SQLite statements                                                |
+| `drivers/instruction_postgres_table.go`   | The table, the index, the trigger, the view                         |
+| `drivers/instruction_postgres_type.go`    | The enum type, the composite type, the domain                       |
+| `drivers/instruction_postgres_routine.go` | The function, the aggregate, the operator                           |
+| `drivers/instruction_postgres_object.go`  | The extension, the sequence                                          |
+
+`drivers/instruction_test.go` holds one subtest for each type. It is the one place that
+holds the SQL text of a statement. A driver test compares instructions, and it trusts that
+file.
 
 ## SQLite driver
 
@@ -403,7 +466,7 @@ connection of the harness open until the cleanup ends.
 | ------------------------------- | ------------------------------------------------ |
 | `ExecOnSource(sql)`             | Builds the wanted schema                         |
 | `ExecOnTarget(sql)`             | Builds the old schema, or applies the diff       |
-| `RequireDiff(expected)`         | Compares the whole diff and returns it           |
+| `RequireInstructions(expected)` | Compares the whole instruction list and returns it |
 | `FetchAllFromTarget(table, ...)`| Reads the rows of the target as maps (SQLite)    |
 
 Every harness method calls `d.tb.Helper()` on its first line.
@@ -413,14 +476,16 @@ Every harness method calls `d.tb.Helper()` on its first line.
 1. Create the harness with `NewTestSQLiteDriver(t)` or `NewTestPostgresDriver(t)`.
 2. Build the wanted schema with `ExecOnSource`.
 3. Build the old schema with `ExecOnTarget`. Insert rows when the change moves data.
-4. Compare the whole output with `RequireDiff`. Write the expected SQL as a raw string.
+4. Compare the whole output with `RequireInstructions`. Write the expected instructions as
+   Go values.
 5. Apply the diff with `driver.ExecOnTarget(diff)`. This step proves that the SQL runs.
 6. If the change moves data, read the rows with `FetchAllFromTarget` and compare them with
    `require.Equal`.
 
 Rules:
 
-- Compare the whole diff string. Never compare one line, and never use `strings.Contains`.
+- Compare the whole instruction list. Never compare one instruction, and never compare the
+  SQL text. `instruction_test.go` covers the text.
 - Always apply the diff to the target after the comparison.
 - A test that recreates a table must insert rows first, and must compare the rows after.
 - Add a subtest for each new schema object and for each new kind of change.
