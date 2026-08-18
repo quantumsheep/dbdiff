@@ -449,6 +449,54 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("RenameTwoColumns", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				x TEXT,
+				y INTEGER
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				a TEXT,
+				b INTEGER
+			);
+
+			INSERT INTO users (id, a, b) VALUES (1, 'Alice', 30);
+		`)
+
+		// The distinct types of x and y give each rename exactly one candidate, so the
+		// detection is unambiguous. The order must follow the source columns: x before y.
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLRenameColumnAction{
+					ColumnName:    "a",
+					NewColumnName: "x",
+				},
+			},
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLRenameColumnAction{
+					ColumnName:    "b",
+					NewColumnName: "y",
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "x": "Alice", "y": int64(30)},
+		}, rows)
+	})
+
 	t.Run("ModifyColumnType", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

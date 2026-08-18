@@ -237,12 +237,21 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 		return instructions, nil
 	}
 
-	for oldName, newName := range columnsDiff.Renamed {
+	// The map gives no stable order. The loop walks the source columns instead, so the
+	// rename statements follow the shape of the source table on every run.
+	newNameToOldName := lo.Invert(columnsDiff.Renamed)
+
+	for _, column := range t.Columns {
+		oldName, renamed := newNameToOldName[column.Name]
+		if !renamed {
+			continue
+		}
+
 		instructions = append(instructions, &SQLiteAlterTableInstruction{
 			Name: t.Name,
 			Action: &SQLRenameColumnAction{
 				ColumnName:    oldName,
-				NewColumnName: newName,
+				NewColumnName: column.Name,
 			},
 		})
 	}
