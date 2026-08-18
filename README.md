@@ -71,9 +71,46 @@ a row of the target database. dbdiff holds no rollback.
 
 | Flag       | Value                    | Purpose                                                                                          |
 | ---------- | ------------------------ | ------------------------------------------------------------------------------------------------ |
-| `--driver` | `sqlite3` or `postgres`  | Select the database engine. The default value is `sqlite3`.                                       |
+| `--driver` | `sqlite3` or `postgres`  | Select the database engine. The default value comes from the source and the target. See [Driver detection](#driver-detection). |
 | `--schema` | A schema name            | Name the schema that the postgres driver reads. The default value is the schema of the search path. |
 | `--data`   | none                     | Add the comparison of the rows. The default value is off.                                         |
+
+### Driver detection
+
+If you give no `--driver` flag, dbdiff reads the engine from the source and the target:
+
+| Argument                                      | Driver    |
+| --------------------------------------------- | --------- |
+| A path with the prefix `sqlite://`             | `sqlite3` |
+| A URL with the prefix `postgres://` or `postgresql://` | `postgres` |
+| A connection string of the form `host=localhost dbname=app` | `postgres` |
+| A `.sql` file or a directory                   | none      |
+| Another path                                   | `sqlite3` |
+
+One argument is sufficient. In this example the target names the engine, and dbdiff applies
+`schema.sql` to a temporary PostgreSQL server:
+
+```bash
+dbdiff schema.sql postgres://user:password@localhost:5432/production
+```
+
+dbdiff gives an error in two cases. In the first case the two arguments name SQL text, so
+no argument names an engine:
+
+```bash
+dbdiff old_schema.sql new_schema.sql
+# dbdiff: cannot detect the driver of "old_schema.sql" and "new_schema.sql". Use the --driver flag
+```
+
+In the second case the two arguments name a different engine:
+
+```bash
+dbdiff sqlite://source.db postgres://user:password@localhost:5432/target
+# dbdiff: "sqlite://source.db" names the sqlite3 driver and "postgres://user:password@localhost:5432/target" names the postgres driver. Use the --driver flag
+```
+
+Give the `--driver` flag to correct the two cases. The flag has priority, so dbdiff runs no
+detection when you give it.
 
 ## SQLite
 
@@ -139,10 +176,13 @@ built.
 ```bash
 dbdiff schema.sql production.sqlite
 dbdiff ./migrations production.sqlite
-dbdiff old_schema.sql new_schema.sql
+dbdiff --driver sqlite3 old_schema.sql new_schema.sql
 ```
 
 A connection URL holds `://`, so a URL never names SQL text.
+
+Two SQL sources name no engine. Give the `--driver` flag in that case. See
+[Driver detection](#driver-detection).
 
 dbdiff applies the SQL to a temporary database, and then it compares that database. The
 `--driver` flag names the dialect of the files, and it names the engine of the temporary

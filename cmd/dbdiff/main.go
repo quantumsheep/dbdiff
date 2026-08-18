@@ -23,9 +23,9 @@ func main() {
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "driver",
-				Usage: "Database driver to use. Supported drivers: sqlite3, postgres",
+				Usage: "Database driver to use. Supported drivers: sqlite3, postgres. The default is the driver of the source and the target",
 				Validator: func(s string) error {
-					if slices.Contains([]string{"sqlite3", "postgres"}, s) {
+					if slices.Contains(drivers.SupportedDriverNames, s) {
 						return nil
 					}
 					return fmt.Errorf("unsupported driver: %s", s)
@@ -73,17 +73,20 @@ func action(ctx context.Context, command *cli.Command) error {
 	var driver drivers.Driver
 	var err error
 
-	driverFlag := command.String("driver")
-	if driverFlag == "" {
-		driverFlag = "sqlite3"
+	driverName := command.String("driver")
+	if driverName == "" {
+		driverName, err = drivers.DetectDriver(sourceDatabaseURL, targetDatabaseURL)
+		if err != nil {
+			return err
+		}
 	}
 
 	schemaFlag := command.String("schema")
 
 	compareData := command.Bool("data")
 
-	switch driverFlag {
-	case "sqlite3":
+	switch driverName {
+	case drivers.SQLiteDriverName:
 		if schemaFlag != "" {
 			return fmt.Errorf("the --schema flag applies to the postgres driver only")
 		}
@@ -96,7 +99,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		if err != nil {
 			return fmt.Errorf("failed to create sqlite3 driver: %w", err)
 		}
-	case "postgres":
+	case drivers.PostgresDriverName:
 		driver, err = drivers.NewPostgresDriver(ctx, &drivers.PostgresDriverConfig{
 			SourceConnectionString: sourceDatabaseURL,
 			TargetConnectionString: targetDatabaseURL,
@@ -108,7 +111,7 @@ func action(ctx context.Context, command *cli.Command) error {
 			return fmt.Errorf("failed to create postgres driver: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported driver: %s", command.String("driver"))
+		return fmt.Errorf("unsupported driver: %s", driverName)
 	}
 
 	defer driver.Close()

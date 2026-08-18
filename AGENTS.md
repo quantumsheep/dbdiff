@@ -74,8 +74,10 @@ The `drivers` package uses one file per schema object per engine:
 ```
 drivers/
 ├── driver.go                  The Driver interface and SectionDiff
+├── driver_detection.go        DetectDriver and the driver names
 ├── identifier.go              quoteIdentifier and quoteIdentifiers
 ├── sql_source.go              The SQL file source: detection, file order, apply
+├── driver_detection_test.go   The tests of DetectDriver
 ├── sqlite.go                  The SQLite driver: connections, queries, top-level diff
 ├── sqlite_table.go            SQLiteTable and its diff
 ├── sqlite_column.go           SQLiteColumn
@@ -117,7 +119,8 @@ go run ./cmd/dbdiff <source> <target>
 go run ./cmd/dbdiff --driver postgres <source> <target>
 ```
 
-The `--driver` flag accepts `sqlite3` and `postgres`. The default value is `sqlite3`.
+The `--driver` flag accepts `sqlite3` and `postgres`. An empty value starts the detection
+of `DetectDriver`. See [Driver detection](#driver-detection).
 
 The SQLite driver needs CGO, because `go-sqlite3` is a C binding. If a build fails with an
 undefined symbol, set `CGO_ENABLED=1` before the build.
@@ -145,6 +148,25 @@ in `cmd/dbdiff/main.go` and a value to the flag validator.
 A driver opens one side with `OpenSide(ctx, path, ...)`. That method reads a database, or
 it builds a temporary database from a SQL source. `Close` releases the temporary
 database.
+
+## Driver detection
+
+`DetectDriver(source, target)` in `driver_detection.go` names the engine when the user
+gives no `--driver` flag. It reads each argument alone with `detectDriverOfArgument`, and
+that function answers with an empty name when the argument names no engine.
+
+| Argument                                              | Name                 |
+| ----------------------------------------------------- | -------------------- |
+| The prefix `sqlite://`                                 | `SQLiteDriverName`   |
+| The prefix `postgres://` or `postgresql://`            | `PostgresDriverName` |
+| Another `://` scheme                                   | empty                |
+| A SQL source, which `IsSQLSource` reports              | empty                |
+| A keyword string, for example `host=localhost user=app` | `PostgresDriverName` |
+| Another path                                           | `SQLiteDriverName`   |
+
+Two empty names give an error, and two different names give an error. Each message names
+the `--driver` flag. One name and one empty name give that one name, because a SQL source
+takes the engine of the other side.
 
 ## Naming
 

@@ -202,6 +202,32 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Contains(t, result.Stderr, "holds no .sql file")
 	})
 
+	t.Run("TwoSQLFilesWithoutDriver", func(t *testing.T) {
+		sourcePath := writeSQLFile(t, t.TempDir(), "source.sql", `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+		`)
+
+		targetPath := writeSQLFile(t, t.TempDir(), "target.sql", `
+			CREATE TABLE users (id INTEGER PRIMARY KEY);
+		`)
+
+		result := runDbdiff(t, binaryPath, sourcePath, targetPath)
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "cannot detect the driver")
+		require.Contains(t, result.Stderr, "--driver")
+		require.Empty(t, result.Stdout)
+	})
+
+	t.Run("TwoDifferentEnginesWithoutDriver", func(t *testing.T) {
+		result := runDbdiff(t, binaryPath, "sqlite://source.db", "postgres://user@localhost/target")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "names the sqlite3 driver")
+		require.Contains(t, result.Stderr, "names the postgres driver")
+		require.Empty(t, result.Stdout)
+	})
+
 	// The standard output must hold the SQL statements only, and no log of the temporary
 	// PostgreSQL server.
 	t.Run("SQLFileSourceWithPostgresDriver", func(t *testing.T) {
