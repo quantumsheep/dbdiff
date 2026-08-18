@@ -170,40 +170,50 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 	return instructions, nil
 }
 
-func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, error) {
+// sectionRules holds the parts that differ between two kinds of schema object.
+type sectionRules[T any] struct {
+	Get    func(ctx context.Context, db *sql.DB) ([]T, error)
+	Key    func(object T) string
+	Create func(source T) Instruction
+	Change func(source T, target T) []Instruction
+	Drop   func(target T) Instruction
+}
+
+// diffSection compares the objects of one kind. It creates an object that the target does
+// not hold, it changes an object that differs, and it drops an object that the source does
+// not hold.
+func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules sectionRules[T]) (*SectionDiff, error) {
 	var additions []Instruction
 	var removals []Instruction
 
-	sourceExtensions, err := d.GetExtensions(ctx, d.SourceDatabaseConnection)
+	sourceObjects, err := rules.Get(ctx, driver.SourceDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	targetExtensions, err := d.GetExtensions(ctx, d.TargetDatabaseConnection)
+	targetObjects, err := rules.Get(ctx, driver.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceExtension := range sourceExtensions {
-		targetExtension, found := lo.Find(targetExtensions, func(extension *PostgresExtension) bool {
-			return extension.Name == sourceExtension.Name
+	for _, sourceObject := range sourceObjects {
+		targetObject, found := lo.Find(targetObjects, func(object T) bool {
+			return rules.Key(object) == rules.Key(sourceObject)
 		})
 		if !found {
-			additions = append(additions, sourceExtension.CreateInstruction())
+			additions = append(additions, rules.Create(sourceObject))
 			continue
 		}
 
-		if sourceExtension.Version != targetExtension.Version {
-			additions = append(additions, sourceExtension.UpdateInstruction())
-		}
+		additions = append(additions, rules.Change(sourceObject, targetObject)...)
 	}
 
-	for _, targetExtension := range targetExtensions {
-		_, found := lo.Find(sourceExtensions, func(extension *PostgresExtension) bool {
-			return extension.Name == targetExtension.Name
+	for _, targetObject := range targetObjects {
+		_, found := lo.Find(sourceObjects, func(object T) bool {
+			return rules.Key(object) == rules.Key(targetObject)
 		})
 		if !found {
-			removals = append(removals, targetExtension.DropInstruction())
+			removals = append(removals, rules.Drop(targetObject))
 		}
 	}
 
@@ -211,258 +221,136 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 		Additions: additions,
 		Removals:  removals,
 	}, nil
+}
+
+func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, error) {
+	return diffSection(ctx, d, sectionRules[*PostgresExtension]{
+		Get: d.GetExtensions,
+		Key: func(extension *PostgresExtension) string {
+			return extension.Name
+		},
+		Create: func(extension *PostgresExtension) Instruction {
+			return extension.CreateInstruction()
+		},
+		Change: func(source *PostgresExtension, target *PostgresExtension) []Instruction {
+			if source.Version == target.Version {
+				return nil
+			}
+
+			return []Instruction{source.UpdateInstruction()}
+		},
+		Drop: func(target *PostgresExtension) Instruction {
+			return target.DropInstruction()
+		},
+	})
 }
 
 func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
-	var additions []Instruction
-	var removals []Instruction
-
-	sourceTypes, err := d.GetTypes(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	targetTypes, err := d.GetTypes(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sourceType := range sourceTypes {
-		targetType, found := lo.Find(targetTypes, func(enumType *PostgresType) bool {
-			return enumType.Name == sourceType.Name
-		})
-		if !found {
-			additions = append(additions, sourceType.CreateInstruction())
-			continue
-		}
-
-		subInstructions := sourceType.Diff(targetType)
-		additions = append(additions, subInstructions...)
-	}
-
-	for _, targetType := range targetTypes {
-		_, found := lo.Find(sourceTypes, func(enumType *PostgresType) bool {
-			return enumType.Name == targetType.Name
-		})
-		if !found {
-			removals = append(removals, &PostgresDropTypeInstruction{Name: targetType.Name})
-		}
-	}
-
-	return &SectionDiff{
-		Additions: additions,
-		Removals:  removals,
-	}, nil
+	return diffSection(ctx, d, sectionRules[*PostgresType]{
+		Get: d.GetTypes,
+		Key: func(enumType *PostgresType) string {
+			return enumType.Name
+		},
+		Create: func(enumType *PostgresType) Instruction {
+			return enumType.CreateInstruction()
+		},
+		Change: func(source *PostgresType, target *PostgresType) []Instruction {
+			return source.Diff(target)
+		},
+		Drop: func(target *PostgresType) Instruction {
+			return &PostgresDropTypeInstruction{Name: target.Name}
+		},
+	})
 }
 
 func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) {
-	var additions []Instruction
-	var removals []Instruction
-
-	sourceDomains, err := d.GetDomains(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	targetDomains, err := d.GetDomains(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sourceDomain := range sourceDomains {
-		targetDomain, found := lo.Find(targetDomains, func(domain *PostgresDomain) bool {
-			return domain.Name == sourceDomain.Name
-		})
-		if !found {
-			additions = append(additions, sourceDomain.CreateInstruction())
-			continue
-		}
-
-		subInstructions := sourceDomain.Diff(targetDomain)
-		additions = append(additions, subInstructions...)
-	}
-
-	for _, targetDomain := range targetDomains {
-		_, found := lo.Find(sourceDomains, func(domain *PostgresDomain) bool {
-			return domain.Name == targetDomain.Name
-		})
-		if !found {
-			removals = append(removals, targetDomain.DropInstruction())
-		}
-	}
-
-	return &SectionDiff{
-		Additions: additions,
-		Removals:  removals,
-	}, nil
+	return diffSection(ctx, d, sectionRules[*PostgresDomain]{
+		Get: d.GetDomains,
+		Key: func(domain *PostgresDomain) string {
+			return domain.Name
+		},
+		Create: func(domain *PostgresDomain) Instruction {
+			return domain.CreateInstruction()
+		},
+		Change: func(source *PostgresDomain, target *PostgresDomain) []Instruction {
+			return source.Diff(target)
+		},
+		Drop: func(target *PostgresDomain) Instruction {
+			return target.DropInstruction()
+		},
+	})
 }
 
 func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, error) {
-	var additions []Instruction
-	var removals []Instruction
-
-	sourceCompositeTypes, err := d.GetCompositeTypes(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	targetCompositeTypes, err := d.GetCompositeTypes(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sourceCompositeType := range sourceCompositeTypes {
-		targetCompositeType, found := lo.Find(targetCompositeTypes, func(compositeType *PostgresCompositeType) bool {
-			return compositeType.Name == sourceCompositeType.Name
-		})
-		if !found {
-			additions = append(additions, sourceCompositeType.CreateInstruction())
-			continue
-		}
-
-		subInstructions := sourceCompositeType.Diff(targetCompositeType)
-		additions = append(additions, subInstructions...)
-	}
-
-	for _, targetCompositeType := range targetCompositeTypes {
-		_, found := lo.Find(sourceCompositeTypes, func(compositeType *PostgresCompositeType) bool {
-			return compositeType.Name == targetCompositeType.Name
-		})
-		if !found {
-			removals = append(removals, targetCompositeType.DropInstruction())
-		}
-	}
-
-	return &SectionDiff{
-		Additions: additions,
-		Removals:  removals,
-	}, nil
+	return diffSection(ctx, d, sectionRules[*PostgresCompositeType]{
+		Get: d.GetCompositeTypes,
+		Key: func(compositeType *PostgresCompositeType) string {
+			return compositeType.Name
+		},
+		Create: func(compositeType *PostgresCompositeType) Instruction {
+			return compositeType.CreateInstruction()
+		},
+		Change: func(source *PostgresCompositeType, target *PostgresCompositeType) []Instruction {
+			return source.Diff(target)
+		},
+		Drop: func(target *PostgresCompositeType) Instruction {
+			return target.DropInstruction()
+		},
+	})
 }
 
 func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, error) {
-	var additions []Instruction
-	var removals []Instruction
-
-	sourceAggregates, err := d.GetAggregates(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	targetAggregates, err := d.GetAggregates(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sourceAggregate := range sourceAggregates {
-		targetAggregate, found := lo.Find(targetAggregates, func(aggregate *PostgresAggregate) bool {
-			return aggregate.Signature() == sourceAggregate.Signature()
-		})
-		if !found {
-			additions = append(additions, sourceAggregate.CreateInstruction())
-			continue
-		}
-
-		subInstructions := sourceAggregate.Diff(targetAggregate)
-		additions = append(additions, subInstructions...)
-	}
-
-	for _, targetAggregate := range targetAggregates {
-		_, found := lo.Find(sourceAggregates, func(aggregate *PostgresAggregate) bool {
-			return aggregate.Signature() == targetAggregate.Signature()
-		})
-		if !found {
-			removals = append(removals, targetAggregate.DropInstruction())
-		}
-	}
-
-	return &SectionDiff{
-		Additions: additions,
-		Removals:  removals,
-	}, nil
+	return diffSection(ctx, d, sectionRules[*PostgresAggregate]{
+		Get: d.GetAggregates,
+		Key: func(aggregate *PostgresAggregate) string {
+			return aggregate.Signature()
+		},
+		Create: func(aggregate *PostgresAggregate) Instruction {
+			return aggregate.CreateInstruction()
+		},
+		Change: func(source *PostgresAggregate, target *PostgresAggregate) []Instruction {
+			return source.Diff(target)
+		},
+		Drop: func(target *PostgresAggregate) Instruction {
+			return target.DropInstruction()
+		},
+	})
 }
 
 func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error) {
-	var additions []Instruction
-	var removals []Instruction
-
-	sourceOperators, err := d.GetOperators(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	targetOperators, err := d.GetOperators(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sourceOperator := range sourceOperators {
-		targetOperator, found := lo.Find(targetOperators, func(operator *PostgresOperator) bool {
-			return operator.Signature() == sourceOperator.Signature()
-		})
-		if !found {
-			additions = append(additions, sourceOperator.CreateInstruction())
-			continue
-		}
-
-		subInstructions := sourceOperator.Diff(targetOperator)
-		additions = append(additions, subInstructions...)
-	}
-
-	for _, targetOperator := range targetOperators {
-		_, found := lo.Find(sourceOperators, func(operator *PostgresOperator) bool {
-			return operator.Signature() == targetOperator.Signature()
-		})
-		if !found {
-			removals = append(removals, targetOperator.DropInstruction())
-		}
-	}
-
-	return &SectionDiff{
-		Additions: additions,
-		Removals:  removals,
-	}, nil
+	return diffSection(ctx, d, sectionRules[*PostgresOperator]{
+		Get: d.GetOperators,
+		Key: func(operator *PostgresOperator) string {
+			return operator.Signature()
+		},
+		Create: func(operator *PostgresOperator) Instruction {
+			return operator.CreateInstruction()
+		},
+		Change: func(source *PostgresOperator, target *PostgresOperator) []Instruction {
+			return source.Diff(target)
+		},
+		Drop: func(target *PostgresOperator) Instruction {
+			return target.DropInstruction()
+		},
+	})
 }
 
 func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error) {
-	var additions []Instruction
-	var removals []Instruction
-
-	sourceSequences, err := d.GetSequences(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	targetSequences, err := d.GetSequences(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sourceSequence := range sourceSequences {
-		targetSequence, found := lo.Find(targetSequences, func(sequence *PostgresSequence) bool {
-			return sequence.Name == sourceSequence.Name
-		})
-		if !found {
-			additions = append(additions, sourceSequence.CreateInstruction())
-			continue
-		}
-
-		subInstructions := sourceSequence.Diff(targetSequence)
-		additions = append(additions, subInstructions...)
-	}
-
-	for _, targetSequence := range targetSequences {
-		_, found := lo.Find(sourceSequences, func(sequence *PostgresSequence) bool {
-			return sequence.Name == targetSequence.Name
-		})
-		if !found {
-			removals = append(removals, &PostgresDropSequenceInstruction{Name: targetSequence.Name})
-		}
-	}
-
-	return &SectionDiff{
-		Additions: additions,
-		Removals:  removals,
-	}, nil
+	return diffSection(ctx, d, sectionRules[*PostgresSequence]{
+		Get: d.GetSequences,
+		Key: func(sequence *PostgresSequence) string {
+			return sequence.Name
+		},
+		Create: func(sequence *PostgresSequence) Instruction {
+			return sequence.CreateInstruction()
+		},
+		Change: func(source *PostgresSequence, target *PostgresSequence) []Instruction {
+			return source.Diff(target)
+		},
+		Drop: func(target *PostgresSequence) Instruction {
+			return &PostgresDropSequenceInstruction{Name: target.Name}
+		},
+	})
 }
 
 func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error) {
