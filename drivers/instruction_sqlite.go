@@ -73,26 +73,22 @@ type SQLiteCreateIndexInstruction struct {
 }
 
 func (i *SQLiteCreateIndexInstruction) String() string {
-	var statement strings.Builder
-
-	statement.WriteString("CREATE ")
+	statement := "CREATE "
 
 	if i.Unique {
-		statement.WriteString("UNIQUE ")
+		statement += "UNIQUE "
 	}
 
-	fmt.Fprintf(&statement, "INDEX %s ON %s (%s)",
+	statement += fmt.Sprintf("INDEX %s ON %s (%s)",
 		quoteIdentifier(i.Name),
 		quoteIdentifier(i.TableName),
 		strings.Join(i.Keys, ", "))
 
 	if i.Condition != nil {
-		fmt.Fprintf(&statement, " WHERE %s", i.Condition.ConditionClause())
+		statement += " WHERE " + i.Condition.ConditionClause()
 	}
 
-	statement.WriteString(";")
-
-	return statement.String()
+	return statement + ";"
 }
 
 // The definition comes from sqlite_master, so dbdiff replays the text of the source.

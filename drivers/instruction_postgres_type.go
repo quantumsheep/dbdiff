@@ -72,26 +72,22 @@ type PostgresCreateDomainInstruction struct {
 }
 
 func (i *PostgresCreateDomainInstruction) String() string {
-	var statement strings.Builder
-
-	fmt.Fprintf(&statement, "CREATE DOMAIN %s AS %s", quoteIdentifier(i.Name), i.BaseType)
+	statement := fmt.Sprintf("CREATE DOMAIN %s AS %s", quoteIdentifier(i.Name), i.BaseType)
 
 	if i.Default.Valid {
-		fmt.Fprintf(&statement, " DEFAULT %s", i.Default.String)
+		statement += " DEFAULT " + i.Default.String
 	}
 
 	if i.NotNull {
-		fmt.Fprint(&statement, " NOT NULL")
+		statement += " NOT NULL"
 	}
 
 	for _, constraint := range i.Constraints {
-		fmt.Fprintf(&statement, " CONSTRAINT %s %s",
+		statement += fmt.Sprintf(" CONSTRAINT %s %s",
 			quoteIdentifier(constraint.Name), constraint.Def)
 	}
 
-	fmt.Fprint(&statement, ";")
-
-	return statement.String()
+	return statement + ";"
 }
 
 // DROP DOMAIN name
