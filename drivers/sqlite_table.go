@@ -104,6 +104,12 @@ type SQLiteTableColumnsDiff struct {
 	ConstraintsChanged bool
 }
 
+// NeedsRecreation tells if the change needs a new table. SQLite supports no ALTER COLUMN,
+// so a modified column, a changed foreign key, or a changed table constraint needs one.
+func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
+	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged
+}
+
 func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 	diff := &SQLiteTableColumnsDiff{
 		Added:              []string{},
@@ -181,9 +187,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 
 	var instructions []Instruction
 
-	// SQLite supports no ALTER COLUMN, so a modified column, a new foreign key, or a new
-	// table constraint needs a recreation of the table.
-	if len(columnsDiff.Modified) > 0 || columnsDiff.ForeignKeysChanged || columnsDiff.ConstraintsChanged {
+	if columnsDiff.NeedsRecreation() {
 		tempTable := t.Copy()
 		tempTable.Name = "_" + t.Name + "_temp"
 
@@ -230,9 +234,11 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 			Action: &SQLRenameTableAction{NewName: t.Name},
 		})
 
-		for _, index := range t.Indexes {
-			instructions = append(instructions, index.CreateInstruction())
-		}
+		// The DROP TABLE statement removes each index and each trigger of the table. The
+		// recreation builds every one of them again from the source, so the index diff and
+		// the trigger diff below compare a target that is not there.
+		instructions = append(instructions, t.IndexInstructions()...)
+		instructions = append(instructions, t.TriggerInstructions()...)
 
 		return instructions, nil
 	}
@@ -274,6 +280,20 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 			Action: &SQLiteAddColumnAction{Column: column},
 		})
 	}
+
+	indexInstructions, err := t.DiffIndexes(other)
+	if err != nil {
+		return nil, err
+	}
+
+	instructions = append(instructions, indexInstructions...)
+
+	triggerInstructions, err := t.DiffTriggers(other)
+	if err != nil {
+		return nil, err
+	}
+
+	instructions = append(instructions, triggerInstructions...)
 
 	return instructions, nil
 }

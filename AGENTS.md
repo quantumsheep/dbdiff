@@ -254,16 +254,28 @@ A `PRAGMA` statement takes no placeholder. The driver puts the name through
 
 `NewSQLiteDriver` removes the `sqlite://` prefix from each path.
 
-SQLite does not support `ALTER COLUMN`. `SQLiteTable.DiffTable` recreates the table when a
-column changes, or when a foreign key changes. The recreation prints five parts in this
-order:
+`SQLiteTable.DiffTable` compares the columns, the indexes, and the triggers of one table.
+`SQLiteDriver.DiffTables` calls that one method. It calls `DiffIndexes` and `DiffTriggers`
+in no other place, because those two methods compare the target that `DiffTable` can drop.
+
+SQLite does not support `ALTER COLUMN`. `DiffTable` recreates the table when a column
+changes, when a foreign key changes, or when a table constraint changes.
+`SQLiteTableColumnsDiff.NeedsRecreation` reports that case. The recreation prints six parts
+in this order:
 
 1. `CREATE TABLE "_<name>_temp"` with the new columns and the new foreign keys.
 2. `INSERT INTO "_<name>_temp" (...) SELECT ... FROM "<name>"` with an explicit column
    map. A new column takes its `DEFAULT` value, or `NULL`.
 3. `DROP TABLE "<name>"`.
 4. `ALTER TABLE "_<name>_temp" RENAME TO "<name>"`.
-5. One `CREATE INDEX` statement for each index of the table.
+5. One `CREATE INDEX` statement for each index of the source table.
+6. One `CREATE TRIGGER` statement for each trigger of the source table.
+
+Part 3 removes each index and each trigger of the table. Parts 5 and 6 build every one of
+them again. `DiffTable` returns the list at that point, and it compares no index and no
+trigger. Without that step the diff prints a `CREATE INDEX` statement two times, or it
+prints a `DROP INDEX` statement for an index that part 3 removed. A trigger that the two
+sides both hold gets no statement, and the recreation loses it.
 
 `DiffColumns` detects a rename. A source column that the target does not hold, and that
 holds the attributes of exactly one free target column, is a rename. Two candidates make

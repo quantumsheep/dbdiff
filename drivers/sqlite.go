@@ -120,20 +120,6 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {
 		}
 
 		instructions = append(instructions, tableInstructions...)
-
-		indexInstructions, err := sourceTable.DiffIndexes(targetTable)
-		if err != nil {
-			return nil, err
-		}
-
-		instructions = append(instructions, indexInstructions...)
-
-		triggerInstructions, err := sourceTable.DiffTriggers(targetTable)
-		if err != nil {
-			return nil, err
-		}
-
-		instructions = append(instructions, triggerInstructions...)
 	}
 
 	for _, targetTable := range targetTables {

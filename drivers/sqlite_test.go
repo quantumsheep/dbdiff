@@ -1521,6 +1521,192 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("RecreateTableWithNewIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age INTEGER
+			);
+			CREATE INDEX idx_users_age ON users (age);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age TEXT
+			);
+
+			INSERT INTO users (id, age) VALUES (1, '30');
+		`)
+
+		// The recreation builds each index of the source. The index diff prints no second
+		// statement for the same index.
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "age"},
+				SelectExpressions: []string{`"id"`, `"age"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "idx_users_age",
+				TableName: "users",
+				Keys:      []string{`"age"`},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "age": int64(30)},
+		}, rows)
+	})
+
+	t.Run("RecreateTableWithRemovedIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age INTEGER
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age TEXT
+			);
+			CREATE INDEX idx_users_age ON users (age);
+
+			INSERT INTO users (id, age) VALUES (1, '30');
+		`)
+
+		// The DROP TABLE statement of the recreation removes the index of the target. The
+		// index diff prints no DROP INDEX statement for that index.
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "age"},
+				SelectExpressions: []string{`"id"`, `"age"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "age": int64(30)},
+		}, rows)
+	})
+
+	t.Run("RecreateTableWithTrigger", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age INTEGER
+			);
+			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age TEXT
+			);
+			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+
+			INSERT INTO users (id, age) VALUES (1, '30');
+		`)
+
+		// The DROP TABLE statement of the recreation removes the trigger of the target. The
+		// recreation builds each trigger of the source again.
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_users_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_users_temp",
+				ColumnNames:       []string{"id", "age"},
+				SelectExpressions: []string{`"id"`, `"age"`},
+				SourceTableName:   "users",
+			},
+			&SQLDropTableInstruction{Name: "users"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_users_temp",
+				Action: &SQLRenameTableAction{NewName: "users"},
+			},
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		triggers, err := driver.GetTableTriggers(t.Context(), driver.TargetDatabaseConnection, "users")
+		require.NoError(t, err)
+		require.Len(t, triggers, 1)
+		require.Equal(t, "users_insert", triggers[0].Name)
+	})
+
 	t.Run("Triggers", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
