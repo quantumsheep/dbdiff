@@ -4,7 +4,8 @@ dbdiff reads the schema of two databases. Then it prints the SQL statements that
 second schema equal to the first one.
 
 dbdiff supports SQLite and PostgreSQL. It compares the schema by default. The `--data`
-flag adds the comparison of the rows.
+flag adds the comparison of the rows. Each side is a database, a `.sql` file, or a
+directory of `.sql` migration files.
 
 ## Installation
 
@@ -38,6 +39,13 @@ This example compares two SQLite files:
 
 ```bash
 dbdiff source.sqlite target.sqlite
+```
+
+Each side accepts SQL text in place of a database:
+
+```bash
+dbdiff schema.sql target.sqlite
+dbdiff ./migrations target.sqlite
 ```
 
 The output holds one SQL statement per line:
@@ -120,6 +128,57 @@ An object that an extension owns stays out of the output. The `CREATE EXTENSION`
 builds that object again. A sequence that a `SERIAL` column or an identity column owns
 stays out of the output for the same reason.
 
+## SQL files
+
+An argument names SQL text in two cases. The first case is a path that ends in `.sql`. The
+second case is a directory. dbdiff reads the `.sql` files of the top level of that
+directory, sorts the names, and applies the files in that order. It skips a file whose name
+ends in `.down.sql`, because a down migration removes the schema that its up migration
+built.
+
+```bash
+dbdiff schema.sql production.sqlite
+dbdiff ./migrations production.sqlite
+dbdiff old_schema.sql new_schema.sql
+```
+
+A connection URL holds `://`, so a URL never names SQL text.
+
+dbdiff applies the SQL to a temporary database, and then it compares that database. The
+`--driver` flag names the dialect of the files, and it names the engine of the temporary
+database.
+
+- The `sqlite3` driver writes a temporary SQLite file. It needs no other program.
+- The `postgres` driver starts a temporary PostgreSQL server on a free port of the loopback
+  interface. The first run downloads that server. Later runs read the binaries of the cache
+  directory of the user.
+
+The temporary PostgreSQL server takes the version of the database of the other side. This
+example reads the version of `production`, and it applies `schema.sql` to a server of that
+version:
+
+```bash
+dbdiff --driver postgres schema.sql postgres://user:password@localhost:5432/production
+```
+
+Two SQL files give no version, so the temporary server takes the default version:
+
+```bash
+dbdiff --driver postgres old_schema.sql new_schema.sql
+```
+
+dbdiff removes the temporary database at the end of the run. It changes no file of the
+source.
+
+### Limits of a SQL file
+
+- The SQL must be correct for the engine that the `--driver` flag names.
+- dbdiff reads no annotation of a migration tool. A goose file holds the up migration and
+  the down migration in one file, behind a `-- +goose` comment. dbdiff applies both parts,
+  so a goose directory gives a wrong schema. A golang-migrate directory and a directory of
+  numbered files work.
+- dbdiff reads the top level of the directory only. It reads no subdirectory.
+
 ## Data comparison
 
 The `--data` flag adds the comparison of the rows:
@@ -175,6 +234,8 @@ constraint of two or more columns as a table constraint.
 - The PostgreSQL driver compares one schema for each run. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
   object that moved from one schema to another schema.
+- A SQL source of the postgres driver needs a download on the first run. Read
+  [Limits of a SQL file](#limits-of-a-sql-file) for the other limits.
 
 ## Development
 

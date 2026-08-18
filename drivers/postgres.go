@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/samber/lo"
@@ -26,26 +27,37 @@ type PostgresDriver struct {
 	SourceSchema             string
 	TargetSchema             string
 	CompareData              bool
+
+	ScratchVersion embeddedpostgres.PostgresVersion
+
+	scratchServer *PostgresScratchServer
 }
 
-func NewPostgresDriver(config *PostgresDriverConfig) (*PostgresDriver, error) {
-	sourceDatabaseConnection, err := openPostgresConnection(config.SourceConnectionString, config.SourceSchema)
-	if err != nil {
-		return nil, err
-	}
-
-	targetDatabaseConnection, err := openPostgresConnection(config.TargetConnectionString, config.TargetSchema)
-	if err != nil {
-		return nil, err
-	}
-
+func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*PostgresDriver, error) {
 	driver := &PostgresDriver{
-		SourceDatabaseConnection: sourceDatabaseConnection,
-		TargetDatabaseConnection: targetDatabaseConnection,
-		SourceSchema:             config.SourceSchema,
-		TargetSchema:             config.TargetSchema,
-		CompareData:              config.CompareData,
+		SourceSchema:   config.SourceSchema,
+		TargetSchema:   config.TargetSchema,
+		CompareData:    config.CompareData,
+		ScratchVersion: postgresScratchVersionOfConfig(ctx, config),
 	}
+
+	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceConnectionString, config.SourceSchema, "source")
+	if err != nil {
+		driver.StopScratchServer()
+		return nil, err
+	}
+
+	driver.SourceDatabaseConnection = sourceDatabaseConnection
+
+	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetConnectionString, config.TargetSchema, "target")
+	if err != nil {
+		driver.SourceDatabaseConnection.Close()
+		driver.StopScratchServer()
+
+		return nil, err
+	}
+
+	driver.TargetDatabaseConnection = targetDatabaseConnection
 
 	return driver, nil
 }
@@ -89,19 +101,11 @@ func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema st
 }
 
 func (d *PostgresDriver) Close() error {
-	var err error
+	sourceError := d.SourceDatabaseConnection.Close()
+	targetError := d.TargetDatabaseConnection.Close()
+	stopError := d.StopScratchServer()
 
-	err = d.SourceDatabaseConnection.Close()
-	if err != nil {
-		return err
-	}
-
-	err = d.TargetDatabaseConnection.Close()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return firstError(sourceError, targetError, stopError)
 }
 
 func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {

@@ -11,6 +11,9 @@ the target. The source holds the wanted state. The output changes the target.
 dbdiff supports SQLite and PostgreSQL. It compares schemas. The `--data` flag adds the
 comparison of the rows, and the default value of that flag is off.
 
+An argument names a database, a `.sql` file, or a directory of `.sql` files. See
+[SQL sources](#sql-sources).
+
 ## The rules that matter most
 
 Read this section before you write any code.
@@ -44,11 +47,12 @@ version renames functions and moves types.
 
 | Library                   | Version | Where the documentation is                     |
 | ------------------------- | ------- | ---------------------------------------------- |
-| `github.com/urfave/cli`   | v3.6.1  | `go doc github.com/urfave/cli/v3`              |
-| `github.com/jackc/pgx`    | v5.8.0  | `go doc github.com/jackc/pgx/v5/stdlib`        |
-| `github.com/mattn/go-sqlite3` | v1.14.32 | `go doc github.com/mattn/go-sqlite3`      |
-| `github.com/samber/lo`    | v1.52.0 | `go doc github.com/samber/lo`                  |
-| `github.com/stretchr/testify` | v1.11.1 | `go doc github.com/stretchr/testify/require` |
+| `github.com/urfave/cli`   | v3.11.0 | `go doc github.com/urfave/cli/v3`              |
+| `github.com/jackc/pgx`    | v5.10.0 | `go doc github.com/jackc/pgx/v5/stdlib`        |
+| `github.com/mattn/go-sqlite3` | v1.14.50 | `go doc github.com/mattn/go-sqlite3`      |
+| `github.com/samber/lo`    | v1.53.0 | `go doc github.com/samber/lo`                  |
+| `github.com/stretchr/testify` | v1.12.0 | `go doc github.com/stretchr/testify/require` |
+| `github.com/fergusstrange/embedded-postgres` | v1.34.0 | `go doc github.com/fergusstrange/embedded-postgres` |
 
 **urfave/cli v3 is not the urfave/cli that you remember.** Version 3 replaces `cli.App`
 with `cli.Command`. It passes a `context.Context` to every action. It reads a positional
@@ -71,6 +75,7 @@ The `drivers` package uses one file per schema object per engine:
 drivers/
 ├── driver.go                  The Driver interface and SectionDiff
 ├── identifier.go              quoteIdentifier and quoteIdentifiers
+├── sql_source.go              The SQL file source: detection, file order, apply
 ├── sqlite.go                  The SQLite driver: connections, queries, top-level diff
 ├── sqlite_table.go            SQLiteTable and its diff
 ├── sqlite_column.go           SQLiteColumn
@@ -79,6 +84,7 @@ drivers/
 ├── sqlite_view.go             SQLiteView
 ├── sqlite_foreign_key.go      SQLiteForeignKey
 ├── sqlite_data.go             The row comparison of SQLite
+├── sqlite_sql_source.go       The temporary SQLite database of a SQL source
 ├── sqlite_test.go             The SQLite test harness and the tests
 ├── postgres.go                The PostgreSQL driver
 ├── postgres_table.go          PostgresTable and its diff
@@ -97,6 +103,7 @@ drivers/
 ├── postgres_extension.go      PostgresExtension
 ├── postgres_cast.go           The automatic cast lookup and the USING clause
 ├── postgres_data.go           The row comparison of PostgreSQL
+├── postgres_sql_source.go     The temporary PostgreSQL server of a SQL source
 └── postgres_test.go           The PostgreSQL test harness and the tests
 ```
 
@@ -129,9 +136,15 @@ type Driver interface {
 ```
 
 A driver holds two `*sql.DB` fields: `SourceDatabaseConnection` and
-`TargetDatabaseConnection`. A constructor is `New<Engine>Driver(config *<Engine>DriverConfig)`.
-The config struct holds the two connection strings. To register a new driver, add a case
-to the switch in `cmd/dbdiff/main.go` and a value to the flag validator.
+`TargetDatabaseConnection`. A constructor is
+`New<Engine>Driver(ctx context.Context, config *<Engine>DriverConfig)`. The constructor
+takes a context, because a SQL source runs statements before the diff starts. The config
+struct holds the two connection strings. To register a new driver, add a case to the switch
+in `cmd/dbdiff/main.go` and a value to the flag validator.
+
+A driver opens one side with `OpenSide(ctx, path, ...)`. That method reads a database, or
+it builds a temporary database from a SQL source. `Close` releases the temporary
+database.
 
 ## Naming
 
@@ -418,6 +431,50 @@ a `CREATE VIEW` statement needs the views that it reads first, and a `DROP VIEW`
 takes the reverse order. `DiffViews` walks the source views forward and the target views
 backward.
 
+## SQL sources
+
+An argument names SQL text when the path ends in `.sql`, or when the path is a directory.
+A path that holds `://` is a connection URL, so it never names SQL text. `IsSQLSource` in
+`sql_source.go` holds that rule.
+
+`NewSQLSource` reads the file list. A file gives a list of one. A directory gives the
+`.sql` files of its top level, in the order of the names. It drops a file whose name ends
+in `.down.sql`, because a down migration removes the schema that its up migration built. A
+directory that holds no `.sql` file is an error.
+
+`ApplyTo` sends each whole file in one `ExecContext` call. Do not add a statement splitter.
+Both engines accept several statements in one call, and a correct splitter needs a parser,
+because a function body of PostgreSQL holds a semicolon.
+
+Each engine materializes a source in its own file:
+
+- `sqlite_sql_source.go` writes a database into a directory of `os.MkdirTemp`. `Close`
+  removes that directory.
+- `postgres_sql_source.go` starts a `PostgresScratchServer` with
+  `fergusstrange/embedded-postgres`. The server takes a free port of the loopback
+  interface, and it holds one database for each side. `Close` stops it and removes its
+  files.
+
+`postgresScratchVersionOfConfig` selects the version of the temporary server. A comparison
+of SQL text against a database reads the major version of that database with
+`DetectPostgresScratchVersion`, and the temporary server takes the version of the same
+major. The statements then match the engine that runs them. Two SQL sources give an empty
+version, and the library then selects its default version. Do not name a version in the
+code. A server that gives no version also gives an empty value, and the diff reports the
+connection later.
+
+Four settings of the temporary server matter. Keep them:
+
+- The logger is `io.Discard`. The default logger of the library writes to the standard
+  output, and dbdiff writes the SQL statements to that stream.
+- The port comes from `findFreePort`. The default port of the library is 5432, and a real
+  server holds that port.
+- `Version` stays absent for an empty version. A call with an empty value gives an invalid
+  configuration, and it also replaces the default of the library.
+- `BinariesPath` names a stable directory of the cache of the user. Without it every run
+  extracts the archive again. The name holds the version, and the default version takes the
+  module version of the library, so a new library reads no stale binaries.
+
 ## Data comparison
 
 The `--data` flag sets the `CompareData` field of the driver config. The field is false by
@@ -480,6 +537,13 @@ connection of the harness open until the cleanup ends.
 | `ExecOnTarget(sql)`             | Builds the old schema, or applies the diff       |
 | `RequireInstructions(expected)` | Compares the whole instruction list and returns it |
 | `FetchAllFromTarget(table, ...)`| Reads the rows of the target as maps (SQLite)    |
+| `WriteSQLFile(directory, name, content)` | Writes one `.sql` file of a SQL source  |
+
+`NewTestSQLiteDriverWithPaths(tb, source, target)` builds a driver for two given paths. Use
+it for a test of a SQL source. `NewTestSQLiteDriver` calls it with two database files.
+
+A test that starts the temporary PostgreSQL server calls `t.Skip` under `testing.Short`,
+because the first run downloads the server.
 
 Every harness method calls `d.tb.Helper()` on its first line.
 
@@ -695,3 +759,7 @@ item when your task touches it.
   schema. This item is a boundary of the tool, not a defect. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
   object that moved from one schema to another schema.
+- A SQL source reads no annotation of a migration tool. A goose file holds the up migration
+  and the down migration in one file, behind a `-- +goose` comment. dbdiff applies both
+  parts. A golang-migrate directory and a directory of numbered files work.
+- A SQL source reads the top level of a directory only. It reads no subdirectory.

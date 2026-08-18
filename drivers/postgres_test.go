@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
 )
@@ -54,7 +56,7 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	sourceConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, sourceSchema)
 	targetConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, targetSchema)
 
-	driver, err := NewPostgresDriver(&PostgresDriverConfig{
+	driver, err := NewPostgresDriver(tb.Context(), &PostgresDriverConfig{
 		SourceConnectionString: sourceConnectionString,
 		TargetConnectionString: targetConnectionString,
 	})
@@ -110,7 +112,7 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 	sourceConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", sourceDatabase)
 	targetConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", targetDatabase)
 
-	driver, err := NewPostgresDriver(&PostgresDriverConfig{
+	driver, err := NewPostgresDriver(tb.Context(), &PostgresDriverConfig{
 		SourceConnectionString: sourceConnectionString,
 		TargetConnectionString: targetConnectionString,
 	})
@@ -1892,7 +1894,7 @@ func TestPostgresDriver(t *testing.T) {
 		harness.ExecOnSource(`CREATE TABLE users (id INT NOT NULL);`)
 
 		// The two connection strings hold no search path, so the config selects the schema.
-		driver, err := NewPostgresDriver(&PostgresDriverConfig{
+		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
 			SourceConnectionString: postgresTestConnectionString,
 			TargetConnectionString: postgresTestConnectionString,
 			SourceSchema:           harness.sourceSchema,
@@ -1916,7 +1918,7 @@ func TestPostgresDriver(t *testing.T) {
 	})
 
 	t.Run("UnknownSchema", func(t *testing.T) {
-		driver, err := NewPostgresDriver(&PostgresDriverConfig{
+		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
 			SourceConnectionString: postgresTestConnectionString,
 			TargetConnectionString: postgresTestConnectionString,
 			SourceSchema:           "schema_that_does_not_exist",
@@ -1930,5 +1932,160 @@ func TestPostgresDriver(t *testing.T) {
 
 		_, err = driver.Diff(t.Context())
 		require.EqualError(t, err, `the source database has no schema with the name "schema_that_does_not_exist"`)
+	})
+
+	t.Run("SQLFileSource", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("the temporary postgres server needs a download on the first run")
+		}
+
+		migrationsDirectory := t.TempDir()
+
+		WriteSQLFile(t, migrationsDirectory, "001_create_users.up.sql", `
+			CREATE TABLE users (id INT NOT NULL);
+		`)
+		WriteSQLFile(t, migrationsDirectory, "002_add_email.up.sql", `
+			ALTER TABLE users ADD COLUMN email TEXT;
+		`)
+		WriteSQLFile(t, migrationsDirectory, "002_add_email.down.sql", `
+			ALTER TABLE users DROP COLUMN email;
+		`)
+
+		targetPath := WriteSQLFile(t, t.TempDir(), "target.sql", `
+			CREATE TABLE users (id INT NOT NULL);
+		`)
+
+		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
+			SourceConnectionString: migrationsDirectory,
+			TargetConnectionString: targetPath,
+		})
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			require.NoError(t, driver.Close())
+		})
+
+		instructions, err := driver.Diff(t.Context())
+		require.NoError(t, err)
+
+		require.Equal(t, []Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "email",
+							Type: "text",
+						},
+					},
+				},
+			},
+		}, instructions)
+
+		_, err = driver.TargetDatabaseConnection.ExecContext(t.Context(), RenderInstructions(instructions))
+		require.NoError(t, err)
+	})
+
+	t.Run("EmptyDirectorySource", func(t *testing.T) {
+		_, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
+			SourceConnectionString: t.TempDir(),
+			TargetConnectionString: postgresTestConnectionString,
+		})
+		require.ErrorContains(t, err, "holds no .sql file")
+	})
+
+	t.Run("DetectScratchVersion", func(t *testing.T) {
+		connection, err := sql.Open("pgx", postgresTestConnectionString)
+		require.NoError(t, err)
+
+		defer func() {
+			require.NoError(t, connection.Close())
+		}()
+
+		var versionNumber int
+
+		row := connection.QueryRowContext(t.Context(), "SELECT current_setting('server_version_num')::int")
+		require.NoError(t, row.Scan(&versionNumber))
+
+		major := versionNumber / 10000
+
+		version := DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString)
+		require.Equal(t, postgresScratchVersions[major], version)
+		require.True(t, strings.HasPrefix(string(version), fmt.Sprintf("%d.", major)), version)
+	})
+
+	t.Run("DetectScratchVersionOfUnreachableServer", func(t *testing.T) {
+		version := DetectPostgresScratchVersion(t.Context(), "postgres://user:password@127.0.0.1:1/absent?sslmode=disable")
+		require.Equal(t, embeddedpostgres.PostgresVersion(""), version)
+	})
+
+	t.Run("ScratchVersionOfConfig", func(t *testing.T) {
+		sqlPath := WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (id INT);`)
+
+		liveVersion := DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString)
+		require.NotEmpty(t, liveVersion)
+
+		version := postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
+			SourceConnectionString: sqlPath,
+			TargetConnectionString: postgresTestConnectionString,
+		})
+		require.Equal(t, liveVersion, version)
+
+		version = postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
+			SourceConnectionString: postgresTestConnectionString,
+			TargetConnectionString: sqlPath,
+		})
+		require.Equal(t, liveVersion, version)
+
+		version = postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
+			SourceConnectionString: sqlPath,
+			TargetConnectionString: sqlPath,
+		})
+		require.Equal(t, embeddedpostgres.PostgresVersion(""), version)
+	})
+
+	t.Run("SQLFileSourceAgainstDatabase", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("the temporary postgres server needs a download on the first run")
+		}
+
+		harness := NewTestPostgresDriver(t)
+		harness.ExecOnTarget(`CREATE TABLE users (id INT NOT NULL);`)
+
+		sourcePath := WriteSQLFile(t, t.TempDir(), "schema.sql", `
+			CREATE TABLE users (id INT NOT NULL, name TEXT);
+		`)
+
+		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
+			SourceConnectionString: sourcePath,
+			TargetConnectionString: postgresTestConnectionString,
+			TargetSchema:           harness.targetSchema,
+		})
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			require.NoError(t, driver.Close())
+		})
+
+		require.Equal(t, DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString), driver.ScratchVersion)
+
+		instructions, err := driver.Diff(t.Context())
+		require.NoError(t, err)
+
+		require.Equal(t, []Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "name",
+							Type: "text",
+						},
+					},
+				},
+			},
+		}, instructions)
+
+		harness.ExecOnTarget(RenderInstructions(instructions))
 	})
 }

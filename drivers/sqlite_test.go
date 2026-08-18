@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -92,9 +93,15 @@ func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 	sourceDatabasePath := filepath.Join(tb.TempDir(), "source.sqlite")
 	targetDatabasePath := filepath.Join(tb.TempDir(), "target.sqlite")
 
-	driver, err := NewSQLiteDriver(&SQLLiteDriverConfig{
-		SourceDatabasePath: sourceDatabasePath,
-		TargetDatabasePath: targetDatabasePath,
+	return NewTestSQLiteDriverWithPaths(tb, sourceDatabasePath, targetDatabasePath)
+}
+
+func NewTestSQLiteDriverWithPaths(tb testing.TB, sourcePath string, targetPath string) *TestingSQLiteDriver {
+	tb.Helper()
+
+	driver, err := NewSQLiteDriver(tb.Context(), &SQLLiteDriverConfig{
+		SourceDatabasePath: sourcePath,
+		TargetDatabasePath: targetPath,
 	})
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
@@ -105,6 +112,17 @@ func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 		SQLiteDriver: driver,
 		tb:           tb,
 	}
+}
+
+func WriteSQLFile(tb testing.TB, directory string, name string, content string) string {
+	tb.Helper()
+
+	path := filepath.Join(directory, name)
+
+	err := os.WriteFile(path, []byte(content), 0o600)
+	require.NoError(tb, err)
+
+	return path
 }
 
 // A read method must return this error through rows.Err.
@@ -2124,5 +2142,171 @@ func TestSQLiteDriver(t *testing.T) {
 		// The read method must return the failure of Next through rows.Err.
 		_, err = driver.GetTableColumns(t.Context(), db, "users")
 		require.ErrorIs(t, err, errRowIteration)
+	})
+
+	t.Run("SQLFileSource", func(t *testing.T) {
+		sourcePath := WriteSQLFile(t, t.TempDir(), "schema.sql", `
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				email TEXT
+			);
+		`)
+
+		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+
+		driver := NewTestSQLiteDriverWithPaths(t, sourcePath, targetPath)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+
+			INSERT INTO users (id, name) VALUES (1, 'Alice');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name: "email",
+						Type: "TEXT",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "email": nil},
+		}, rows)
+	})
+
+	t.Run("MigrationsDirectorySource", func(t *testing.T) {
+		migrationsDirectory := t.TempDir()
+
+		WriteSQLFile(t, migrationsDirectory, "001_create_users.up.sql", `
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+		`)
+		WriteSQLFile(t, migrationsDirectory, "002_add_email.up.sql", `
+			ALTER TABLE users ADD COLUMN email TEXT;
+		`)
+		WriteSQLFile(t, migrationsDirectory, "002_add_email.down.sql", `
+			ALTER TABLE users DROP COLUMN email;
+		`)
+		WriteSQLFile(t, migrationsDirectory, "010_add_index.up.sql", `
+			CREATE INDEX users_email ON users (email);
+		`)
+		WriteSQLFile(t, migrationsDirectory, "notes.txt", `This file holds no SQL.`)
+
+		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+
+		driver := NewTestSQLiteDriverWithPaths(t, migrationsDirectory, targetPath)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				Name: "users",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name: "email",
+						Type: "TEXT",
+					},
+				},
+				ForeignKeys: []*SQLiteForeignKey{},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "users_email",
+				TableName: "users",
+				Keys:      []string{`"email"`},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		driver.ExecOnTarget(`INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');`)
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "email": "alice@example.com"},
+		}, rows)
+	})
+
+	t.Run("SQLFileSourceOnBothSides", func(t *testing.T) {
+		sourcePath := WriteSQLFile(t, t.TempDir(), "source.sql", `
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				email TEXT
+			);
+		`)
+
+		targetPath := WriteSQLFile(t, t.TempDir(), "target.sql", `
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+
+			CREATE TABLE audit (
+				id INTEGER PRIMARY KEY
+			);
+		`)
+
+		driver := NewTestSQLiteDriverWithPaths(t, sourcePath, targetPath)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name: "email",
+						Type: "TEXT",
+					},
+				},
+			},
+			&SQLDropTableInstruction{
+				Name: "audit",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("EmptyDirectorySource", func(t *testing.T) {
+		emptyDirectory := t.TempDir()
+		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+
+		_, err := NewSQLiteDriver(t.Context(), &SQLLiteDriverConfig{
+			SourceDatabasePath: emptyDirectory,
+			TargetDatabasePath: targetPath,
+		})
+		require.ErrorContains(t, err, "holds no .sql file")
+	})
+
+	t.Run("InvalidSQLFileSource", func(t *testing.T) {
+		sourcePath := WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (;`)
+		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+
+		_, err := NewSQLiteDriver(t.Context(), &SQLLiteDriverConfig{
+			SourceDatabasePath: sourcePath,
+			TargetDatabasePath: targetPath,
+		})
+		require.ErrorContains(t, err, "schema.sql")
 	})
 }

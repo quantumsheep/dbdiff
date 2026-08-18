@@ -16,7 +16,7 @@ func main() {
 		Usage:       "Compare database schemas and generate migration scripts",
 		Description: "Compare database schemas and generate migration scripts",
 		Action:      action,
-		UsageText:   "dbdiff [global options] <url1> <url2>",
+		UsageText:   "dbdiff [global options] <source> <target>",
 		OnUsageError: func(ctx context.Context, command *cli.Command, err error, isSubcommand bool) error {
 			return err
 		},
@@ -43,11 +43,11 @@ func main() {
 		Arguments: []cli.Argument{
 			&cli.StringArg{
 				Name:      "source",
-				UsageText: "Database connection URL or path for the source database",
+				UsageText: "Connection URL of the source database, a .sql file, or a directory of .sql files",
 			},
 			&cli.StringArg{
 				Name:      "target",
-				UsageText: "Database connection URL or path for the target database",
+				UsageText: "Connection URL of the target database, a .sql file, or a directory of .sql files",
 			},
 		},
 	}
@@ -88,7 +88,7 @@ func action(ctx context.Context, command *cli.Command) error {
 			return fmt.Errorf("the --schema flag applies to the postgres driver only")
 		}
 
-		driver, err = drivers.NewSQLiteDriver(&drivers.SQLLiteDriverConfig{
+		driver, err = drivers.NewSQLiteDriver(ctx, &drivers.SQLLiteDriverConfig{
 			SourceDatabasePath: sourceDatabaseURL,
 			TargetDatabasePath: targetDatabaseURL,
 			CompareData:        compareData,
@@ -97,7 +97,7 @@ func action(ctx context.Context, command *cli.Command) error {
 			return fmt.Errorf("failed to create sqlite3 driver: %w", err)
 		}
 	case "postgres":
-		driver, err = drivers.NewPostgresDriver(&drivers.PostgresDriverConfig{
+		driver, err = drivers.NewPostgresDriver(ctx, &drivers.PostgresDriverConfig{
 			SourceConnectionString: sourceDatabaseURL,
 			TargetConnectionString: targetDatabaseURL,
 			SourceSchema:           schemaFlag,

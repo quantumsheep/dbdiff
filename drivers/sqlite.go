@@ -22,45 +22,46 @@ type SQLiteDriver struct {
 	SourceDatabaseConnection *sql.DB
 	TargetDatabaseConnection *sql.DB
 	CompareData              bool
+
+	temporaryDirectory string
 }
 
-func NewSQLiteDriver(config *SQLLiteDriverConfig) (*SQLiteDriver, error) {
-	sourceDatabasePath := strings.TrimPrefix(config.SourceDatabasePath, "sqlite://")
-	targetDatabasePath := strings.TrimPrefix(config.TargetDatabasePath, "sqlite://")
-
-	sourceDatabaseConnection, err := sql.Open("sqlite3", sourceDatabasePath)
-	if err != nil {
-		return nil, err
-	}
-
-	targetDatabaseConnection, err := sql.Open("sqlite3", targetDatabasePath)
-	if err != nil {
-		return nil, err
-	}
-
+func NewSQLiteDriver(ctx context.Context, config *SQLLiteDriverConfig) (*SQLiteDriver, error) {
 	driver := &SQLiteDriver{
-		SourceDatabaseConnection: sourceDatabaseConnection,
-		TargetDatabaseConnection: targetDatabaseConnection,
-		CompareData:              config.CompareData,
+		CompareData: config.CompareData,
 	}
+
+	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceDatabasePath, "source")
+	if err != nil {
+		driver.RemoveTemporaryDirectory()
+		return nil, err
+	}
+
+	driver.SourceDatabaseConnection = sourceDatabaseConnection
+
+	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetDatabasePath, "target")
+	if err != nil {
+		driver.SourceDatabaseConnection.Close()
+		driver.RemoveTemporaryDirectory()
+
+		return nil, err
+	}
+
+	driver.TargetDatabaseConnection = targetDatabaseConnection
 
 	return driver, nil
 }
 
+func trimSQLitePrefix(path string) string {
+	return strings.TrimPrefix(path, "sqlite://")
+}
+
 func (d *SQLiteDriver) Close() error {
-	var err error
+	sourceError := d.SourceDatabaseConnection.Close()
+	targetError := d.TargetDatabaseConnection.Close()
+	removeError := d.RemoveTemporaryDirectory()
 
-	err = d.SourceDatabaseConnection.Close()
-	if err != nil {
-		return err
-	}
-
-	err = d.TargetDatabaseConnection.Close()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return firstError(sourceError, targetError, removeError)
 }
 
 func (d *SQLiteDriver) Diff(ctx context.Context) ([]Instruction, error) {
