@@ -12,7 +12,7 @@ type PostgresType struct {
 func (t *PostgresType) CreateInstruction() *PostgresCreateEnumTypeInstruction {
 	return &PostgresCreateEnumTypeInstruction{
 		Name:   t.Name,
-		Values: t.Values,
+		Labels: t.Values,
 	}
 }
 

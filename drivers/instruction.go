@@ -93,17 +93,18 @@ func (c *SQLSetClause) Clause() string {
 }
 
 // INSERT INTO table_name ( column_name [, ...] ) VALUES ( expression [, ...] )
+// An expression holds already-formatted SQL text. The caller quotes the value.
 type SQLInsertInstruction struct {
 	TableName   string
 	ColumnNames []string
-	Values      []string
+	Expressions []string
 }
 
 func (i *SQLInsertInstruction) String() string {
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
 		quoteIdentifier(i.TableName),
 		strings.Join(quoteIdentifiers(i.ColumnNames), ", "),
-		strings.Join(i.Values, ", "))
+		strings.Join(i.Expressions, ", "))
 }
 
 // INSERT INTO table_name ( column_name [, ...] ) SELECT expression [, ...] FROM table_name

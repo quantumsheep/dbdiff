@@ -377,7 +377,7 @@ func TestPostgresDriver(t *testing.T) {
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresCreateEnumTypeInstruction{
 				Name:   "mood",
-				Values: []string{"sad", "ok"},
+				Labels: []string{"sad", "ok"},
 			},
 			&PostgresCreateTableInstruction{
 				Name: "users",
@@ -985,7 +985,7 @@ func TestPostgresDriver(t *testing.T) {
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresCreateEnumTypeInstruction{
 				Name:   "mood",
-				Values: []string{"sad", "ok"},
+				Labels: []string{"sad", "ok"},
 			},
 		})
 
@@ -1019,7 +1019,7 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresDropTypeInstruction{Name: "mood"},
 			&PostgresCreateEnumTypeInstruction{
 				Name:   "mood",
-				Values: []string{"sad"},
+				Labels: []string{"sad"},
 			},
 		})
 
@@ -1660,7 +1660,7 @@ func TestPostgresDriver(t *testing.T) {
 			&SQLInsertInstruction{
 				TableName:   "users",
 				ColumnNames: []string{"id", "name"},
-				Values:      []string{"3", "'Carol'"},
+				Expressions: []string{"3", "'Carol'"},
 			},
 			&SQLUpdateInstruction{
 				TableName: "users",
@@ -1746,7 +1746,7 @@ func TestPostgresDriver(t *testing.T) {
 			&SQLInsertInstruction{
 				TableName:   "notes",
 				ColumnNames: []string{"id", "body"},
-				Values:      []string{"3", "NULL"},
+				Expressions: []string{"3", "NULL"},
 			},
 			&SQLUpdateInstruction{
 				TableName: "notes",

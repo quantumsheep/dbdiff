@@ -9,14 +9,15 @@ import (
 )
 
 // CREATE TYPE name AS ENUM ( label [, ...] )
+// A label holds raw text. String() quotes each label.
 type PostgresCreateEnumTypeInstruction struct {
 	Name   string
-	Values []string
+	Labels []string
 }
 
 func (i *PostgresCreateEnumTypeInstruction) String() string {
-	labels := lo.Map(i.Values, func(value string, _ int) string {
-		return quoteLiteral(value)
+	labels := lo.Map(i.Labels, func(label string, _ int) string {
+		return quoteLiteral(label)
 	})
 
 	return fmt.Sprintf("CREATE TYPE %s AS ENUM (%s);",

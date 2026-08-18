@@ -81,7 +81,7 @@ func TestInstructions(t *testing.T) {
 		instruction := &SQLInsertInstruction{
 			TableName:   "users",
 			ColumnNames: []string{"id", "name"},
-			Values:      []string{"1", "'Alice'"},
+			Expressions: []string{"1", "'Alice'"},
 		}
 
 		require.Equal(t,
@@ -536,7 +536,7 @@ func TestInstructions(t *testing.T) {
 	t.Run("PostgresCreateEnumType", func(t *testing.T) {
 		instruction := &PostgresCreateEnumTypeInstruction{
 			Name:   "mood",
-			Values: []string{"sad", "happy"},
+			Labels: []string{"sad", "happy"},
 		}
 
 		require.Equal(t, `CREATE TYPE "mood" AS ENUM ('sad', 'happy');`, instruction.String())

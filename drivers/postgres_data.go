@@ -119,7 +119,7 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, sourceTable *Postgre
 			insertions = append(insertions, &SQLInsertInstruction{
 				TableName:   sourceTable.Name,
 				ColumnNames: sourceColumnNames,
-				Values:      values,
+				Expressions: values,
 			})
 
 			continue

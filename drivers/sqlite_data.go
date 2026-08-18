@@ -131,7 +131,7 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 			insertions = append(insertions, &SQLInsertInstruction{
 				TableName:   sourceTable.Name,
 				ColumnNames: sourceColumnNames,
-				Values:      values,
+				Expressions: values,
 			})
 
 			continue

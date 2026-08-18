@@ -1703,7 +1703,7 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLInsertInstruction{
 				TableName:   "users",
 				ColumnNames: []string{"id", "name"},
-				Values:      []string{"3", "'Carol'"},
+				Expressions: []string{"3", "'Carol'"},
 			},
 			&SQLUpdateInstruction{
 				TableName: "users",
@@ -1789,7 +1789,7 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLInsertInstruction{
 				TableName:   "notes",
 				ColumnNames: []string{"id", "body"},
-				Values:      []string{"3", "NULL"},
+				Expressions: []string{"3", "NULL"},
 			},
 			&SQLUpdateInstruction{
 				TableName: "notes",
