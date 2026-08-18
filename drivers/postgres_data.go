@@ -159,8 +159,7 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, sourceTable *Postgre
 		})
 	}
 
-	instructions := append(insertions, modifications...)
-	instructions = append(instructions, removals...)
+	instructions := slices.Concat(insertions, modifications, removals)
 
 	return instructions, nil
 }

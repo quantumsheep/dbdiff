@@ -171,8 +171,7 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 		})
 	}
 
-	instructions := append(insertions, modifications...)
-	instructions = append(instructions, removals...)
+	instructions := slices.Concat(insertions, modifications, removals)
 
 	return instructions, nil
 }
