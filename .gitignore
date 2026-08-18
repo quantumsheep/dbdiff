@@ -34,3 +34,6 @@ go.work.sum
 
 # macOS
 .DS_Store
+
+# Agent notes and plans
+/docs/
