@@ -82,9 +82,13 @@ func (i *PostgresCreateDomainInstruction) String() string {
 		statement += " NOT NULL"
 	}
 
-	for _, constraint := range i.Constraints {
-		statement += fmt.Sprintf(" CONSTRAINT %s %s",
+	clauses := lo.Map(i.Constraints, func(constraint *PostgresDomainConstraint, _ int) string {
+		return fmt.Sprintf("CONSTRAINT %s %s",
 			quoteIdentifier(constraint.Name), constraint.Def)
+	})
+
+	if len(clauses) > 0 {
+		statement += " " + strings.Join(clauses, " ")
 	}
 
 	return statement + ";"
