@@ -407,6 +407,7 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Extensions  | `pg_extension`                                           |
 | Rules       | `pg_rules`                                               |
 | Extended statistics | `pg_statistic_ext` with `pg_get_statisticsobjdef` |
+| Replica identity | `pg_class.relreplident`, and `pg_index.indisreplident` for the index |
 | Policies    | `pg_policies`                                            |
 | Comments    | `obj_description` and `col_description`                  |
 | Collations  | `pg_collation`, when `attcollation` differs from `typcollation` |

@@ -246,6 +246,12 @@ that parameter its default value again.
 **Unlogged tables.** The driver keeps the `UNLOGGED` keyword of a table. A change of that
 keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 
+**Replica identity.** The driver keeps the replica identity of a table. Logical replication
+reads that mode to identify a row of the table. The mode `USING INDEX` names an index, so
+the output prints the `CREATE INDEX` statement of that index first. The output changes the
+mode before a `DROP INDEX` statement, because PostgreSQL refuses to drop the index that the
+replica identity of the target holds.
+
 **Table inheritance.** A table of `INHERITS` is no partition. The driver prints a
 `CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
 PostgreSQL merges a column that the parent and the child both declare.
@@ -384,6 +390,7 @@ the same treatment.
 | Rules             | ➖                                    | ✅         |
 | Extended statistics | ➖                                  | ✅         |
 | Partitioned tables | ➖                                   | ✅         |
+| Replica identity  | ➖                                    | ✅         |
 | Sequences       | ➖                                      | ✅         |
 | Enum types      | ➖                                      | ✅         |
 | Domains         | ➖                                      | ✅         |

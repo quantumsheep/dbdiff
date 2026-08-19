@@ -1626,6 +1626,9 @@ func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewNam
 // value p, and relispartition names a partition. The query reads the key of a partitioned
 // table and the bound of a partition, because information_schema reports neither.
 //
+// relreplident names the mode of the replica identity. The mode i names an index, and
+// pg_index reports that index with the flag indisreplident.
+//
 // pg_inherits names the parent of a partition and the parent of a table of INHERITS, so
 // relispartition separates the two. Without that test a table of INHERITS takes the
 // statement of a partition, and that statement holds no bound.
@@ -1651,7 +1654,20 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 			c.relrowsecurity,
 			c.relforcerowsecurity,
 			c.relpersistence = 'u',
-			coalesce(array_to_string(c.reloptions, ','), '')
+			coalesce(array_to_string(c.reloptions, ','), ''),
+			CASE c.relreplident
+				WHEN 'd' THEN 'DEFAULT'
+				WHEN 'n' THEN 'NOTHING'
+				WHEN 'f' THEN 'FULL'
+				WHEN 'i' THEN 'USING INDEX'
+				ELSE ''
+			END,
+			coalesce((
+				SELECT replica_index.relname
+				FROM pg_index i
+				JOIN pg_class replica_index ON replica_index.oid = i.indexrelid
+				WHERE i.indrelid = c.oid AND i.indisreplident
+			), '')
 		FROM pg_class c
 		WHERE c.relnamespace = current_schema()::regnamespace
 		AND c.relkind IN ('r', 'p')
@@ -1672,11 +1688,11 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 	for tableRows.Next() {
 		var tableName, partitionKey, partitionParent, partitionBound, inherits, comment string
 		var rowLevelSecurity, forceRowLevelSecurity, unlogged bool
-		var storageParameters string
+		var storageParameters, replicaIdentity, replicaIdentityIndex string
 
 		err := tableRows.Scan(&tableName, &partitionKey, &partitionParent, &partitionBound,
 			&inherits, &comment, &rowLevelSecurity, &forceRowLevelSecurity, &unlogged,
-			&storageParameters)
+			&storageParameters, &replicaIdentity, &replicaIdentityIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -1699,6 +1715,8 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		if storageParameters != "" {
 			table.StorageParameters = strings.Split(storageParameters, ",")
 		}
+		table.ReplicaIdentity = replicaIdentity
+		table.ReplicaIdentityIndex = replicaIdentityIndex
 		table.RowLevelSecurity = rowLevelSecurity
 		table.ForceRowLevelSecurity = forceRowLevelSecurity
 

@@ -864,6 +864,22 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `SET LOGGED`, action.TableActionClause())
 	})
 
+	t.Run("PostgresReplicaIdentityAction", func(t *testing.T) {
+		action := &PostgresReplicaIdentityAction{Mode: "FULL"}
+
+		require.Equal(t, `REPLICA IDENTITY FULL`, action.TableActionClause())
+	})
+
+	t.Run("PostgresReplicaIdentityUsingIndexAction", func(t *testing.T) {
+		action := &PostgresReplicaIdentityAction{
+			Mode:      "USING INDEX",
+			IndexName: "users_email_key",
+		}
+
+		require.Equal(t, `REPLICA IDENTITY USING INDEX "users_email_key"`,
+			action.TableActionClause())
+	})
+
 	t.Run("PostgresCreateTableWithStorageParameters", func(t *testing.T) {
 		instruction := &PostgresCreateTableInstruction{
 			Name: "tuned",

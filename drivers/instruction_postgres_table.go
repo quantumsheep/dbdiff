@@ -291,6 +291,23 @@ func (a *PostgresSetPersistenceAction) TableActionClause() string {
 	return "SET " + a.Persistence
 }
 
+// REPLICA IDENTITY { DEFAULT | USING INDEX index_name | FULL | NOTHING }
+type PostgresReplicaIdentityAction struct {
+	// Mode holds DEFAULT, FULL, NOTHING, or USING INDEX.
+	Mode string
+
+	// IndexName names the index of the mode USING INDEX. Every other mode keeps it empty.
+	IndexName string
+}
+
+func (a *PostgresReplicaIdentityAction) TableActionClause() string {
+	if a.IndexName != "" {
+		return "REPLICA IDENTITY " + a.Mode + " " + quoteIdentifier(a.IndexName)
+	}
+
+	return "REPLICA IDENTITY " + a.Mode
+}
+
 // { ENABLE | DISABLE | FORCE | NO FORCE } ROW LEVEL SECURITY
 type PostgresRowLevelSecurityAction struct {
 	Mode string

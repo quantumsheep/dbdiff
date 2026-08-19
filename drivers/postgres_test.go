@@ -1243,6 +1243,111 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreateTableWithAReplicaIdentity", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE events (id INT);
+			ALTER TABLE events REPLICA IDENTITY FULL;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "events",
+				Columns: []*PostgresColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "events",
+				Actions: []AlterTableAction{
+					&PostgresReplicaIdentityAction{Mode: "FULL"},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterReplicaIdentity", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE events (id INT);
+			ALTER TABLE events REPLICA IDENTITY NOTHING;
+		`)
+		driver.ExecOnTarget(`CREATE TABLE events (id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "events",
+				Actions: []AlterTableAction{
+					&PostgresReplicaIdentityAction{Mode: "NOTHING"},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// The mode USING INDEX names an index, so the statement comes after the CREATE INDEX
+	// statement of that index.
+	t.Run("ReplicaIdentityUsingAnIndex", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);
+			CREATE UNIQUE INDEX events_code_key ON events (code);
+			ALTER TABLE events REPLICA IDENTITY USING INDEX events_code_key;
+		`)
+		driver.ExecOnTarget(`CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE UNIQUE INDEX events_code_key ON events USING btree (code)",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "events",
+				Actions: []AlterTableAction{
+					&PostgresReplicaIdentityAction{
+						Mode:      "USING INDEX",
+						IndexName: "events_code_key",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// PostgreSQL refuses to drop the index that the replica identity of the target holds,
+	// so the mode changes before the DROP INDEX statement.
+	t.Run("ReplicaIdentityBeforeAnIndexRemoval", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);
+			CREATE UNIQUE INDEX events_code_key ON events (code);
+			ALTER TABLE events REPLICA IDENTITY USING INDEX events_code_key;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "events",
+				Actions: []AlterTableAction{
+					&PostgresReplicaIdentityAction{Mode: "DEFAULT"},
+				},
+			},
+			&SQLDropIndexInstruction{Name: "events_code_key"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("CreateTableWithStorageParameters", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

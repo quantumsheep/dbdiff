@@ -32,6 +32,14 @@ type PostgresTable struct {
 	// StorageParameters holds the WITH options of the table.
 	StorageParameters []string
 
+	// ReplicaIdentity names the mode of the replica identity: DEFAULT, FULL, NOTHING, or
+	// USING INDEX. Logical replication reads that mode to identify a row.
+	ReplicaIdentity string
+
+	// ReplicaIdentityIndex names the index of the mode USING INDEX. Every other mode keeps
+	// this field empty.
+	ReplicaIdentityIndex string
+
 	RowLevelSecurity      bool
 	ForceRowLevelSecurity bool
 	Policies              []*PostgresPolicy
@@ -61,6 +69,23 @@ func (t *PostgresTable) RowLevelSecurityInstructions() []Instruction {
 	}
 
 	return instructions
+}
+
+// ReplicaIdentityInstructions returns the statement that sets the replica identity of the
+// table. PostgreSQL accepts no such option in a CREATE TABLE statement. It returns nothing
+// for the mode DEFAULT, because every new table holds that mode.
+func (t *PostgresTable) ReplicaIdentityInstructions() []Instruction {
+	if t.ReplicaIdentity == "" || t.ReplicaIdentity == "DEFAULT" {
+		return nil
+	}
+
+	return []Instruction{&PostgresAlterTableInstruction{
+		Name: t.Name,
+		Actions: []AlterTableAction{&PostgresReplicaIdentityAction{
+			Mode:      t.ReplicaIdentity,
+			IndexName: t.ReplicaIdentityIndex,
+		}},
+	}}
 }
 
 func (t *PostgresTable) PolicyByName(name string) (*PostgresPolicy, bool) {
@@ -305,6 +330,17 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				&SQLDropIndexInstruction{Name: targetIndex.Name},
 				sourceIndex.CreateInstruction())
 		}
+	}
+
+	// The mode USING INDEX names an index, so this block comes after the index additions
+	// above. It comes before the index removals below, because PostgreSQL refuses to drop
+	// the index that the replica identity of the target holds.
+	if t.ReplicaIdentity != other.ReplicaIdentity ||
+		t.ReplicaIdentityIndex != other.ReplicaIdentityIndex {
+		instructions = append(instructions, alterTable(&PostgresReplicaIdentityAction{
+			Mode:      t.ReplicaIdentity,
+			IndexName: t.ReplicaIdentityIndex,
+		}))
 	}
 
 	for _, targetIndex := range other.Indexes {
@@ -614,6 +650,9 @@ func (t *PostgresTable) Instructions() []Instruction {
 	for _, index := range t.Indexes {
 		instructions = append(instructions, index.CreateInstruction())
 	}
+
+	// The mode USING INDEX names an index, so this statement comes after the index loop.
+	instructions = append(instructions, t.ReplicaIdentityInstructions()...)
 
 	for _, trigger := range t.Triggers {
 		instructions = append(instructions, trigger.CreateInstruction())
