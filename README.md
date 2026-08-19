@@ -7,8 +7,6 @@
 [![Tests](https://github.com/quantumsheep/dbdiff/actions/workflows/test.yaml/badge.svg)](https://github.com/quantumsheep/dbdiff/actions/workflows/test.yaml)
 [![Release](https://img.shields.io/github/v/release/quantumsheep/dbdiff?label=release)](https://github.com/quantumsheep/dbdiff/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/quantumsheep/dbdiff.svg)](https://pkg.go.dev/github.com/quantumsheep/dbdiff)
-[![Go Report Card](https://goreportcard.com/badge/github.com/quantumsheep/dbdiff)](https://goreportcard.com/report/github.com/quantumsheep/dbdiff)
-[![codecov](https://codecov.io/gh/quantumsheep/dbdiff/branch/main/graph/badge.svg)](https://codecov.io/gh/quantumsheep/dbdiff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
