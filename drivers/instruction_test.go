@@ -812,6 +812,16 @@ func TestInstructions(t *testing.T) {
 ) INHERITS ("parent");`, instruction.String())
 	})
 
+	t.Run("SQLiteCreateVirtualTable", func(t *testing.T) {
+		instruction := &SQLiteCreateVirtualTableInstruction{
+			Definition: "CREATE VIRTUAL TABLE docs USING fts4(title, body)",
+		}
+
+		require.Equal(t,
+			`CREATE VIRTUAL TABLE docs USING fts4(title, body);`,
+			instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

@@ -88,6 +88,7 @@ drivers/
 ├── sqlite_definition.go       The parser of a CREATE TABLE statement of SQLite
 ├── sqlite_unique_constraint.go SQLiteUniqueConstraint, a key of two or more columns
 ├── sqlite_check_constraint.go SQLiteCheckConstraint, a check of a table
+├── sqlite_virtual_table.go    SQLiteVirtualTable and its diff
 ├── sqlite_data.go             The row comparison of SQLite
 ├── sqlite_sql_source.go       The temporary SQLite database of a SQL source
 ├── sqlite_test.go             The SQLite test harness and the tests
@@ -325,6 +326,12 @@ removals. A target column that another rename holds is not a candidate.
 holds the type list that a recreation can convert: `TEXT`, `INTEGER`, `REAL`, and `BLOB`.
 An incompatible type change becomes a `DROP COLUMN` statement and an `ADD COLUMN`
 statement.
+
+`GetTables` reads the names from `sqlite_master`, in the order of `rowid`. That order is
+the order of the creation, so a table that holds a foreign key comes after the table that
+it names. Keep that order. `PRAGMA table_list` gives the kind of each table, and the query
+drops a row of the kind `virtual` or `shadow`. A shadow table belongs to the module of a
+virtual table, and the module builds it again.
 
 `GetTableColumns` reads `PRAGMA table_xinfo`. `PRAGMA table_info` gives no generated
 column, so it hides that column from the whole diff. The `hidden` value names the kind of

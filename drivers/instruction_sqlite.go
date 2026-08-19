@@ -89,6 +89,15 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	return statement + ";"
 }
 
+// The definition comes from sqlite_master, so dbdiff replays the text of the source.
+type SQLiteCreateVirtualTableInstruction struct {
+	Definition string
+}
+
+func (i *SQLiteCreateVirtualTableInstruction) String() string {
+	return i.Definition + ";"
+}
+
 // CREATE [ UNIQUE ] INDEX name ON table_name ( key [, ...] ) [ WHERE condition ]
 // A key holds the quoted name of a column, or the text of an expression.
 type SQLiteCreateIndexInstruction struct {

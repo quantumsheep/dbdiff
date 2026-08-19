@@ -75,6 +75,13 @@ func (d *SQLiteDriver) Diff(ctx context.Context) ([]Instruction, error) {
 
 	instructions = append(instructions, tableInstructions...)
 
+	virtualTableInstructions, err := d.DiffVirtualTables(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	instructions = append(instructions, virtualTableInstructions...)
+
 	viewInstructions, err := d.DiffViews(ctx)
 	if err != nil {
 		return nil, err
@@ -181,8 +188,24 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]Instruction, error) {
 	return instructions, nil
 }
 
+// GetTables returns the ordinary tables of the database. PRAGMA table_list names the kind
+// of each table. A virtual table takes its own statement, and a shadow table belongs to the
+// module of a virtual table, so this method returns neither of the two.
+//
+// The order comes from sqlite_master, which holds the tables in the order of the creation.
+// A table that holds a foreign key comes after the table that it names, so keep that order.
 func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
-	rows, err := db.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+	rows, err := db.QueryContext(ctx, `
+		SELECT master.name
+		FROM sqlite_master AS master
+		WHERE master.type = 'table' AND master.name NOT LIKE 'sqlite_%'
+		AND NOT EXISTS (
+			SELECT 1 FROM pragma_table_list AS list
+			WHERE list.schema = 'main' AND list.name = master.name
+			AND list.type IN ('virtual', 'shadow')
+		)
+		ORDER BY master.rowid;
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -315,6 +338,87 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 
 // GetTableDefinition returns the CREATE TABLE statement of the table. sqlite_master holds
 // no row for an internal table, and the caller then reads an empty definition.
+// GetVirtualTables returns the virtual tables of the database, with the text of each
+// CREATE VIRTUAL TABLE statement.
+func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQLiteVirtualTable, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT master.name, master.sql
+		FROM sqlite_master AS master
+		WHERE master.type = 'table' AND master.name NOT LIKE 'sqlite_%'
+		AND EXISTS (
+			SELECT 1 FROM pragma_table_list AS list
+			WHERE list.schema = 'main' AND list.name = master.name AND list.type = 'virtual'
+		)
+		ORDER BY master.rowid;
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var tables []*SQLiteVirtualTable
+
+	for rows.Next() {
+		table := &SQLiteVirtualTable{}
+
+		err := rows.Scan(&table.Name, &table.SQL)
+		if err != nil {
+			return nil, err
+		}
+
+		tables = append(tables, table)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return tables, nil
+}
+
+// DiffVirtualTables compares the virtual tables of the two databases.
+func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]Instruction, error) {
+	sourceTables, err := d.GetVirtualTables(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	targetTables, err := d.GetVirtualTables(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	var instructions []Instruction
+
+	for _, sourceTable := range sourceTables {
+		targetTable, found := lo.Find(targetTables, func(table *SQLiteVirtualTable) bool {
+			return table.Name == sourceTable.Name
+		})
+		if !found {
+			instructions = append(instructions, sourceTable.CreateInstruction())
+			continue
+		}
+
+		if sourceTable.SQL != targetTable.SQL {
+			instructions = append(instructions,
+				targetTable.DropInstruction(), sourceTable.CreateInstruction())
+		}
+	}
+
+	for _, targetTable := range targetTables {
+		_, found := lo.Find(sourceTables, func(table *SQLiteVirtualTable) bool {
+			return table.Name == targetTable.Name
+		})
+		if !found {
+			instructions = append(instructions, targetTable.DropInstruction())
+		}
+	}
+
+	return instructions, nil
+}
+
 func (d *SQLiteDriver) GetTableDefinition(ctx context.Context, db *sql.DB, tableName string) (string, error) {
 	row := db.QueryRowContext(ctx,
 		"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?;", tableName)

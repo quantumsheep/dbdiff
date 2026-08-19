@@ -340,6 +340,7 @@ the same treatment.
 | Tables          | ✅                                      | ✅         |
 | Identity columns  | ➖                                    | ✅         |
 | Table options     | ✅ (WITHOUT ROWID, STRICT)            | ➖         |
+| Virtual tables    | ✅                                    | ➖         |
 | Generated columns | ✅                                    | ✅         |
 | Indexes         | ✅                                      | ✅         |
 | Constraints     | ✅ (foreign keys, primary keys, unique, checks) | ✅  |
@@ -363,6 +364,11 @@ the same treatment.
 columns.
 
 dbdiff does not support MySQL.
+
+The SQLite driver compares a virtual table, for example an `fts4` table. It replays the
+`CREATE VIRTUAL TABLE` statement, and it names no shadow table of the module. SQLite holds
+no `ALTER` statement for such a table, so a new definition prints a `DROP` statement and a
+`CREATE` statement. The `.sql` file of a source must name a module that the build holds.
 
 The SQLite driver keeps the name of a table constraint. A column constraint holds no name,
 so a named `UNIQUE` constraint of one column stays a table constraint.

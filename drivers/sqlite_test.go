@@ -1723,6 +1723,74 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
+	// A virtual table takes a CREATE VIRTUAL TABLE statement, and its module builds the
+	// shadow tables. The diff replays the statement, and it names no shadow table.
+	t.Run("CreateVirtualTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE VIRTUAL TABLE docs USING fts4(title, body);
+			CREATE TABLE plain (id INTEGER);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "plain",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "id",
+						Type: "INTEGER",
+					},
+				},
+			},
+			&SQLiteCreateVirtualTableInstruction{
+				Definition: "CREATE VIRTUAL TABLE docs USING fts4(title, body)",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropVirtualTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "docs"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// SQLite holds no ALTER statement for a virtual table, so a new definition prints a
+	// DROP statement and a CREATE statement.
+	t.Run("ModifyVirtualTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE VIRTUAL TABLE docs USING fts4(title, body, tags);`)
+		driver.ExecOnTarget(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "docs"},
+			&SQLiteCreateVirtualTableInstruction{
+				Definition: "CREATE VIRTUAL TABLE docs USING fts4(title, body, tags)",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("EqualVirtualTables", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+		driver.ExecOnTarget(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("DropTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
