@@ -263,6 +263,18 @@ func (i *PostgresDropTriggerInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
 }
 
+// { ENABLE | ENABLE REPLICA | ENABLE ALWAYS | DISABLE } TRIGGER name
+type PostgresTriggerEnableAction struct {
+	// Mode holds ENABLE, DISABLE, ENABLE REPLICA, or ENABLE ALWAYS.
+	Mode string
+
+	TriggerName string
+}
+
+func (a *PostgresTriggerEnableAction) TableActionClause() string {
+	return a.Mode + " TRIGGER " + quoteIdentifier(a.TriggerName)
+}
+
 // SET ( storage_parameter [= value] [, ...] )
 type PostgresSetStorageParametersAction struct {
 	Parameters []string

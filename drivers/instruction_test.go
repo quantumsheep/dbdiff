@@ -864,6 +864,24 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `SET LOGGED`, action.TableActionClause())
 	})
 
+	t.Run("PostgresTriggerEnableAction", func(t *testing.T) {
+		action := &PostgresTriggerEnableAction{
+			Mode:        "ENABLE ALWAYS",
+			TriggerName: "set_timestamp",
+		}
+
+		require.Equal(t, `ENABLE ALWAYS TRIGGER "set_timestamp"`, action.TableActionClause())
+	})
+
+	t.Run("PostgresTriggerDisableAction", func(t *testing.T) {
+		action := &PostgresTriggerEnableAction{
+			Mode:        "DISABLE",
+			TriggerName: "set_timestamp",
+		}
+
+		require.Equal(t, `DISABLE TRIGGER "set_timestamp"`, action.TableActionClause())
+	})
+
 	t.Run("PostgresReplicaIdentityAction", func(t *testing.T) {
 		action := &PostgresReplicaIdentityAction{Mode: "FULL"}
 

@@ -362,9 +362,13 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
 		if !found {
 			instructions = append(instructions, sourceTrigger.CreateInstruction())
+			instructions = append(instructions, sourceTrigger.EnableInstructions(t.Name)...)
+
 			continue
 		}
 
+		// A new trigger takes the mode ENABLE, so the mode of the source comes after the
+		// CREATE TRIGGER statement below.
 		if sourceTrigger.Def != targetTrigger.Def {
 			instructions = append(instructions,
 				&PostgresDropTriggerInstruction{
@@ -372,6 +376,16 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 					TableName: t.Name,
 				},
 				sourceTrigger.CreateInstruction())
+			instructions = append(instructions, sourceTrigger.EnableInstructions(t.Name)...)
+
+			continue
+		}
+
+		if sourceTrigger.EnableMode != targetTrigger.EnableMode {
+			instructions = append(instructions, alterTable(&PostgresTriggerEnableAction{
+				Mode:        sourceTrigger.EnableMode,
+				TriggerName: sourceTrigger.Name,
+			}))
 		}
 	}
 
@@ -656,6 +670,7 @@ func (t *PostgresTable) Instructions() []Instruction {
 
 	for _, trigger := range t.Triggers {
 		instructions = append(instructions, trigger.CreateInstruction())
+		instructions = append(instructions, trigger.EnableInstructions(t.Name)...)
 	}
 
 	return instructions

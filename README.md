@@ -246,6 +246,11 @@ that parameter its default value again.
 **Unlogged tables.** The driver keeps the `UNLOGGED` keyword of a table. A change of that
 keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 
+**Trigger modes.** The driver keeps the mode of a trigger: `ENABLE`, `DISABLE`,
+`ENABLE REPLICA`, or `ENABLE ALWAYS`. A `CREATE TRIGGER` statement accepts no mode, so the
+output prints a separate `ALTER TABLE ... TRIGGER` statement after it. PostgreSQL builds
+every trigger with `ENABLE`, so that mode needs no statement.
+
 **Replica identity.** The driver keeps the replica identity of a table. Logical replication
 reads that mode to identify a row of the table. The mode `USING INDEX` names an index, so
 the output prints the `CREATE INDEX` statement of that index first. The output changes the
@@ -384,7 +389,7 @@ the same treatment.
 | Generated columns | ✅                                    | ✅         |
 | Indexes         | ✅                                      | ✅         |
 | Constraints     | ✅ (foreign keys, primary keys, unique, checks) | ✅  |
-| Triggers        | ✅                                      | ✅         |
+| Triggers        | ✅                                      | ✅ (with the mode) |
 | Views           | ✅                                      | ✅         |
 | Materialized views | ➖                                   | ✅         |
 | Rules             | ➖                                    | ✅         |

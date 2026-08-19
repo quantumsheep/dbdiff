@@ -396,7 +396,7 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Views       | `information_schema.views`                               |
 | Constraints | `pg_constraint` with `pg_get_constraintdef(oid)`         |
 | Indexes     | `pg_indexes`, without the indexes of a constraint        |
-| Triggers    | `pg_trigger` with `pg_get_triggerdef(oid)`               |
+| Triggers    | `pg_trigger` with `pg_get_triggerdef(oid)` and `tgenabled` |
 | Sequences   | `pg_sequences`, without the sequence that a column owns  |
 | Enum types  | `pg_type` with `pg_enum`, in the order of `enumsortorder` |
 | Domains     | `pg_type` with `typtype = 'd'`, and the checks of `pg_constraint` |

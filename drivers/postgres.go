@@ -1908,6 +1908,9 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 
 	// The regexp_replace call removes the schema prefix of the table. Without it the
 	// statement builds the trigger on the table of the source schema.
+	//
+	// pg_get_triggerdef writes no mode, so the query reads tgenabled apart. The value O
+	// names the mode of every new trigger.
 	triggerRows, err := db.QueryContext(ctx, `
 			SELECT
 				tgname,
@@ -1915,7 +1918,14 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 					pg_get_triggerdef(oid),
 					' ON ' || quote_ident(current_schema()) || '\.',
 					' ON '
-				)
+				),
+				CASE tgenabled
+					WHEN 'O' THEN 'ENABLE'
+					WHEN 'D' THEN 'DISABLE'
+					WHEN 'R' THEN 'ENABLE REPLICA'
+					WHEN 'A' THEN 'ENABLE ALWAYS'
+					ELSE 'ENABLE'
+				END
 			FROM pg_trigger
 			WHERE tgrelid = $1::regclass AND tgisinternal = false
 		`, quoteIdentifier(tableName))
@@ -1928,7 +1938,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	for triggerRows.Next() {
 		trigger := &PostgresTrigger{}
 
-		err := triggerRows.Scan(&trigger.Name, &trigger.Def)
+		err := triggerRows.Scan(&trigger.Name, &trigger.Def, &trigger.EnableMode)
 		if err != nil {
 			return nil, err
 		}

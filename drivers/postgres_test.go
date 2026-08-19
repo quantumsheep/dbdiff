@@ -2054,6 +2054,130 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	// A CREATE TRIGGER statement accepts no mode, so the mode comes in a second statement.
+	t.Run("CreateADisabledTrigger", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `
+			CREATE OR REPLACE FUNCTION update_timestamp() RETURNS TRIGGER AS $$
+			BEGIN
+				NEW.updated_at = NOW();
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+		`
+		driver.ExecOnSource(setup)
+		driver.ExecOnTarget(setup)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (updated_at TIMESTAMP);
+			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+			ALTER TABLE users DISABLE TRIGGER set_timestamp;
+		`)
+		driver.ExecOnTarget(`CREATE TABLE users (updated_at TIMESTAMP);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp()",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresTriggerEnableAction{
+						Mode:        "DISABLE",
+						TriggerName: "set_timestamp",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// The two sides hold the same definition, so the mode alone gives the statement.
+	t.Run("AlterTriggerEnableMode", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE OR REPLACE FUNCTION update_timestamp() RETURNS TRIGGER AS $$
+			BEGIN
+				NEW.updated_at = NOW();
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+
+			CREATE TABLE users (updated_at TIMESTAMP);
+			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+		`
+		driver.ExecOnSource(schema)
+		driver.ExecOnTarget(schema)
+
+		driver.ExecOnSource(`ALTER TABLE users ENABLE ALWAYS TRIGGER set_timestamp;`)
+		driver.ExecOnTarget(`ALTER TABLE users DISABLE TRIGGER set_timestamp;`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresTriggerEnableAction{
+						Mode:        "ENABLE ALWAYS",
+						TriggerName: "set_timestamp",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A DROP TRIGGER statement and a CREATE TRIGGER statement give the mode ENABLE, so the
+	// mode of the source comes after that pair.
+	t.Run("AlterTriggerDefinitionAndEnableMode", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `
+			CREATE OR REPLACE FUNCTION update_timestamp() RETURNS TRIGGER AS $$
+			BEGIN
+				NEW.updated_at = NOW();
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+
+			CREATE TABLE users (updated_at TIMESTAMP);
+		`
+		driver.ExecOnSource(setup)
+		driver.ExecOnTarget(setup)
+
+		driver.ExecOnSource(`
+			CREATE TRIGGER set_timestamp BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+			ALTER TABLE users ENABLE REPLICA TRIGGER set_timestamp;
+		`)
+		driver.ExecOnTarget(`
+			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropTriggerInstruction{
+				Name:      "set_timestamp",
+				TableName: "users",
+			},
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER set_timestamp BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp()",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresTriggerEnableAction{
+						Mode:        "ENABLE REPLICA",
+						TriggerName: "set_timestamp",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("EqualTriggers", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
