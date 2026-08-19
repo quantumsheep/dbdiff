@@ -841,6 +841,29 @@ func TestInstructions(t *testing.T) {
 );`, instruction.String())
 	})
 
+	t.Run("PostgresCreateUnloggedTable", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "cache",
+			Columns: []*PostgresColumn{
+				{
+					Name: "id",
+					Type: "integer",
+				},
+			},
+			Unlogged: true,
+		}
+
+		require.Equal(t, `CREATE UNLOGGED TABLE "cache" (
+	"id" integer
+);`, instruction.String())
+	})
+
+	t.Run("PostgresSetLoggedAction", func(t *testing.T) {
+		action := &PostgresSetPersistenceAction{Persistence: "LOGGED"}
+
+		require.Equal(t, `SET LOGGED`, action.TableActionClause())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

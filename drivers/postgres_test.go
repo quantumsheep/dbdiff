@@ -1160,6 +1160,45 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreateUnloggedTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE UNLOGGED TABLE cache (id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "cache",
+				Columns: []*PostgresColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+				},
+				Unlogged: true,
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterTablePersistence", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE UNLOGGED TABLE cache (id INT);`)
+		driver.ExecOnTarget(`CREATE TABLE cache (id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "cache",
+				Actions: []AlterTableAction{
+					&PostgresSetPersistenceAction{Persistence: "UNLOGGED"},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

@@ -20,6 +20,9 @@ type PostgresTable struct {
 
 	Comment string
 
+	// Unlogged marks a table that keeps no write ahead log.
+	Unlogged bool
+
 	RowLevelSecurity      bool
 	ForceRowLevelSecurity bool
 	Policies              []*PostgresPolicy
@@ -218,6 +221,16 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				}))
 			}
 		}
+	}
+
+	if t.Unlogged != other.Unlogged {
+		persistence := "LOGGED"
+		if t.Unlogged {
+			persistence = "UNLOGGED"
+		}
+
+		instructions = append(instructions,
+			alterTable(&PostgresSetPersistenceAction{Persistence: persistence}))
 	}
 
 	instructions = append(instructions, diffRowLevelSecurity(t, other)...)
@@ -463,6 +476,7 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 		PartitionKey: t.PartitionKey,
 		Comment:      t.Comment,
 		Inherits:     t.Inherits,
+		Unlogged:     t.Unlogged,
 	}
 }
 

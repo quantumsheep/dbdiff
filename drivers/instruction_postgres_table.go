@@ -177,6 +177,10 @@ type PostgresCreateTableInstruction struct {
 	// Inherits names the parent of a table of INHERITS. PostgreSQL merges a column that
 	// the two tables both declare, so the statement keeps every column.
 	Inherits []string
+
+	// Unlogged marks a table that keeps no write ahead log. Such a table loses its rows
+	// after a crash, and it costs less to write.
+	Unlogged bool
 }
 
 func (i *PostgresCreateTableInstruction) String() string {
@@ -190,8 +194,13 @@ func (i *PostgresCreateTableInstruction) String() string {
 		lines = append(lines, "\t"+constraint.Clause())
 	}
 
-	statement := fmt.Sprintf("CREATE TABLE %s (\n%s\n)",
-		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+	keyword := "CREATE TABLE"
+	if i.Unlogged {
+		keyword = "CREATE UNLOGGED TABLE"
+	}
+
+	statement := fmt.Sprintf("%s %s (\n%s\n)",
+		keyword, quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
 
 	if len(i.Inherits) > 0 {
 		statement += " INHERITS (" + strings.Join(quoteIdentifiers(i.Inherits), ", ") + ")"
@@ -245,6 +254,15 @@ type PostgresDropTriggerInstruction struct {
 func (i *PostgresDropTriggerInstruction) String() string {
 	return fmt.Sprintf("DROP TRIGGER %s ON %s;",
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+}
+
+// SET { LOGGED | UNLOGGED }
+type PostgresSetPersistenceAction struct {
+	Persistence string
+}
+
+func (a *PostgresSetPersistenceAction) TableActionClause() string {
+	return "SET " + a.Persistence
 }
 
 // { ENABLE | DISABLE | FORCE | NO FORCE } ROW LEVEL SECURITY

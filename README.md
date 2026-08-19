@@ -238,6 +238,9 @@ the columns, the constraints, and the indexes of its parent, so the output names
 them. A `DROP TABLE` statement of a parent removes every partition of it, so the output
 prints no second statement for those partitions.
 
+**Unlogged tables.** The driver keeps the `UNLOGGED` keyword of a table. A change of that
+keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
+
 **Table inheritance.** A table of `INHERITS` is no partition. The driver prints a
 `CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
 PostgreSQL merges a column that the parent and the child both declare.

@@ -1315,7 +1315,8 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 			), ''),
 			coalesce(obj_description(c.oid, 'pg_class'), ''),
 			c.relrowsecurity,
-			c.relforcerowsecurity
+			c.relforcerowsecurity,
+			c.relpersistence = 'u'
 		FROM pg_class c
 		WHERE c.relnamespace = current_schema()::regnamespace
 		AND c.relkind IN ('r', 'p')
@@ -1335,10 +1336,10 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 
 	for tableRows.Next() {
 		var tableName, partitionKey, partitionParent, partitionBound, inherits, comment string
-		var rowLevelSecurity, forceRowLevelSecurity bool
+		var rowLevelSecurity, forceRowLevelSecurity, unlogged bool
 
 		err := tableRows.Scan(&tableName, &partitionKey, &partitionParent, &partitionBound,
-			&inherits, &comment, &rowLevelSecurity, &forceRowLevelSecurity)
+			&inherits, &comment, &rowLevelSecurity, &forceRowLevelSecurity, &unlogged)
 		if err != nil {
 			return nil, err
 		}
@@ -1356,6 +1357,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		if inherits != "" {
 			table.Inherits = strings.Split(inherits, ",")
 		}
+		table.Unlogged = unlogged
 		table.RowLevelSecurity = rowLevelSecurity
 		table.ForceRowLevelSecurity = forceRowLevelSecurity
 
