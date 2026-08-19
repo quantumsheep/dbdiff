@@ -160,6 +160,10 @@ type PostgresCreateTableInstruction struct {
 	// Comment holds the comment of the table. A separate COMMENT ON statement writes it,
 	// because CREATE TABLE accepts no comment.
 	Comment string
+
+	// Inherits names the parent of a table of INHERITS. PostgreSQL merges a column that
+	// the two tables both declare, so the statement keeps every column.
+	Inherits []string
 }
 
 func (i *PostgresCreateTableInstruction) String() string {
@@ -175,6 +179,10 @@ func (i *PostgresCreateTableInstruction) String() string {
 
 	statement := fmt.Sprintf("CREATE TABLE %s (\n%s\n)",
 		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+
+	if len(i.Inherits) > 0 {
+		statement += " INHERITS (" + strings.Join(quoteIdentifiers(i.Inherits), ", ") + ")"
+	}
 
 	if i.PartitionKey != "" {
 		statement += " PARTITION BY " + i.PartitionKey

@@ -791,6 +791,23 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `DROP POLICY "docs_read" ON "docs";`, instruction.String())
 	})
 
+	t.Run("PostgresCreateTableThatInherits", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "child",
+			Columns: []*PostgresColumn{
+				{
+					Name: "a",
+					Type: "integer",
+				},
+			},
+			Inherits: []string{"parent"},
+		}
+
+		require.Equal(t, `CREATE TABLE "child" (
+	"a" integer
+) INHERITS ("parent");`, instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

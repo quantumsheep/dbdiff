@@ -1066,6 +1066,45 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	// A table of INHERITS is no partition. pg_inherits names the parent of both kinds, so
+	// relispartition gives the difference.
+	t.Run("CreateTableThatInheritsAnotherTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE zparent (a INT);
+			CREATE TABLE achild (b INT) INHERITS (zparent);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "zparent",
+				Columns: []*PostgresColumn{
+					{
+						Name: "a",
+						Type: "integer",
+					},
+				},
+			},
+			&PostgresCreateTableInstruction{
+				Name: "achild",
+				Columns: []*PostgresColumn{
+					{
+						Name: "a",
+						Type: "integer",
+					},
+					{
+						Name: "b",
+						Type: "integer",
+					},
+				},
+				Inherits: []string{"zparent"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

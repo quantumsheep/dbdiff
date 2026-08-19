@@ -14,6 +14,10 @@ type PostgresTable struct {
 	PartitionParent string
 	PartitionBound  string
 
+	// Inherits names the parent of a table of INHERITS. That table is no partition, so it
+	// keeps its own columns and its own statement.
+	Inherits []string
+
 	Comment string
 
 	RowLevelSecurity      bool
@@ -316,9 +320,9 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 }
 
 // sortTablesByPartitionParent orders the tables so that a partition comes after its
-// parent. The name of a partition can sort before the name of its parent, and a
-// CREATE TABLE ... PARTITION OF statement needs the parent. A partition of a partition
-// keeps the same rule, because the walk visits the parent first.
+// parent, and a table of INHERITS comes after every parent of it. The name of a child can
+// sort before the name of its parent, and each of the two statements needs the parent. A
+// partition of a partition keeps the same rule, because the walk visits the parent first.
 func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
 	tableByName := make(map[string]*PostgresTable, len(tables))
 
@@ -341,6 +345,13 @@ func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
 		parent, isPartition := tableByName[table.PartitionParent]
 		if isPartition {
 			visit(parent)
+		}
+
+		for _, parentName := range table.Inherits {
+			parent, found := tableByName[parentName]
+			if found {
+				visit(parent)
+			}
 		}
 
 		sorted = append(sorted, table)
@@ -440,6 +451,7 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 		Constraints:  t.Constraints,
 		PartitionKey: t.PartitionKey,
 		Comment:      t.Comment,
+		Inherits:     t.Inherits,
 	}
 }
 

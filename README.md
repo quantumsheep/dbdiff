@@ -238,6 +238,10 @@ the columns, the constraints, and the indexes of its parent, so the output names
 them. A `DROP TABLE` statement of a parent removes every partition of it, so the output
 prints no second statement for those partitions.
 
+**Table inheritance.** A table of `INHERITS` is no partition. The driver prints a
+`CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
+PostgreSQL merges a column that the parent and the child both declare.
+
 **Materialized views.** The driver compares the query and the indexes of a materialized
 view. A changed query prints a `DROP MATERIALIZED VIEW` statement and a
 `CREATE MATERIALIZED VIEW` statement, because PostgreSQL holds no action that replaces the

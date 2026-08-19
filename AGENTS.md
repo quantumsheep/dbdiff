@@ -412,6 +412,11 @@ drops a row that `pg_inherits` names, because PostgreSQL builds that index from 
 of the parent. It also removes the keyword `ONLY`, which PostgreSQL writes for the index of
 a partitioned table.
 
+`pg_inherits` names the parent of a partition and the parent of a table of `INHERITS`.
+`GetTables` tests `relispartition` to separate the two. Without that test a table of
+`INHERITS` takes the statement of a partition, and that statement holds no bound, so
+PostgreSQL rejects it.
+
 `GetTables` sorts the tables with `sortTablesByPartitionParent`. The name of a partition
 can sort before the name of its parent, and a `CREATE TABLE ... PARTITION OF` statement
 needs the parent. Keep that sort.

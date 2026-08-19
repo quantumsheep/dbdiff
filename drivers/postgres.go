@@ -1291,18 +1291,28 @@ func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewNam
 // GetTables returns each table of the schema. relkind names a partitioned table with the
 // value p, and relispartition names a partition. The query reads the key of a partitioned
 // table and the bound of a partition, because information_schema reports neither.
+//
+// pg_inherits names the parent of a partition and the parent of a table of INHERITS, so
+// relispartition separates the two. Without that test a table of INHERITS takes the
+// statement of a partition, and that statement holds no bound.
 func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*PostgresTable, error) {
 	tableRows, err := db.QueryContext(ctx, `
 		SELECT
 			c.relname,
 			coalesce(pg_get_partkeydef(c.oid), ''),
-			coalesce((
+			CASE WHEN c.relispartition THEN coalesce((
 				SELECT parent.relname
 				FROM pg_inherits i
 				JOIN pg_class parent ON parent.oid = i.inhparent
 				WHERE i.inhrelid = c.oid
-			), ''),
+			), '') ELSE '' END,
 			coalesce(pg_get_expr(c.relpartbound, c.oid), ''),
+			coalesce((
+				SELECT array_to_string(array_agg(parent.relname ORDER BY i.inhseqno), ',')
+				FROM pg_inherits i
+				JOIN pg_class parent ON parent.oid = i.inhparent
+				WHERE i.inhrelid = c.oid AND NOT c.relispartition
+			), ''),
 			coalesce(obj_description(c.oid, 'pg_class'), ''),
 			c.relrowsecurity,
 			c.relforcerowsecurity
@@ -1324,11 +1334,11 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 	var tables []*PostgresTable
 
 	for tableRows.Next() {
-		var tableName, partitionKey, partitionParent, partitionBound, comment string
+		var tableName, partitionKey, partitionParent, partitionBound, inherits, comment string
 		var rowLevelSecurity, forceRowLevelSecurity bool
 
 		err := tableRows.Scan(&tableName, &partitionKey, &partitionParent, &partitionBound,
-			&comment, &rowLevelSecurity, &forceRowLevelSecurity)
+			&inherits, &comment, &rowLevelSecurity, &forceRowLevelSecurity)
 		if err != nil {
 			return nil, err
 		}
@@ -1342,6 +1352,10 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		table.PartitionParent = partitionParent
 		table.PartitionBound = partitionBound
 		table.Comment = comment
+
+		if inherits != "" {
+			table.Inherits = strings.Split(inherits, ",")
+		}
 		table.RowLevelSecurity = rowLevelSecurity
 		table.ForceRowLevelSecurity = forceRowLevelSecurity
 
