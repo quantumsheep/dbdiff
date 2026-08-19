@@ -1241,6 +1241,74 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	// PRAGMA index_info gives the name of a key column, and it gives no direction and no
+	// collation. Those two parts come from the CREATE INDEX statement.
+	t.Run("CreateIndexWithDirectionAndCollation", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE items (a INTEGER, b TEXT);
+			CREATE INDEX items_sorted ON items (a DESC, b COLLATE NOCASE ASC);
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE items (a INTEGER, b TEXT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateIndexInstruction{
+				Name:      "items_sorted",
+				TableName: "items",
+				Keys:      []string{`"a" DESC`, `"b" COLLATE NOCASE`},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A direction that changes makes a different index, so the diff prints a DROP statement
+	// and a CREATE statement.
+	t.Run("ModifyIndexDirection", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE items (a INTEGER);
+			CREATE INDEX items_sorted ON items (a DESC);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE items (a INTEGER);
+			CREATE INDEX items_sorted ON items (a);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropIndexInstruction{Name: "items_sorted"},
+			&SQLiteCreateIndexInstruction{
+				Name:      "items_sorted",
+				TableName: "items",
+				Keys:      []string{`"a" DESC`},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// The keyword ASC is the default, so an index that names it equals an index that does
+	// not. Without this rule the diff prints a statement for two equal indexes.
+	t.Run("IndexWithExplicitAscMatchesTheDefault", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE items (a INTEGER);
+			CREATE INDEX items_sorted ON items (a ASC);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE items (a INTEGER);
+			CREATE INDEX items_sorted ON items (a);
+		`)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("DropTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

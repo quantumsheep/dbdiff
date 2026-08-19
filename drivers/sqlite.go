@@ -632,7 +632,9 @@ func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tabl
 }
 
 // GetIndexKeys returns the SQL text of each key part of an index. PRAGMA index_info gives
-// no name for a key that an expression builds, so that key comes from definitionKeys.
+// no name for a key that an expression builds, so that key comes from definitionKeys. The
+// PRAGMA also gives no direction and no collation, so indexKeyModifiers reads those two
+// parts from the same text.
 func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName string, definitionKeys []string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
 	if err != nil {
@@ -654,7 +656,14 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 		}
 
 		if name.Valid {
-			keys = append(keys, quoteIdentifier(name.String))
+			modifiers := ""
+
+			if keyPosition >= 0 && keyPosition < len(definitionKeys) {
+				modifiers = indexKeyModifiers(definitionKeys[keyPosition])
+			}
+
+			keys = append(keys, quoteIdentifier(name.String)+modifiers)
+
 			continue
 		}
 

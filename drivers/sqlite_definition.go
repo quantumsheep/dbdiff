@@ -4,6 +4,35 @@ import (
 	"strings"
 )
 
+// indexKeyModifiers returns the collation and the direction of one key of an index, with a
+// leading space. PRAGMA index_info reports neither, so the text of the CREATE INDEX
+// statement gives them.
+//
+// The keyword ASC is the default of SQLite. This function drops it, so an index that names
+// it equals an index that does not.
+func indexKeyModifiers(definitionKey string) string {
+	tokens := splitTopLevelTokens(definitionKey)
+	if len(tokens) < 2 {
+		return ""
+	}
+
+	var modifiers []string
+
+	for _, token := range tokens[1:] {
+		if strings.EqualFold(token, "ASC") {
+			continue
+		}
+
+		modifiers = append(modifiers, token)
+	}
+
+	if len(modifiers) == 0 {
+		return ""
+	}
+
+	return " " + strings.Join(modifiers, " ")
+}
+
 // parseTableOptions reads the options that follow the column list of a CREATE TABLE
 // statement. SQLite accepts WITHOUT ROWID and STRICT, in any order and in any case.
 func parseTableOptions(definition string) (withoutRowID bool, strict bool) {

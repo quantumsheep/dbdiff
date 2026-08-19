@@ -364,6 +364,10 @@ columns.
 
 dbdiff does not support MySQL.
 
+The SQLite driver keeps the direction and the collation of each key of an index. The
+keyword `ASC` is the default of SQLite, so an index that names it equals an index that does
+not.
+
 The SQLite driver compares a partial index and an index that an expression builds. It
 prints a primary key of one column and a `UNIQUE` constraint of one column in the
 definition of that column. It prints a primary key of two or more columns and a `UNIQUE`
