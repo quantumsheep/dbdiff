@@ -339,8 +339,8 @@ virtual table, and the module builds it again.
 `GetTableColumns` reads `PRAGMA table_xinfo`. `PRAGMA table_info` gives no generated
 column, so it hides that column from the whole diff. The `hidden` value names the kind of
 the column: 1 is a hidden column of a virtual table, 2 is a VIRTUAL generated column, and 3
-is a STORED one. The PRAGMA gives no expression, so `parseGeneratedColumns` in
-`sqlite_generated_column.go` reads the expression from the CREATE TABLE statement of
+is a STORED one. The PRAGMA gives no expression, so `parseTableDefinition` in
+`sqlite_definition.go` reads the expression from the CREATE TABLE statement of
 `sqlite_master`.
 
 `parseTableDefinition` in `sqlite_definition.go` reads every part of a `CREATE TABLE`
@@ -411,11 +411,13 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Comments    | `obj_description` and `col_description`                  |
 | Collations  | `pg_collation`, when `attcollation` differs from `typcollation` |
 
-`Diff` prints twelve sections in this order: extensions, enum types, domains, composite
+`Diff` prints thirteen sections in this order: extensions, enum types, domains, composite
 types, sequences, functions, aggregates, operators, tables, extended statistics, views,
-materialized views. A table can use each of the first five, an aggregate and an operator
-use a function, an extended statistics object names a table, and a materialized view reads
-a table or a view. Keep that order when you add a section.
+materialized views, privileges. A table can use each of the first five, an aggregate and an
+operator use a function, an extended statistics object names a table, and a materialized
+view reads a table or a view. The privileges section comes last, because a GRANT statement
+names an object that the other sections build. Without the `--privileges` flag that section
+stays empty. Keep that order when you add a section.
 
 `GetTables` reads `pg_class` with `relkind IN ('r', 'p')`, and not
 `information_schema.tables`. The value `p` names a partitioned table, and `relispartition`

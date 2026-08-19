@@ -204,16 +204,18 @@ Without that flag, the search path of the connection string selects the schema. 
 default schema is `public`. If a database holds no schema with the given name, dbdiff
 gives an error.
 
-**Section order.** The driver prints ten sections in this order:
+**Section order.** The driver prints thirteen sections in this order:
 
 ```
 extensions → enum types → domains → composite types → sequences
   → functions → aggregates → operators → tables → extended statistics
-  → views → materialized views
+  → views → materialized views → privileges
 ```
 
 A table can use each of the first five objects. A materialized view reads a table or a
-view. That order gives each statement the objects that it needs.
+view. That order gives each statement the objects that it needs. The privileges section
+comes last, because a `GRANT` statement names an object that the other sections build.
+Without the `--privileges` flag that section stays empty.
 
 **Owned objects.** An object that an extension owns stays out of the output. The
 `CREATE EXTENSION` statement builds that object again. A sequence that a `SERIAL` column or

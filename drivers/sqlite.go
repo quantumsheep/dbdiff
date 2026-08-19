@@ -445,7 +445,7 @@ const (
 )
 
 // GetTableColumns reads PRAGMA table_xinfo, because PRAGMA table_info gives no generated
-// column. The PRAGMA gives no expression for such a column, so parseGeneratedColumns reads
+// column. The PRAGMA gives no expression for such a column, so parseTableDefinition reads
 // the expression from the CREATE TABLE statement of the table.
 func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {
 	definition, err := d.GetTableDefinition(ctx, db, tableName)

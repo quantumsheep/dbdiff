@@ -335,7 +335,7 @@ func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
 }
 
 // splitColumnDefinitions returns the parts of the list that follows the table name. A table
-// constraint gives a part too, and parseGeneratedColumn drops it.
+// constraint gives a part too, and parseTableDefinition drops it.
 func splitColumnDefinitions(definition string) []string {
 	start := indexOfKeyList(definition)
 	if start < 0 {
