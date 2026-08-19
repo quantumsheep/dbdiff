@@ -19,6 +19,7 @@ type PostgresDriverConfig struct {
 	SourceSchema           string
 	TargetSchema           string
 	CompareData            bool
+	ComparePrivileges      bool
 }
 
 type PostgresDriver struct {
@@ -27,6 +28,7 @@ type PostgresDriver struct {
 	SourceSchema             string
 	TargetSchema             string
 	CompareData              bool
+	ComparePrivileges        bool
 
 	ScratchVersion embeddedpostgres.PostgresVersion
 
@@ -35,10 +37,11 @@ type PostgresDriver struct {
 
 func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*PostgresDriver, error) {
 	driver := &PostgresDriver{
-		SourceSchema:   config.SourceSchema,
-		TargetSchema:   config.TargetSchema,
-		CompareData:    config.CompareData,
-		ScratchVersion: postgresScratchVersionOfConfig(ctx, config),
+		SourceSchema:      config.SourceSchema,
+		TargetSchema:      config.TargetSchema,
+		CompareData:       config.CompareData,
+		ComparePrivileges: config.ComparePrivileges,
+		ScratchVersion:    postgresScratchVersionOfConfig(ctx, config),
 	}
 
 	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceConnectionString, config.SourceSchema, "source")
@@ -135,6 +138,7 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 		d.DiffStatistics,
 		d.DiffViews,
 		d.DiffMaterializedViews,
+		d.DiffPrivileges,
 	}
 
 	sectionDiffs := make([]*SectionDiff, 0, len(sections))
@@ -1309,6 +1313,183 @@ func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*Post
 	}
 
 	return statistics, nil
+}
+
+// DiffPrivileges compares the owner and the privileges of each object of the schema. The
+// section stays empty while ComparePrivileges is false.
+//
+// A role belongs to the server and not to the schema, so this comparison is off by default.
+// A target server holds other role names in most cases, and a GRANT statement of an absent
+// role fails.
+func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, error) {
+	if !d.ComparePrivileges {
+		return &SectionDiff{}, nil
+	}
+
+	var additions []Instruction
+
+	sourceOwners, err := d.GetOwners(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	targetOwners, err := d.GetOwners(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sourceOwner := range sourceOwners {
+		targetOwner, found := lo.Find(targetOwners, func(owner *PostgresOwner) bool {
+			return owner.ObjectName == sourceOwner.ObjectName
+		})
+		if found && targetOwner.Owner == sourceOwner.Owner {
+			continue
+		}
+
+		additions = append(additions, sourceOwner.SetInstruction())
+	}
+
+	sourcePrivileges, err := d.GetPrivileges(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	targetPrivileges, err := d.GetPrivileges(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sourcePrivilege := range sourcePrivileges {
+		targetPrivilege, found := lo.Find(targetPrivileges, func(privilege *PostgresPrivilege) bool {
+			return privilege.Key() == sourcePrivilege.Key()
+		})
+		if !found {
+			additions = append(additions,
+				sourcePrivilege.GrantInstruction(sourcePrivilege.Privileges))
+
+			continue
+		}
+
+		granted := missingPrivileges(sourcePrivilege.Privileges, targetPrivilege.Privileges)
+		if len(granted) > 0 {
+			additions = append(additions, sourcePrivilege.GrantInstruction(granted))
+		}
+
+		revoked := missingPrivileges(targetPrivilege.Privileges, sourcePrivilege.Privileges)
+		if len(revoked) > 0 {
+			additions = append(additions, sourcePrivilege.RevokeInstruction(revoked))
+		}
+	}
+
+	for _, targetPrivilege := range targetPrivileges {
+		_, found := lo.Find(sourcePrivileges, func(privilege *PostgresPrivilege) bool {
+			return privilege.Key() == targetPrivilege.Key()
+		})
+		if !found {
+			additions = append(additions,
+				targetPrivilege.RevokeInstruction(targetPrivilege.Privileges))
+		}
+	}
+
+	return &SectionDiff{Additions: additions}, nil
+}
+
+// GetOwners returns the owner of each object of the schema.
+func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT c.relname, c.relkind, pg_get_userbyid(c.relowner)
+		FROM pg_class c
+		WHERE c.relnamespace = current_schema()::regnamespace
+		AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
+		AND NOT c.relispartition
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = c.oid AND d.deptype IN ('e', 'a', 'i')
+		)
+		ORDER BY c.relname
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var owners []*PostgresOwner
+
+	for rows.Next() {
+		var name, relkind, owner string
+
+		err := rows.Scan(&name, &relkind, &owner)
+		if err != nil {
+			return nil, err
+		}
+
+		owners = append(owners, &PostgresOwner{
+			ObjectType: ownerObjectType(relkind),
+			ObjectName: name,
+			Owner:      owner,
+		})
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return owners, nil
+}
+
+// GetPrivileges returns the privileges that each role holds on each object of the schema.
+// It reads no privilege of the owner, because PostgreSQL gives those with the object.
+func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			c.relname,
+			c.relkind,
+			pg_get_userbyid(acl.grantee),
+			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+		FROM pg_class c, aclexplode(c.relacl) acl
+		WHERE c.relnamespace = current_schema()::regnamespace
+		AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
+		AND acl.grantee <> c.relowner
+		AND acl.grantee <> 0
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = c.oid AND d.deptype IN ('e', 'a', 'i')
+		)
+		GROUP BY c.relname, c.relkind, acl.grantee
+		ORDER BY c.relname, pg_get_userbyid(acl.grantee)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var privileges []*PostgresPrivilege
+
+	for rows.Next() {
+		var name, relkind, grantee, granted string
+
+		err := rows.Scan(&name, &relkind, &grantee, &granted)
+		if err != nil {
+			return nil, err
+		}
+
+		privileges = append(privileges, &PostgresPrivilege{
+			ObjectType: privilegeObjectType(relkind),
+			ObjectName: name,
+			Grantee:    grantee,
+			Privileges: sortedPrivileges(strings.Split(granted, ",")),
+		})
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return privileges, nil
 }
 
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {

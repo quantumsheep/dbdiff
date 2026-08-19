@@ -149,3 +149,43 @@ type PostgresDropStatisticsInstruction struct {
 func (i *PostgresDropStatisticsInstruction) String() string {
 	return "DROP STATISTICS " + quoteIdentifier(i.Name) + ";"
 }
+
+// GRANT privilege [, ...] ON object_type name TO role_name
+type PostgresGrantInstruction struct {
+	Privileges []string
+	ObjectType string
+	ObjectName string
+	Grantee    string
+}
+
+func (i *PostgresGrantInstruction) String() string {
+	return fmt.Sprintf("GRANT %s ON %s %s TO %s;",
+		joinPrivileges(i.Privileges), i.ObjectType,
+		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
+}
+
+// REVOKE privilege [, ...] ON object_type name FROM role_name
+type PostgresRevokeInstruction struct {
+	Privileges []string
+	ObjectType string
+	ObjectName string
+	Grantee    string
+}
+
+func (i *PostgresRevokeInstruction) String() string {
+	return fmt.Sprintf("REVOKE %s ON %s %s FROM %s;",
+		joinPrivileges(i.Privileges), i.ObjectType,
+		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
+}
+
+// ALTER object_type name OWNER TO role_name
+type PostgresSetOwnerInstruction struct {
+	ObjectType string
+	ObjectName string
+	Owner      string
+}
+
+func (i *PostgresSetOwnerInstruction) String() string {
+	return fmt.Sprintf("ALTER %s %s OWNER TO %s;",
+		i.ObjectType, quoteIdentifier(i.ObjectName), quoteIdentifier(i.Owner))
+}

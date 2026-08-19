@@ -58,6 +58,10 @@ func main() {
 				Usage: "Name of the schema to compare. The postgres driver accepts this flag. The default is the schema of the search path",
 			},
 			&cli.BoolFlag{
+				Name:  "privileges",
+				Usage: "Compare the owner and the privileges of each object. A role belongs to the server, so this comparison is off by default",
+			},
+			&cli.BoolFlag{
 				Name:  "data",
 				Usage: "Compare the rows of each table that the source and the target both hold. The comparison needs a primary key",
 			},
@@ -107,10 +111,16 @@ func action(ctx context.Context, command *cli.Command) error {
 
 	compareData := command.Bool("data")
 
+	comparePrivileges := command.Bool("privileges")
+
 	switch driverName {
 	case drivers.SQLiteDriverName:
 		if schemaFlag != "" {
 			return fmt.Errorf("the --schema flag applies to the postgres driver only")
+		}
+
+		if comparePrivileges {
+			return fmt.Errorf("the --privileges flag applies to the postgres driver only")
 		}
 
 		driver, err = drivers.NewSQLiteDriver(ctx, &drivers.SQLLiteDriverConfig{
@@ -128,6 +138,7 @@ func action(ctx context.Context, command *cli.Command) error {
 			SourceSchema:           schemaFlag,
 			TargetSchema:           schemaFlag,
 			CompareData:            compareData,
+			ComparePrivileges:      comparePrivileges,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create postgres driver: %w", err)

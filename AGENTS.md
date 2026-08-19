@@ -103,6 +103,7 @@ drivers/
 ├── postgres_policy.go         PostgresPolicy, a row level security policy
 ├── postgres_rule.go           PostgresRule, a rule of a table
 ├── postgres_statistics.go     PostgresStatistics, an extended statistics object
+├── postgres_privilege.go      PostgresPrivilege and PostgresOwner
 ├── postgres_sequence.go       PostgresSequence
 ├── postgres_type.go           PostgresType, an enum type
 ├── postgres_domain.go         PostgresDomain
@@ -869,8 +870,8 @@ item when your task touches it.
 
 - The data comparison prints no row of a table that the source only holds. The schema
   section creates that table, and the table stays empty.
-- dbdiff compares no privilege and no owner. It prints no `GRANT` statement and no
-  `REVOKE` statement.
+- The `--privileges` flag compares the owner and the privileges of an object of `pg_class`.
+  It reads no privilege of a schema, of a function, or of a type, and no default privilege.
 - The PostgreSQL driver compares one schema for each run. The `--schema` flag selects that
   schema. This item is a boundary of the tool, not a defect. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no

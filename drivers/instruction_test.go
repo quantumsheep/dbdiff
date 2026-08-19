@@ -941,6 +941,44 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `DROP STATISTICS "st_ab";`, instruction.String())
 	})
 
+	t.Run("PostgresGrant", func(t *testing.T) {
+		instruction := &PostgresGrantInstruction{
+			Privileges: []string{"SELECT", "INSERT"},
+			ObjectType: "TABLE",
+			ObjectName: "users",
+			Grantee:    "app_writer",
+		}
+
+		require.Equal(t,
+			`GRANT SELECT, INSERT ON TABLE "users" TO "app_writer";`,
+			instruction.String())
+	})
+
+	t.Run("PostgresRevoke", func(t *testing.T) {
+		instruction := &PostgresRevokeInstruction{
+			Privileges: []string{"UPDATE"},
+			ObjectType: "TABLE",
+			ObjectName: "users",
+			Grantee:    "app_writer",
+		}
+
+		require.Equal(t,
+			`REVOKE UPDATE ON TABLE "users" FROM "app_writer";`,
+			instruction.String())
+	})
+
+	t.Run("PostgresSetOwner", func(t *testing.T) {
+		instruction := &PostgresSetOwnerInstruction{
+			ObjectType: "TABLE",
+			ObjectName: "users",
+			Owner:      "app_owner",
+		}
+
+		require.Equal(t,
+			`ALTER TABLE "users" OWNER TO "app_owner";`,
+			instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

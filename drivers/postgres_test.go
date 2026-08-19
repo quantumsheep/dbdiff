@@ -37,6 +37,19 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	sourceSchema := fmt.Sprintf("source_%d", id)
 	targetSchema := fmt.Sprintf("target_%d", id)
 
+	// A role belongs to the server, so the tests share one role. CREATE ROLE fails when the
+	// role exists already, and the DO block keeps the harness quiet in that case.
+	_, err = conn.ExecContext(tb.Context(), `
+		DO $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dbdiff_reader') THEN
+				CREATE ROLE dbdiff_reader;
+			END IF;
+		END
+		$$;
+	`)
+	require.NoError(tb, err)
+
 	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", sourceSchema))
 	require.NoError(tb, err)
 	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", targetSchema))
@@ -131,6 +144,17 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 		sourceSchema:   "public",
 		targetSchema:   "public",
 	}
+}
+
+// NewTestPostgresDriverWithPrivileges builds a driver that compares the privileges. It
+// creates the role that the tests name, because a role belongs to the server.
+func NewTestPostgresDriverWithPrivileges(tb testing.TB) *TestingPostgresDriver {
+	tb.Helper()
+
+	driver := NewTestPostgresDriver(tb)
+	driver.ComparePrivileges = true
+
+	return driver
 }
 
 func (d *TestingPostgresDriver) ExecOnSource(sqlStatements string) {
@@ -1489,6 +1513,69 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresDropStatisticsInstruction{Name: "st_ab"},
 			&PostgresCreateStatisticsInstruction{
 				Definition: "CREATE STATISTICS st_ab ON a, c FROM t",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A role name belongs to the server and not to the schema, so the comparison of the
+	// privileges needs the ComparePrivileges field. The default value is false.
+	t.Run("ComparePrivilegesIsOffByDefault", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			GRANT SELECT ON users TO dbdiff_reader;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ComparePrivileges", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			GRANT SELECT, INSERT ON users TO dbdiff_reader;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresGrantInstruction{
+				Privileges: []string{"INSERT", "SELECT"},
+				ObjectType: "TABLE",
+				ObjectName: "users",
+				Grantee:    "dbdiff_reader",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A privilege that the source does not hold takes a REVOKE statement.
+	t.Run("RevokePrivileges", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			GRANT SELECT ON users TO dbdiff_reader;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			GRANT SELECT, INSERT ON users TO dbdiff_reader;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresRevokeInstruction{
+				Privileges: []string{"INSERT"},
+				ObjectType: "TABLE",
+				ObjectName: "users",
+				Grantee:    "dbdiff_reader",
 			},
 		})
 

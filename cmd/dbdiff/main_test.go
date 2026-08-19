@@ -103,6 +103,13 @@ func TestDbdiffCommand(t *testing.T) {
 		require.NotContains(t, result.Stdout, "version \n")
 	})
 
+	t.Run("PrivilegesFlagWithSQLiteDriver", func(t *testing.T) {
+		result := runDbdiff(t, binaryPath, "--privileges", "a.sqlite", "b.sqlite")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "the --privileges flag applies to the postgres driver only")
+	})
+
 	t.Run("MissingSourceArgument", func(t *testing.T) {
 		result := runDbdiff(t, binaryPath)
 

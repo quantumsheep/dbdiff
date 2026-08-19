@@ -106,6 +106,7 @@ dbdiff source.sqlite target.sqlite | sqlite3 target.sqlite
 | `--driver` | `sqlite3` or `postgres` | Select the database engine. The default value comes from the source and the target. See [Driver detection](#driver-detection). |
 | `--schema` | A schema name           | Name the schema that the postgres driver reads. The default value is the schema of the search path.                            |
 | `--data`   | none                    | Add the comparison of the rows. The default value is off.                                                                      |
+| `--privileges` | none               | Add the comparison of the owner and the privileges. The postgres driver accepts this flag. The default value is off.            |
 | `--version` | none                   | Print the version of the build and exit.                                                                                       |
 
 ## Driver detection
@@ -249,6 +250,17 @@ keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 `CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
 PostgreSQL merges a column that the parent and the child both declare.
 
+**Privileges.** The `--privileges` flag adds the comparison of the owner and of the
+privileges. A role belongs to the server and not to the schema, so that comparison stays off
+by default. A target server holds other role names in most cases, and a `GRANT` statement of
+a role that is absent fails.
+
+```bash
+dbdiff --driver postgres --privileges \
+  postgres://user:password@localhost:5432/source \
+  postgres://user:password@localhost:5432/target
+```
+
 **Extended statistics.** The driver compares each `CREATE STATISTICS` object. Such an
 object names a table, so the output prints it after the tables. PostgreSQL holds no action
 that changes the columns of the object, so a new definition prints a `DROP` statement and a
@@ -382,6 +394,7 @@ the same treatment.
 | Extensions      | ➖                                      | ✅         |
 | Comments        | ➖                                      | ✅         |
 | Row level security | ➖                                   | ✅         |
+| Privileges      | ➖                                      | ✅ (`--privileges`) |
 | Data            | ✅                                      | ✅         |
 
 ✅ dbdiff compares this object. ➖ the engine holds no such object. A table covers its
@@ -417,8 +430,9 @@ constraint of two or more columns as a table constraint.
 
 - The data comparison covers a table that the source and the target both hold. A table
   that the source only holds stays empty. The schema section creates that table.
-- dbdiff compares no privilege. It prints no `GRANT` statement and no `REVOKE` statement,
-  and it compares no owner. Manage those with the tools of your database.
+- The `--privileges` flag compares the owner and the privileges of a table, of a view, of a
+  materialized view, and of a sequence. It compares no privilege of a schema, of a function,
+  or of a type, and it reads no default privilege of `ALTER DEFAULT PRIVILEGES`.
 - The PostgreSQL driver compares one schema for each run. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
   object that moved from one schema to another schema.
