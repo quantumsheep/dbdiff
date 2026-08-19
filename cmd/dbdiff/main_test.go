@@ -95,6 +95,14 @@ func writeSQLiteDatabase(tb testing.TB, path string, sqlStatements string) {
 func TestDbdiffCommand(t *testing.T) {
 	binaryPath := buildDbdiff(t)
 
+	t.Run("VersionFlag", func(t *testing.T) {
+		result := runDbdiff(t, binaryPath, "--version")
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Contains(t, result.Stdout, "dbdiff version ")
+		require.NotContains(t, result.Stdout, "version \n")
+	})
+
 	t.Run("MissingSourceArgument", func(t *testing.T) {
 		result := runDbdiff(t, binaryPath)
 

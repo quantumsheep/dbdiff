@@ -4,15 +4,37 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"slices"
 
 	"github.com/quantumsheep/dbdiff/drivers"
 	"github.com/urfave/cli/v3"
 )
 
+// The release workflow writes the tag into this variable with the linker flag -X. A build
+// that sets no value reads the version of the module.
+var version = ""
+
+// commandVersion returns the version of the build. A build of a release holds the tag. A
+// build of go install holds the version of the module. Another build holds the text
+// "unknown".
+func commandVersion() string {
+	if version != "" {
+		return version
+	}
+
+	buildInfo, found := debug.ReadBuildInfo()
+	if found && buildInfo.Main.Version != "" && buildInfo.Main.Version != "(devel)" {
+		return buildInfo.Main.Version
+	}
+
+	return "unknown"
+}
+
 func main() {
 	command := &cli.Command{
 		Name:        "dbdiff",
+		Version:     commandVersion(),
 		Usage:       "Compare database schemas and generate migration scripts",
 		Description: "Compare database schemas and generate migration scripts",
 		Action:      action,
