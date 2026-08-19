@@ -451,6 +451,13 @@ The PostgreSQL tests need the database at `postgres://user:password@localhost:54
 The command `docker compose up -d` starts that database. The SQLite tests need no service,
 because each test writes into a temporary directory.
 
+To run the tests without that database, give the variable and the flag that the CI gives to
+macOS and to Windows:
+
+```bash
+DBDIFF_TEST_SKIP_POSTGRES=1 go test -short ./...
+```
+
 ## License
 
 dbdiff uses the MIT license. Read the [LICENSE](LICENSE) file.

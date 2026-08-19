@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,23 @@ import (
 )
 
 const postgresTestConnectionString = "postgres://user:password@localhost:5432/dbdiff?sslmode=disable"
+
+// skipPostgresServerVariable names the environment variable that stops the tests of the
+// PostgreSQL driver. Those tests need a server on the port 5432, and a runner of macOS or
+// of Windows starts no service container.
+//
+// The variable stays empty on a runner of Linux, so a server that fails there fails the
+// build. A silent skip hides that failure.
+const skipPostgresServerVariable = "DBDIFF_TEST_SKIP_POSTGRES"
+
+// skipWithoutPostgresServer stops the test when the environment names no server.
+func skipWithoutPostgresServer(tb testing.TB) {
+	tb.Helper()
+
+	if os.Getenv(skipPostgresServerVariable) != "" {
+		tb.Skipf("%s stops the tests that need a PostgreSQL server", skipPostgresServerVariable)
+	}
+}
 
 type TestingPostgresDriver struct {
 	*PostgresDriver
@@ -221,6 +239,8 @@ func (d *TestingPostgresDriver) FetchAllFromTarget(table string, additionalRules
 }
 
 func TestPostgresDriver(t *testing.T) {
+	skipWithoutPostgresServer(t)
+
 	t.Run("CreateTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

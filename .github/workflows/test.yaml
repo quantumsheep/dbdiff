@@ -99,3 +99,33 @@ jobs:
 
       - name: Show The Coverage
         run: go tool cover -func=coverage.out
+
+  # A runner of macOS and a runner of Windows start no service container, so these two
+  # platforms run every test that needs no PostgreSQL server. The -short flag stops the
+  # tests of the temporary server, and DBDIFF_TEST_SKIP_POSTGRES stops the tests of the
+  # postgres driver. The job of Linux above covers both groups.
+  test-without-a-server:
+    strategy:
+      matrix:
+        platform:
+          - runner: windows-2025
+            suffix: windows-amd64.exe
+          - runner: macos-15-intel
+            suffix: macos-amd64
+          - runner: macos-26
+            suffix: macos-arm64
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Go 1.25
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25
+
+      - name: Run Tests
+        env:
+          CGO_ENABLED: ${{ runner.os == 'Windows' && '' || '1' }}
+          DBDIFF_TEST_SKIP_POSTGRES: 1
+        run: go test -v -short ./...
+

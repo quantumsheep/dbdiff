@@ -631,6 +631,11 @@ The PostgreSQL tests need the database at
 `postgres://user:password@localhost:5432/dbdiff`. The SQLite tests need no service,
 because each one writes into `tb.TempDir()`.
 
+`DBDIFF_TEST_SKIP_POSTGRES=1` stops `TestPostgresDriver`, which needs that server. A runner
+of macOS and a runner of Windows start no service container, so the CI gives that variable
+and the `-short` flag to those two platforms. Keep the variable empty on Linux. A server
+that fails there must fail the build, and a silent skip hides that failure.
+
 ## Structure
 
 One engine gets one top-level function: `TestSQLiteDriver` or `TestPostgresDriver`. Each
