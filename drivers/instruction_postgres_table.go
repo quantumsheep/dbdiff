@@ -167,10 +167,6 @@ type PostgresCreateTableInstruction struct {
 	Inherits          []string
 	Unlogged          bool
 	StorageParameters []string
-
-	// String writes no comment, because CREATE TABLE accepts none.
-	// PostgresTable.CommentInstructions prints a separate COMMENT ON statement.
-	Comment string
 }
 
 func (i *PostgresCreateTableInstruction) String() string {

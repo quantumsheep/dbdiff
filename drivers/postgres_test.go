@@ -896,7 +896,6 @@ func TestPostgresDriver(t *testing.T) {
 						Comment: "the key",
 					},
 				},
-				Comment: "the people",
 			},
 			&PostgresCommentOnTableInstruction{
 				Name:    "users",

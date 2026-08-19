@@ -653,7 +653,6 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 		Columns:      t.Columns,
 		Constraints:  t.Constraints,
 		PartitionKey: t.PartitionKey,
-		Comment:      t.Comment,
 		Inherits:     t.Inherits,
 		Unlogged:     t.Unlogged,
 
