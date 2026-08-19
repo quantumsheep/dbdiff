@@ -299,8 +299,10 @@ func TestInstructions(t *testing.T) {
 					NotNull: true,
 				},
 			},
-			PrimaryKey:        []string{"team", "member"},
-			UniqueConstraints: [][]string{{"member"}},
+			PrimaryKey: []string{"team", "member"},
+			UniqueConstraints: []*SQLiteUniqueConstraint{
+				{Columns: []string{"member"}},
+			},
 			ForeignKeys: []*SQLiteForeignKey{
 				{
 					Table: "teams",

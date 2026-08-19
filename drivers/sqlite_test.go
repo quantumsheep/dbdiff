@@ -1309,6 +1309,126 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
+	// No PRAGMA statement reports an ON CONFLICT clause, so the parser reads it from the
+	// CREATE TABLE statement. The clause belongs to the constraint before it.
+	t.Run("CreateTableWithConflictClauses", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE t (
+				id INTEGER PRIMARY KEY ON CONFLICT REPLACE,
+				v TEXT UNIQUE ON CONFLICT IGNORE,
+				w TEXT NOT NULL ON CONFLICT ABORT
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "t",
+				Columns: []*SQLiteColumn{
+					{
+						Name:               "id",
+						Type:               "INTEGER",
+						PrimaryKey:         true,
+						PrimaryKeyConflict: "REPLACE",
+					},
+					{
+						Name:           "v",
+						Type:           "TEXT",
+						Unique:         true,
+						UniqueConflict: "IGNORE",
+					},
+					{
+						Name:            "w",
+						Type:            "TEXT",
+						NotNull:         true,
+						NotNullConflict: "ABORT",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateTableWithATableConflictClause", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE u (a INTEGER, b INTEGER, UNIQUE (a, b) ON CONFLICT FAIL);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "u",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "a",
+						Type: "INTEGER",
+					},
+					{
+						Name: "b",
+						Type: "INTEGER",
+					},
+				},
+				UniqueConstraints: []*SQLiteUniqueConstraint{
+					{
+						Columns:  []string{"a", "b"},
+						Conflict: "FAIL",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A new conflict clause changes the constraint, so the table needs a recreation.
+	t.Run("ModifyConflictClauseRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE t (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY);
+			INSERT INTO t (id) VALUES (1);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_t_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:               "id",
+						Type:               "INTEGER",
+						PrimaryKey:         true,
+						PrimaryKeyConflict: "REPLACE",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_t_temp",
+				ColumnNames:       []string{"id"},
+				SelectExpressions: []string{`"id"`},
+				SourceTableName:   "t",
+			},
+			&SQLDropTableInstruction{Name: "t"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_t_temp",
+				Action: &SQLRenameTableAction{NewName: "t"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("t", "")
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
 	t.Run("DropTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1789,7 +1909,9 @@ func TestSQLiteDriver(t *testing.T) {
 						NotNull: true,
 					},
 				},
-				UniqueConstraints: [][]string{{"team", "name"}},
+				UniqueConstraints: []*SQLiteUniqueConstraint{
+					{Columns: []string{"team", "name"}},
+				},
 			},
 		})
 
@@ -1844,7 +1966,9 @@ func TestSQLiteDriver(t *testing.T) {
 						NotNull: true,
 					},
 				},
-				UniqueConstraints: [][]string{{"team", "name"}},
+				UniqueConstraints: []*SQLiteUniqueConstraint{
+					{Columns: []string{"team", "name"}},
+				},
 			},
 			&SQLInsertSelectInstruction{
 				TableName:         "_members_temp",

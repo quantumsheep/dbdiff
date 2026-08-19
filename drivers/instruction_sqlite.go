@@ -30,12 +30,13 @@ func (a *SQLiteAddColumnAction) TableActionClause() string {
 // A key or a constraint of one column stays in the definition of that column. PrimaryKey
 // and UniqueConstraints hold a group of two or more columns only.
 type SQLiteCreateTableInstruction struct {
-	Name              string
-	Columns           []*SQLiteColumn
-	PrimaryKey        []string
-	UniqueConstraints [][]string
-	ForeignKeys       []*SQLiteForeignKey
-	CheckConstraints  []string
+	Name               string
+	Columns            []*SQLiteColumn
+	PrimaryKey         []string
+	PrimaryKeyConflict string
+	UniqueConstraints  []*SQLiteUniqueConstraint
+	ForeignKeys        []*SQLiteForeignKey
+	CheckConstraints   []string
 
 	// SQLite accepts a table option after the closing parenthesis. WITHOUT ROWID comes
 	// first, because SQLite refuses the reverse order.
@@ -51,13 +52,13 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	}
 
 	if len(i.PrimaryKey) > 0 {
-		lines = append(lines, fmt.Sprintf("\tPRIMARY KEY (%s)",
-			strings.Join(quoteIdentifiers(i.PrimaryKey), ", ")))
+		lines = append(lines, fmt.Sprintf("\tPRIMARY KEY (%s)%s",
+			strings.Join(quoteIdentifiers(i.PrimaryKey), ", "),
+			conflictClause(i.PrimaryKeyConflict)))
 	}
 
 	for _, constraint := range i.UniqueConstraints {
-		lines = append(lines, fmt.Sprintf("\tUNIQUE (%s)",
-			strings.Join(quoteIdentifiers(constraint), ", ")))
+		lines = append(lines, "\t"+constraint.Clause())
 	}
 
 	for _, check := range i.CheckConstraints {

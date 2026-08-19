@@ -231,13 +231,24 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
+	definition, err := d.GetTableDefinition(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	parsed := parseTableDefinition(definition)
+
 	// A UNIQUE constraint of one column belongs to the definition of that column.
 	// A constraint of two or more columns is a table constraint.
-	var uniqueConstraints [][]string
+	var uniqueConstraints []*SQLiteUniqueConstraint
 
 	for _, key := range uniqueKeys {
 		if len(key) != 1 {
-			uniqueConstraints = append(uniqueConstraints, key)
+			uniqueConstraints = append(uniqueConstraints, &SQLiteUniqueConstraint{
+				Columns:  key,
+				Conflict: parsed.UniqueConflictOf(key),
+			})
+
 			continue
 		}
 
@@ -264,24 +275,18 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
-	definition, err := d.GetTableDefinition(ctx, db, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	parsed := parseTableDefinition(definition)
-
 	return &SQLiteTable{
-		Name:              tableName,
-		Columns:           columns,
-		PrimaryKey:        primaryKey,
-		UniqueConstraints: uniqueConstraints,
-		Indexes:           indexes,
-		Triggers:          triggers,
-		ForeignKeys:       foreignKeys,
-		CheckConstraints:  parsed.CheckConstraints,
-		WithoutRowID:      parsed.WithoutRowID,
-		Strict:            parsed.Strict,
+		Name:               tableName,
+		Columns:            columns,
+		PrimaryKey:         primaryKey,
+		UniqueConstraints:  uniqueConstraints,
+		Indexes:            indexes,
+		Triggers:           triggers,
+		ForeignKeys:        foreignKeys,
+		CheckConstraints:   parsed.CheckConstraints,
+		PrimaryKeyConflict: parsed.PrimaryKeyConflict,
+		WithoutRowID:       parsed.WithoutRowID,
+		Strict:             parsed.Strict,
 	}, nil
 }
 
@@ -363,6 +368,9 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 			column.AutoIncrement = attributes.AutoIncrement
 			column.Collation = attributes.Collation
 			column.Check = attributes.Check
+			column.PrimaryKeyConflict = attributes.PrimaryKeyConflict
+			column.UniqueConflict = attributes.UniqueConflict
+			column.NotNullConflict = attributes.NotNullConflict
 
 			if hidden == virtualGeneratedColumn || hidden == storedGeneratedColumn {
 				column.GeneratedExpression = attributes.GeneratedExpression

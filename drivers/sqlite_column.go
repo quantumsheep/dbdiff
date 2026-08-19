@@ -35,6 +35,13 @@ type SQLiteColumn struct {
 	// Check holds the check of the column, with the enclosing parentheses. It is empty for
 	// a column with no check.
 	Check string
+
+	// These three fields hold the resolution of the ON CONFLICT clause of each constraint
+	// of the column, for example REPLACE. A constraint with no such clause keeps an empty
+	// value.
+	PrimaryKeyConflict string
+	UniqueConflict     string
+	NotNullConflict    string
 }
 
 func (c *SQLiteColumn) IsGenerated() bool {
@@ -63,20 +70,23 @@ func (c *SQLiteColumn) Definition() string {
 	}
 
 	if c.NotNull {
-		value += " NOT NULL"
+		value += " NOT NULL" + conflictClause(c.NotNullConflict)
 	}
 
 	if c.PrimaryKey {
 		value += " PRIMARY KEY"
 
-		// SQLite accepts the keyword AUTOINCREMENT after the keyword PRIMARY KEY only.
+		// SQLite accepts the keyword AUTOINCREMENT after the keyword PRIMARY KEY only, and
+		// it accepts the ON CONFLICT clause before that keyword only.
+		value += conflictClause(c.PrimaryKeyConflict)
+
 		if c.AutoIncrement {
 			value += " AUTOINCREMENT"
 		}
 	}
 
 	if c.Unique {
-		value += " UNIQUE"
+		value += " UNIQUE" + conflictClause(c.UniqueConflict)
 	}
 
 	if c.Check != "" {

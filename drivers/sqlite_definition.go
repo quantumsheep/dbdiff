@@ -4,6 +4,39 @@ import (
 	"strings"
 )
 
+// conflictResolution returns the resolution of an ON CONFLICT clause in these tokens.
+func conflictResolution(tokens []string) string {
+	for position, token := range tokens {
+		if !strings.EqualFold(token, "ON") || position+2 >= len(tokens) {
+			continue
+		}
+
+		if strings.EqualFold(tokens[position+1], "CONFLICT") {
+			return strings.ToUpper(tokens[position+2])
+		}
+	}
+
+	return ""
+}
+
+// constraintColumnNames reads the names of a column list, for example "(a, b)".
+func constraintColumnNames(list string) []string {
+	inner := strings.TrimSuffix(strings.TrimPrefix(list, "("), ")")
+
+	var names []string
+
+	for _, part := range strings.Split(inner, ",") {
+		tokens := splitTopLevelTokens(part)
+		if len(tokens) == 0 {
+			continue
+		}
+
+		names = append(names, unquoteIdentifier(tokens[0]))
+	}
+
+	return names
+}
+
 // indexKeyModifiers returns the collation and the direction of one key of an index, with a
 // leading space. PRAGMA index_info reports neither, so the text of the CREATE INDEX
 // statement gives them.
@@ -100,10 +133,18 @@ func indexAfterColumnList(definition string) int {
 // PRAGMA table_xinfo names a generated column, and it gives no expression for it. No PRAGMA
 // reports a collation, the keyword AUTOINCREMENT, or a check.
 type SQLiteTableDefinition struct {
-	Columns          map[string]*SQLiteColumn
-	CheckConstraints []string
-	WithoutRowID     bool
-	Strict           bool
+	Columns            map[string]*SQLiteColumn
+	CheckConstraints   []string
+	UniqueConflicts    map[string]string
+	PrimaryKeyConflict string
+	WithoutRowID       bool
+	Strict             bool
+}
+
+// UniqueConflictOf returns the resolution of the ON CONFLICT clause of the table
+// constraint that holds these columns.
+func (d *SQLiteTableDefinition) UniqueConflictOf(columns []string) string {
+	return d.UniqueConflicts[strings.Join(columns, ",")]
 }
 
 // ColumnByName returns the parsed attributes of one column.
@@ -115,7 +156,8 @@ func (d *SQLiteTableDefinition) ColumnByName(name string) (*SQLiteColumn, bool) 
 // parseTableDefinition reads the CREATE TABLE statement of sqlite_master.
 func parseTableDefinition(definition string) *SQLiteTableDefinition {
 	parsed := &SQLiteTableDefinition{
-		Columns: make(map[string]*SQLiteColumn),
+		Columns:         make(map[string]*SQLiteColumn),
+		UniqueConflicts: make(map[string]string),
 	}
 
 	parsed.WithoutRowID, parsed.Strict = parseTableOptions(definition)
@@ -137,6 +179,15 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 
 			if strings.EqualFold(constraint[0], "CHECK") && len(constraint) > 1 {
 				parsed.CheckConstraints = append(parsed.CheckConstraints, constraint[1])
+			}
+
+			if strings.EqualFold(constraint[0], "UNIQUE") && len(constraint) > 1 {
+				key := strings.Join(constraintColumnNames(constraint[1]), ",")
+				parsed.UniqueConflicts[key] = conflictResolution(constraint[1:])
+			}
+
+			if strings.EqualFold(constraint[0], "PRIMARY") && len(constraint) > 2 {
+				parsed.PrimaryKeyConflict = conflictResolution(constraint[2:])
 			}
 
 			continue
@@ -167,10 +218,37 @@ func isTableConstraintKeyword(token string) bool {
 func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
 	column := &SQLiteColumn{Name: name}
 
+	// An ON CONFLICT clause belongs to the constraint before it, so the loop keeps the
+	// name of the constraint that it read last.
+	lastConstraint := ""
+
 	for position, token := range tokens {
 		next := ""
 		if position+1 < len(tokens) {
 			next = tokens[position+1]
+		}
+
+		if strings.EqualFold(token, "ON") && strings.EqualFold(next, "CONFLICT") &&
+			position+2 < len(tokens) {
+			switch lastConstraint {
+			case "PRIMARY KEY":
+				column.PrimaryKeyConflict = strings.ToUpper(tokens[position+2])
+			case "UNIQUE":
+				column.UniqueConflict = strings.ToUpper(tokens[position+2])
+			case "NOT NULL":
+				column.NotNullConflict = strings.ToUpper(tokens[position+2])
+			}
+
+			continue
+		}
+
+		switch {
+		case strings.EqualFold(token, "PRIMARY") && strings.EqualFold(next, "KEY"):
+			lastConstraint = "PRIMARY KEY"
+		case strings.EqualFold(token, "UNIQUE"):
+			lastConstraint = "UNIQUE"
+		case strings.EqualFold(token, "NOT") && strings.EqualFold(next, "NULL"):
+			lastConstraint = "NOT NULL"
 		}
 
 		switch {

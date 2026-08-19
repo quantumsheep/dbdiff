@@ -364,6 +364,9 @@ columns.
 
 dbdiff does not support MySQL.
 
+The SQLite driver keeps the `ON CONFLICT` clause of a `PRIMARY KEY`, of a `UNIQUE`
+constraint, and of a `NOT NULL` constraint. A new clause recreates the table.
+
 The SQLite driver keeps the direction and the collation of each key of an index. The
 keyword `ASC` is the default of SQLite, so an index that names it equals an index that does
 not.

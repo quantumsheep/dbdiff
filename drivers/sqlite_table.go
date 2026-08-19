@@ -7,10 +7,11 @@ import (
 	"github.com/samber/lo"
 )
 
-func equalColumnGroups(first [][]string, second [][]string) bool {
-	return slices.EqualFunc(first, second, func(firstGroup []string, secondGroup []string) bool {
-		return slices.Equal(firstGroup, secondGroup)
-	})
+func equalUniqueConstraints(first []*SQLiteUniqueConstraint, second []*SQLiteUniqueConstraint) bool {
+	return slices.EqualFunc(first, second,
+		func(firstConstraint *SQLiteUniqueConstraint, secondConstraint *SQLiteUniqueConstraint) bool {
+			return firstConstraint.Equal(secondConstraint)
+		})
 }
 
 type SQLiteTable struct {
@@ -19,8 +20,9 @@ type SQLiteTable struct {
 
 	// A key or a constraint of one column stays a column constraint. These two fields hold
 	// the columns of a key or of a constraint of two or more columns only.
-	PrimaryKey        []string
-	UniqueConstraints [][]string
+	PrimaryKey         []string
+	PrimaryKeyConflict string
+	UniqueConstraints  []*SQLiteUniqueConstraint
 
 	Indexes     []*SQLiteIndex
 	Triggers    []*SQLiteTrigger
@@ -69,14 +71,15 @@ func (t *SQLiteTable) TriggerByName(name string) (*SQLiteTrigger, bool) {
 
 func (t *SQLiteTable) CreateTableInstruction() *SQLiteCreateTableInstruction {
 	return &SQLiteCreateTableInstruction{
-		Name:              t.Name,
-		Columns:           t.Columns,
-		PrimaryKey:        t.PrimaryKey,
-		UniqueConstraints: t.UniqueConstraints,
-		ForeignKeys:       t.ForeignKeys,
-		CheckConstraints:  t.CheckConstraints,
-		WithoutRowID:      t.WithoutRowID,
-		Strict:            t.Strict,
+		Name:               t.Name,
+		Columns:            t.Columns,
+		PrimaryKey:         t.PrimaryKey,
+		PrimaryKeyConflict: t.PrimaryKeyConflict,
+		UniqueConstraints:  t.UniqueConstraints,
+		ForeignKeys:        t.ForeignKeys,
+		CheckConstraints:   t.CheckConstraints,
+		WithoutRowID:       t.WithoutRowID,
+		Strict:             t.Strict,
 	}
 }
 
@@ -131,7 +134,9 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		Removed:            []string{},
 		Renamed:            make(map[string]string),
 		ForeignKeysChanged: false,
-		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) || !equalColumnGroups(t.UniqueConstraints, other.UniqueConstraints),
+		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) ||
+			t.PrimaryKeyConflict != other.PrimaryKeyConflict ||
+			!equalUniqueConstraints(t.UniqueConstraints, other.UniqueConstraints),
 		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||
 			!slices.Equal(t.CheckConstraints, other.CheckConstraints),
 	}
