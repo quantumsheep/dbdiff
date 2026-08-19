@@ -181,6 +181,9 @@ type PostgresCreateTableInstruction struct {
 	// Unlogged marks a table that keeps no write ahead log. Such a table loses its rows
 	// after a crash, and it costs less to write.
 	Unlogged bool
+
+	// StorageParameters holds the WITH options of the table, for example fillfactor=70.
+	StorageParameters []string
 }
 
 func (i *PostgresCreateTableInstruction) String() string {
@@ -204,6 +207,10 @@ func (i *PostgresCreateTableInstruction) String() string {
 
 	if len(i.Inherits) > 0 {
 		statement += " INHERITS (" + strings.Join(quoteIdentifiers(i.Inherits), ", ") + ")"
+	}
+
+	if len(i.StorageParameters) > 0 {
+		statement += " WITH (" + strings.Join(i.StorageParameters, ", ") + ")"
 	}
 
 	if i.PartitionKey != "" {
@@ -254,6 +261,25 @@ type PostgresDropTriggerInstruction struct {
 func (i *PostgresDropTriggerInstruction) String() string {
 	return fmt.Sprintf("DROP TRIGGER %s ON %s;",
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+}
+
+// SET ( storage_parameter [= value] [, ...] )
+type PostgresSetStorageParametersAction struct {
+	Parameters []string
+}
+
+func (a *PostgresSetStorageParametersAction) TableActionClause() string {
+	return "SET (" + strings.Join(a.Parameters, ", ") + ")"
+}
+
+// RESET ( storage_parameter [, ...] )
+// A parameter that goes back to its default value takes this action.
+type PostgresResetStorageParametersAction struct {
+	Names []string
+}
+
+func (a *PostgresResetStorageParametersAction) TableActionClause() string {
+	return "RESET (" + strings.Join(a.Names, ", ") + ")"
 }
 
 // SET { LOGGED | UNLOGGED }

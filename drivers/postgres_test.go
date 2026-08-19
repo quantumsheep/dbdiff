@@ -1199,6 +1199,68 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreateTableWithStorageParameters", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "tuned",
+				Columns: []*PostgresColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+				},
+				StorageParameters: []string{"fillfactor=70"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterStorageParameters", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE tuned (id INT) WITH (fillfactor = 90);`)
+		driver.ExecOnTarget(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "tuned",
+				Actions: []AlterTableAction{
+					&PostgresSetStorageParametersAction{
+						Parameters: []string{"fillfactor=90"},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A parameter that the source does not hold goes back to its default value.
+	t.Run("ResetStorageParameters", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE tuned (id INT);`)
+		driver.ExecOnTarget(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "tuned",
+				Actions: []AlterTableAction{
+					&PostgresResetStorageParametersAction{
+						Names: []string{"fillfactor"},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

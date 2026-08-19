@@ -1,5 +1,10 @@
 package drivers
 
+import (
+	"slices"
+	"strings"
+)
+
 type PostgresTable struct {
 	Name        string
 	Columns     []*PostgresColumn
@@ -22,6 +27,9 @@ type PostgresTable struct {
 
 	// Unlogged marks a table that keeps no write ahead log.
 	Unlogged bool
+
+	// StorageParameters holds the WITH options of the table.
+	StorageParameters []string
 
 	RowLevelSecurity      bool
 	ForceRowLevelSecurity bool
@@ -233,6 +241,7 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 			alterTable(&PostgresSetPersistenceAction{Persistence: persistence}))
 	}
 
+	instructions = append(instructions, diffStorageParameters(t, other)...)
 	instructions = append(instructions, diffRowLevelSecurity(t, other)...)
 
 	if t.Comment != other.Comment {
@@ -388,6 +397,58 @@ func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
 	return sorted
 }
 
+// diffStorageParameters compares the WITH options of a table. A parameter that the source
+// does not hold takes a RESET action, which gives it its default value again.
+func diffStorageParameters(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
+	if slices.Equal(sourceTable.StorageParameters, targetTable.StorageParameters) {
+		return nil
+	}
+
+	var instructions []Instruction
+
+	if len(sourceTable.StorageParameters) > 0 {
+		instructions = append(instructions, &PostgresAlterTableInstruction{
+			Name: sourceTable.Name,
+			Actions: []AlterTableAction{
+				&PostgresSetStorageParametersAction{Parameters: sourceTable.StorageParameters},
+			},
+		})
+	}
+
+	var removed []string
+
+	for _, parameter := range targetTable.StorageParameters {
+		name := storageParameterName(parameter)
+
+		held := slices.ContainsFunc(sourceTable.StorageParameters,
+			func(sourceParameter string) bool {
+				return storageParameterName(sourceParameter) == name
+			})
+		if !held {
+			removed = append(removed, name)
+		}
+	}
+
+	if len(removed) > 0 {
+		instructions = append(instructions, &PostgresAlterTableInstruction{
+			Name:    sourceTable.Name,
+			Actions: []AlterTableAction{&PostgresResetStorageParametersAction{Names: removed}},
+		})
+	}
+
+	return instructions
+}
+
+// storageParameterName returns the name of a parameter, with no value.
+func storageParameterName(parameter string) string {
+	name, _, found := strings.Cut(parameter, "=")
+	if !found {
+		return parameter
+	}
+
+	return name
+}
+
 // diffRowLevelSecurity compares the two switches of row level security and every policy.
 func diffRowLevelSecurity(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
 	var instructions []Instruction
@@ -477,6 +538,8 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 		Comment:      t.Comment,
 		Inherits:     t.Inherits,
 		Unlogged:     t.Unlogged,
+
+		StorageParameters: t.StorageParameters,
 	}
 }
 

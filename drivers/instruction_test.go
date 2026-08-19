@@ -864,6 +864,39 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `SET LOGGED`, action.TableActionClause())
 	})
 
+	t.Run("PostgresCreateTableWithStorageParameters", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "tuned",
+			Columns: []*PostgresColumn{
+				{
+					Name: "id",
+					Type: "integer",
+				},
+			},
+			StorageParameters: []string{"fillfactor=70", "autovacuum_enabled=false"},
+		}
+
+		require.Equal(t, `CREATE TABLE "tuned" (
+	"id" integer
+) WITH (fillfactor=70, autovacuum_enabled=false);`, instruction.String())
+	})
+
+	t.Run("PostgresSetStorageParametersAction", func(t *testing.T) {
+		action := &PostgresSetStorageParametersAction{
+			Parameters: []string{"fillfactor=70"},
+		}
+
+		require.Equal(t, `SET (fillfactor=70)`, action.TableActionClause())
+	})
+
+	t.Run("PostgresResetStorageParametersAction", func(t *testing.T) {
+		action := &PostgresResetStorageParametersAction{
+			Names: []string{"fillfactor", "autovacuum_enabled"},
+		}
+
+		require.Equal(t, `RESET (fillfactor, autovacuum_enabled)`, action.TableActionClause())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

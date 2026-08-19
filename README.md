@@ -238,6 +238,10 @@ the columns, the constraints, and the indexes of its parent, so the output names
 them. A `DROP TABLE` statement of a parent removes every partition of it, so the output
 prints no second statement for those partitions.
 
+**Storage parameters.** The driver compares the `WITH` options of a table, for example
+`fillfactor`. A parameter that the source does not hold takes a `RESET` action, which gives
+that parameter its default value again.
+
 **Unlogged tables.** The driver keeps the `UNLOGGED` keyword of a table. A change of that
 keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 
