@@ -18,6 +18,14 @@ type PostgresColumn struct {
 	// GeneratedExpression holds the expression of a stored generated column. It is empty
 	// for every other column.
 	GeneratedExpression string
+
+	// Collation names the collation of the column. It is empty when the column keeps the
+	// collation of its type.
+	Collation string
+
+	// Comment holds the comment of the column. Definition writes no comment, because a
+	// column definition accepts none.
+	Comment string
 }
 
 func (c *PostgresColumn) Copy() *PostgresColumn {
@@ -34,6 +42,10 @@ func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 
 func (c *PostgresColumn) Definition() string {
 	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
+
+	if c.Collation != "" {
+		value += " COLLATE " + quoteIdentifier(c.Collation)
+	}
 
 	if c.NotNull {
 		value += " NOT NULL"

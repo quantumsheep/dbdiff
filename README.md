@@ -7,6 +7,8 @@
 [![Tests](https://github.com/quantumsheep/dbdiff/actions/workflows/test.yaml/badge.svg)](https://github.com/quantumsheep/dbdiff/actions/workflows/test.yaml)
 [![Release](https://img.shields.io/github/v/release/quantumsheep/dbdiff?label=release)](https://github.com/quantumsheep/dbdiff/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/quantumsheep/dbdiff.svg)](https://pkg.go.dev/github.com/quantumsheep/dbdiff)
+[![Go Report Card](https://goreportcard.com/badge/github.com/quantumsheep/dbdiff)](https://goreportcard.com/report/github.com/quantumsheep/dbdiff)
+[![codecov](https://codecov.io/gh/quantumsheep/dbdiff/branch/main/graph/badge.svg)](https://codecov.io/gh/quantumsheep/dbdiff)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -104,6 +106,7 @@ dbdiff source.sqlite target.sqlite | sqlite3 target.sqlite
 | `--driver` | `sqlite3` or `postgres` | Select the database engine. The default value comes from the source and the target. See [Driver detection](#driver-detection). |
 | `--schema` | A schema name           | Name the schema that the postgres driver reads. The default value is the schema of the search path.                            |
 | `--data`   | none                    | Add the comparison of the rows. The default value is off.                                                                      |
+| `--version` | none                   | Print the version of the build and exit.                                                                                       |
 
 ## Driver detection
 
@@ -163,6 +166,17 @@ a foreign key changes, the driver recreates the table. The recreation copies the
 a new table, drops the old table, and renames the new table. A new column takes its default
 value, or `NULL`.
 
+**Generated columns.** The driver keeps a `STORED` generated column and a `VIRTUAL` one.
+The `INSERT` statement of a table recreation names no generated column, because SQLite
+computes that column. SQLite refuses an `ADD COLUMN` action that holds a `STORED` generated
+column, so a new column of that kind recreates the table.
+
+**Column attributes.** No `PRAGMA` statement reports a collation, the keyword
+`AUTOINCREMENT`, or a check. The driver reads each of them from the `CREATE TABLE`
+statement of `sqlite_master`. It reads the table options `WITHOUT ROWID` and `STRICT` from
+the same text. A change of one of these needs a new table, because SQLite holds no
+`ALTER COLUMN` action.
+
 **Rename detection.** The driver detects a renamed column. A source column that the target
 does not hold, and that holds the attributes of exactly one free target column, is a
 rename. Two candidates make the guess unsafe. In that case the column becomes an addition,
@@ -196,14 +210,38 @@ gives an error.
 ```
 extensions → enum types → domains → composite types → sequences
   → functions → aggregates → operators → tables → views
+  → materialized views
 ```
 
-A table can use each of the first five objects. That order gives each statement the objects
-that it needs.
+A table can use each of the first five objects. A materialized view reads a table or a
+view. That order gives each statement the objects that it needs.
 
 **Owned objects.** An object that an extension owns stays out of the output. The
 `CREATE EXTENSION` statement builds that object again. A sequence that a `SERIAL` column or
 an identity column owns stays out of the output for the same reason.
+
+**Comments.** The driver compares the comment of a table and the comment of a column.
+PostgreSQL accepts a comment in no `CREATE` statement, so the output prints a separate
+`COMMENT ON` statement. A comment that goes away gives the keyword `NULL`.
+
+**Row level security.** The driver compares the two switches of a table and each policy of
+it. PostgreSQL holds no action that changes a policy, so a changed policy prints a
+`DROP POLICY` statement and a `CREATE POLICY` statement.
+
+**Collations.** The driver keeps the collation of a column when that collation differs from
+the collation of the type. PostgreSQL changes a collation through the `TYPE` action, so the
+output prints `ALTER COLUMN ... TYPE ... COLLATE ...`.
+
+**Partitioned tables.** The driver keeps the `PARTITION BY` clause of a parent, and it
+prints one `CREATE TABLE ... PARTITION OF` statement for each partition. A partition takes
+the columns, the constraints, and the indexes of its parent, so the output names none of
+them. A `DROP TABLE` statement of a parent removes every partition of it, so the output
+prints no second statement for those partitions.
+
+**Materialized views.** The driver compares the query and the indexes of a materialized
+view. A changed query prints a `DROP MATERIALIZED VIEW` statement and a
+`CREATE MATERIALIZED VIEW` statement, because PostgreSQL holds no action that replaces the
+query. The output builds each index of the view again after that pair.
 
 **Identity columns.** The driver keeps `GENERATED ALWAYS AS IDENTITY` and
 `GENERATED BY DEFAULT AS IDENTITY`. If a column becomes an identity column, the output sets
@@ -297,11 +335,14 @@ the same treatment.
 | --------------- | --------------------------------------- | ---------- |
 | Tables          | ✅                                      | ✅         |
 | Identity columns  | ➖                                    | ✅         |
-| Generated columns | ❌                                    | ✅         |
+| Table options     | ✅ (WITHOUT ROWID, STRICT)            | ➖         |
+| Generated columns | ✅                                    | ✅         |
 | Indexes         | ✅                                      | ✅         |
-| Constraints     | ✅ (foreign keys, primary keys, unique) | ✅         |
+| Constraints     | ✅ (foreign keys, primary keys, unique, checks) | ✅  |
 | Triggers        | ✅                                      | ✅         |
 | Views           | ✅                                      | ✅         |
+| Materialized views | ➖                                   | ✅         |
+| Partitioned tables | ➖                                   | ✅         |
 | Sequences       | ➖                                      | ✅         |
 | Enum types      | ➖                                      | ✅         |
 | Domains         | ➖                                      | ✅         |
@@ -310,10 +351,12 @@ the same treatment.
 | Aggregates      | ➖                                      | ✅         |
 | Operators       | ➖                                      | ✅         |
 | Extensions      | ➖                                      | ✅         |
+| Comments        | ➖                                      | ✅         |
+| Row level security | ➖                                   | ✅         |
 | Data            | ✅                                      | ✅         |
 
-✅ dbdiff compares this object. ❌ dbdiff does not compare this object. ➖ the engine holds
-no such object. A table covers its columns.
+✅ dbdiff compares this object. ➖ the engine holds no such object. A table covers its
+columns.
 
 dbdiff does not support MySQL.
 
@@ -324,10 +367,10 @@ constraint of two or more columns as a table constraint.
 
 ## Limits
 
-- The SQLite driver reads no generated column. `PRAGMA table_info` hides that column, so
-  the driver prints no statement for it, and a table recreation loses it.
 - The data comparison covers a table that the source and the target both hold. A table
   that the source only holds stays empty. The schema section creates that table.
+- dbdiff compares no privilege. It prints no `GRANT` statement and no `REVOKE` statement,
+  and it compares no owner. Manage those with the tools of your database.
 - The PostgreSQL driver compares one schema for each run. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
   object that moved from one schema to another schema.

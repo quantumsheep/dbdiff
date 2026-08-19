@@ -120,7 +120,8 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 	}
 
 	// A table uses an extension, a type, a domain, a composite type, a sequence, or a
-	// function. An aggregate and an operator use a function. Keep this order.
+	// function. An aggregate and an operator use a function. A materialized view reads a
+	// table or a view. Keep this order.
 	sections := []func(ctx context.Context) (*SectionDiff, error){
 		d.DiffExtensions,
 		d.DiffTypes,
@@ -132,6 +133,7 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 		d.DiffOperators,
 		d.DiffTables,
 		d.DiffViews,
+		d.DiffMaterializedViews,
 	}
 
 	sectionDiffs := make([]*SectionDiff, 0, len(sections))
@@ -407,6 +409,15 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	}, nil
 }
 
+// isTableDropped tells if the source holds no table with this name, so the diff drops it.
+func isTableDropped(name string, sourceTables []*PostgresTable) bool {
+	_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
+		return table.Name == name
+	})
+
+	return !found
+}
+
 func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	var additions []Instruction
 	var removals []Instruction
@@ -446,9 +457,17 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
 			return table.Name == targetTable.Name
 		})
-		if !found {
-			removals = append(removals, &SQLDropTableInstruction{Name: targetTable.Name})
+		if found {
+			continue
 		}
+
+		// A DROP TABLE statement of a parent removes every partition of it, so a second
+		// statement for the partition fails.
+		if targetTable.IsPartition() && isTableDropped(targetTable.PartitionParent, sourceTables) {
+			continue
+		}
+
+		removals = append(removals, &SQLDropTableInstruction{Name: targetTable.Name})
 	}
 
 	return &SectionDiff{
@@ -511,6 +530,241 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		EarlyRemovals: earlyRemovals,
 		Additions:     additions,
 	}, nil
+}
+
+func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDiff, error) {
+	var earlyRemovals []Instruction
+	var additions []Instruction
+
+	sourceViews, err := d.GetMaterializedViews(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	targetViews, err := d.GetMaterializedViews(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	// sourceViews holds a view after every view that it reads, so a forward walk creates
+	// each view after the views that it depends on.
+	for _, sourceView := range sourceViews {
+		targetView, found := lo.Find(targetViews, func(view *PostgresMaterializedView) bool {
+			return view.Name == sourceView.Name
+		})
+		if !found {
+			additions = append(additions, sourceView.Instructions()...)
+			continue
+		}
+
+		// A DROP statement of the view removes every index of it, so a changed view builds
+		// each index again.
+		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
+			additions = append(additions, sourceView.Instructions()...)
+			continue
+		}
+
+		additions = append(additions, diffMaterializedViewIndexes(sourceView, targetView)...)
+	}
+
+	// PostgreSQL refuses a DROP statement while another view still reads the view, so a
+	// backward walk drops each dependent view first.
+	for _, targetView := range slices.Backward(targetViews) {
+		sourceView, found := lo.Find(sourceViews, func(view *PostgresMaterializedView) bool {
+			return view.Name == targetView.Name
+		})
+		if !found {
+			earlyRemovals = append(earlyRemovals, targetView.DropInstruction())
+			continue
+		}
+
+		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
+			earlyRemovals = append(earlyRemovals, targetView.DropInstruction())
+		}
+	}
+
+	return &SectionDiff{
+		EarlyRemovals: earlyRemovals,
+		Additions:     additions,
+	}, nil
+}
+
+// diffMaterializedViewIndexes compares the indexes of a view that did not change.
+func diffMaterializedViewIndexes(sourceView *PostgresMaterializedView, targetView *PostgresMaterializedView) []Instruction {
+	var instructions []Instruction
+
+	for _, sourceIndex := range sourceView.Indexes {
+		targetIndex, found := targetView.IndexByName(sourceIndex.Name)
+		if !found {
+			instructions = append(instructions, sourceIndex.CreateInstruction())
+			continue
+		}
+
+		if sourceIndex.Def != targetIndex.Def {
+			instructions = append(instructions,
+				&SQLDropIndexInstruction{Name: targetIndex.Name},
+				sourceIndex.CreateInstruction())
+		}
+	}
+
+	for _, targetIndex := range targetView.Indexes {
+		_, found := sourceView.IndexByName(targetIndex.Name)
+		if !found {
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: targetIndex.Name})
+		}
+	}
+
+	return instructions
+}
+
+// GetMaterializedViews returns the materialized views of the schema, each one after the
+// views that it reads. information_schema reports no materialized view, so the query reads
+// pg_matviews.
+func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) ([]*PostgresMaterializedView, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT m.matviewname, m.definition
+		FROM pg_matviews m
+		JOIN pg_class c ON c.relname = m.matviewname
+			AND c.relnamespace = current_schema()::regnamespace
+		WHERE m.schemaname = current_schema()
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = c.oid AND d.deptype = 'e'
+		)
+		ORDER BY m.matviewname
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var views []*PostgresMaterializedView
+
+	for rows.Next() {
+		view := &PostgresMaterializedView{}
+
+		err := rows.Scan(&view.Name, &view.Def)
+		if err != nil {
+			return nil, err
+		}
+
+		views = append(views, view)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, view := range views {
+		columns, err := d.GetViewColumns(ctx, db, view.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		view.Columns = columns
+
+		indexes, err := d.GetMaterializedViewIndexes(ctx, db, view.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		view.Indexes = indexes
+	}
+
+	return sortMaterializedViewsByDependency(views), nil
+}
+
+// GetMaterializedViewIndexes returns the indexes of one materialized view. pg_indexes holds
+// them beside the indexes of a table.
+func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresIndex, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			indexname,
+			regexp_replace(
+				indexdef,
+				' ON (ONLY )?' || quote_ident(current_schema()) || '\.',
+				' ON '
+			)
+		FROM pg_indexes
+		WHERE schemaname = current_schema() AND tablename = $1
+		ORDER BY indexname
+	`, viewName)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var indexes []*PostgresIndex
+
+	for rows.Next() {
+		index := &PostgresIndex{}
+
+		err := rows.Scan(&index.Name, &index.Def)
+		if err != nil {
+			return nil, err
+		}
+
+		indexes = append(indexes, index)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return indexes, nil
+}
+
+// GetTablePolicies returns the row level security policies of one table. pg_policies gives
+// the text of each expression, so the diff replays that text.
+func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresPolicy, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			policyname,
+			permissive,
+			cmd,
+			array_to_string(roles, ','),
+			coalesce(qual, ''),
+			coalesce(with_check, '')
+		FROM pg_policies
+		WHERE schemaname = current_schema() AND tablename = $1
+		ORDER BY policyname
+	`, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var policies []*PostgresPolicy
+
+	for rows.Next() {
+		policy := &PostgresPolicy{Table: tableName}
+
+		var roles string
+
+		err := rows.Scan(&policy.Name, &policy.Permissive, &policy.Command, &roles,
+			&policy.Using, &policy.WithCheck)
+		if err != nil {
+			return nil, err
+		}
+
+		if roles != "" {
+			policy.Roles = strings.Split(roles, ",")
+		}
+
+		policies = append(policies, policy)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return policies, nil
 }
 
 func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*PostgresExtension, error) {
@@ -1034,12 +1288,32 @@ func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewNam
 	return columns, nil
 }
 
+// GetTables returns each table of the schema. relkind names a partitioned table with the
+// value p, and relispartition names a partition. The query reads the key of a partitioned
+// table and the bound of a partition, because information_schema reports neither.
 func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*PostgresTable, error) {
 	tableRows, err := db.QueryContext(ctx, `
-		SELECT table_name 
-		FROM information_schema.tables 
-		WHERE table_schema = current_schema() 
-		AND table_type = 'BASE TABLE'
+		SELECT
+			c.relname,
+			coalesce(pg_get_partkeydef(c.oid), ''),
+			coalesce((
+				SELECT parent.relname
+				FROM pg_inherits i
+				JOIN pg_class parent ON parent.oid = i.inhparent
+				WHERE i.inhrelid = c.oid
+			), ''),
+			coalesce(pg_get_expr(c.relpartbound, c.oid), ''),
+			coalesce(obj_description(c.oid, 'pg_class'), ''),
+			c.relrowsecurity,
+			c.relforcerowsecurity
+		FROM pg_class c
+		WHERE c.relnamespace = current_schema()::regnamespace
+		AND c.relkind IN ('r', 'p')
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = c.oid AND d.deptype = 'e'
+		)
+		ORDER BY c.relname
 	`)
 	if err != nil {
 		return nil, err
@@ -1050,9 +1324,11 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 	var tables []*PostgresTable
 
 	for tableRows.Next() {
-		var tableName string
+		var tableName, partitionKey, partitionParent, partitionBound, comment string
+		var rowLevelSecurity, forceRowLevelSecurity bool
 
-		err := tableRows.Scan(&tableName)
+		err := tableRows.Scan(&tableName, &partitionKey, &partitionParent, &partitionBound,
+			&comment, &rowLevelSecurity, &forceRowLevelSecurity)
 		if err != nil {
 			return nil, err
 		}
@@ -1062,6 +1338,20 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 			return nil, err
 		}
 
+		table.PartitionKey = partitionKey
+		table.PartitionParent = partitionParent
+		table.PartitionBound = partitionBound
+		table.Comment = comment
+		table.RowLevelSecurity = rowLevelSecurity
+		table.ForceRowLevelSecurity = forceRowLevelSecurity
+
+		policies, err := d.GetTablePolicies(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
+		table.Policies = policies
+
 		tables = append(tables, table)
 	}
 
@@ -1070,7 +1360,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		return nil, err
 	}
 
-	return tables, nil
+	return sortTablesByPartitionParent(tables), nil
 }
 
 func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*PostgresTable, error) {
@@ -1096,9 +1386,14 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				a.attnotnull,
 				CASE WHEN a.attgenerated = '' THEN pg_get_expr(d.adbin, d.adrelid) END,
 				CASE a.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' ELSE '' END,
-				CASE WHEN a.attgenerated = 's' THEN pg_get_expr(d.adbin, d.adrelid) ELSE '' END
+				CASE WHEN a.attgenerated = 's' THEN pg_get_expr(d.adbin, d.adrelid) ELSE '' END,
+				coalesce(column_collation.collname, ''),
+				coalesce(col_description(a.attrelid, a.attnum), '')
 			FROM pg_attribute a
 			LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+			LEFT JOIN pg_type base_type ON base_type.oid = a.atttypid
+			LEFT JOIN pg_collation column_collation ON column_collation.oid = a.attcollation
+				AND a.attcollation <> base_type.typcollation
 			WHERE a.attrelid = $1::regclass
 			AND a.attnum > 0
 			AND NOT a.attisdropped
@@ -1111,12 +1406,12 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	defer columnRows.Close()
 
 	for columnRows.Next() {
-		var columnName, columnType, identity, generatedExpression string
+		var columnName, columnType, identity, generatedExpression, collation, comment string
 		var notNull bool
 		var columnDefault sql.NullString
 
 		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault,
-			&identity, &generatedExpression)
+			&identity, &generatedExpression, &collation, &comment)
 		if err != nil {
 			return nil, err
 		}
@@ -1128,6 +1423,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 			Default:             columnDefault,
 			Identity:            identity,
 			GeneratedExpression: generatedExpression,
+			Collation:           collation,
+			Comment:             comment,
 		}
 		table.Columns = append(table.Columns, column)
 	}
@@ -1165,19 +1462,28 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	}
 
 	// The regexp_replace call removes the schema prefix of the table. Without it the
-	// statement builds the index in the source schema.
+	// statement builds the index in the source schema. It removes the keyword ONLY too.
+	// PostgreSQL writes that keyword for the index of a partitioned table, and a statement
+	// that holds it builds no index on the partitions.
 	indexRows, err := db.QueryContext(ctx, `
 			SELECT
 				indexname,
 				regexp_replace(
 					indexdef,
-					' ON ' || quote_ident(current_schema()) || '\.',
+					' ON (ONLY )?' || quote_ident(current_schema()) || '\.',
 					' ON '
 				)
 			FROM pg_indexes
 			WHERE schemaname = current_schema() AND tablename = $1
 			AND indexname NOT IN (
 				SELECT conname FROM pg_constraint WHERE conrelid = $2::regclass
+			)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM pg_inherits i
+				JOIN pg_class child ON child.oid = i.inhrelid
+				WHERE child.relname = pg_indexes.indexname
+				AND child.relnamespace = current_schema()::regnamespace
 			)
 		`, tableName, quoteIdentifier(tableName))
 	if err != nil {

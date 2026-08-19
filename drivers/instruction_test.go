@@ -449,6 +449,348 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `ALTER COLUMN "age" DROP DEFAULT`, action.TableActionClause())
 	})
 
+	t.Run("SQLiteCreateTableWithGeneratedColumns", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "measures",
+			Columns: []*SQLiteColumn{
+				{
+					Name: "value",
+					Type: "INTEGER",
+				},
+				{
+					Name:                "stored_double",
+					Type:                "INTEGER",
+					GeneratedExpression: "(value * 2)",
+					GeneratedStored:     true,
+				},
+				{
+					Name:                "virtual_triple",
+					Type:                "INTEGER",
+					GeneratedExpression: "(value * 3)",
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "measures" (
+	"value" INTEGER,
+	"stored_double" INTEGER GENERATED ALWAYS AS (value * 2) STORED,
+	"virtual_triple" INTEGER GENERATED ALWAYS AS (value * 3) VIRTUAL
+);`, instruction.String())
+	})
+
+	// SQLite accepts a column with no type. The short form of a generated column, for
+	// example "total AS (price * quantity)", holds no type in most schemas.
+	t.Run("SQLiteCreateTableWithATypelessGeneratedColumn", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "lines",
+			Columns: []*SQLiteColumn{
+				{
+					Name: "price",
+					Type: "INTEGER",
+				},
+				{
+					Name:                "doubled",
+					GeneratedExpression: "(price * 2)",
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "lines" (
+	"price" INTEGER,
+	"doubled" GENERATED ALWAYS AS (price * 2) VIRTUAL
+);`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateTableWithoutRowID", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "sessions",
+			Columns: []*SQLiteColumn{
+				{
+					Name:       "id",
+					Type:       "TEXT",
+					PrimaryKey: true,
+				},
+			},
+			WithoutRowID: true,
+		}
+
+		require.Equal(t, `CREATE TABLE "sessions" (
+	"id" TEXT PRIMARY KEY
+) WITHOUT ROWID;`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateTableWithoutRowIDAndStrict", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "sessions",
+			Columns: []*SQLiteColumn{
+				{
+					Name:       "id",
+					Type:       "TEXT",
+					PrimaryKey: true,
+				},
+			},
+			WithoutRowID: true,
+			Strict:       true,
+		}
+
+		require.Equal(t, `CREATE TABLE "sessions" (
+	"id" TEXT PRIMARY KEY
+) WITHOUT ROWID, STRICT;`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateTableStrict", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "events",
+			Columns: []*SQLiteColumn{
+				{
+					Name: "id",
+					Type: "INTEGER",
+				},
+			},
+			Strict: true,
+		}
+
+		require.Equal(t, `CREATE TABLE "events" (
+	"id" INTEGER
+) STRICT;`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateTableWithAutoIncrement", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "logs",
+			Columns: []*SQLiteColumn{
+				{
+					Name:          "id",
+					Type:          "INTEGER",
+					PrimaryKey:    true,
+					AutoIncrement: true,
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "logs" (
+	"id" INTEGER PRIMARY KEY AUTOINCREMENT
+);`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateTableWithCollationAndCheck", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "people",
+			Columns: []*SQLiteColumn{
+				{
+					Name:      "name",
+					Type:      "TEXT",
+					Collation: "NOCASE",
+				},
+				{
+					Name:  "age",
+					Type:  "INTEGER",
+					Check: "(age > 0)",
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "people" (
+	"name" TEXT COLLATE NOCASE,
+	"age" INTEGER CHECK (age > 0)
+);`, instruction.String())
+	})
+
+	t.Run("SQLiteCreateTableWithATableCheck", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "people",
+			Columns: []*SQLiteColumn{
+				{
+					Name: "name",
+					Type: "TEXT",
+				},
+			},
+			CheckConstraints: []string{"(length(name) < 100)"},
+		}
+
+		require.Equal(t, `CREATE TABLE "people" (
+	"name" TEXT,
+	CHECK (length(name) < 100)
+);`, instruction.String())
+	})
+
+	t.Run("PostgresCreateTablePartitionedByRange", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "events",
+			Columns: []*PostgresColumn{
+				{
+					Name: "created",
+					Type: "date",
+				},
+			},
+			PartitionKey: "RANGE (created)",
+		}
+
+		require.Equal(t, `CREATE TABLE "events" (
+	"created" date
+) PARTITION BY RANGE (created);`, instruction.String())
+	})
+
+	t.Run("PostgresCreateTablePartition", func(t *testing.T) {
+		instruction := &PostgresCreateTablePartitionInstruction{
+			Name:       "events_2024",
+			ParentName: "events",
+			Bound:      "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+		}
+
+		require.Equal(t,
+			`CREATE TABLE "events_2024" PARTITION OF "events" FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateTableDefaultPartition", func(t *testing.T) {
+		instruction := &PostgresCreateTablePartitionInstruction{
+			Name:       "events_default",
+			ParentName: "events",
+			Bound:      "DEFAULT",
+		}
+
+		require.Equal(t,
+			`CREATE TABLE "events_default" PARTITION OF "events" DEFAULT;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateMaterializedView", func(t *testing.T) {
+		instruction := &PostgresCreateMaterializedViewInstruction{
+			Name:  "active_users",
+			Query: " SELECT id\n   FROM users;",
+		}
+
+		require.Equal(t, `CREATE MATERIALIZED VIEW "active_users" AS  SELECT id
+   FROM users;`, instruction.String())
+	})
+
+	t.Run("PostgresDropMaterializedView", func(t *testing.T) {
+		instruction := &PostgresDropMaterializedViewInstruction{Name: "active_users"}
+
+		require.Equal(t, `DROP MATERIALIZED VIEW "active_users";`, instruction.String())
+	})
+
+	t.Run("PostgresCreateTableWithACollation", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "people",
+			Columns: []*PostgresColumn{
+				{
+					Name:      "name",
+					Type:      "text",
+					Collation: "C",
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "people" (
+	"name" text COLLATE "C"
+);`, instruction.String())
+	})
+
+	t.Run("PostgresAlterColumnTypeActionWithACollation", func(t *testing.T) {
+		action := &PostgresAlterColumnTypeAction{
+			ColumnName: "name",
+			DataType:   "text",
+			Collation:  "C",
+		}
+
+		require.Equal(t,
+			`ALTER COLUMN "name" TYPE text COLLATE "C"`,
+			action.TableActionClause())
+	})
+
+	t.Run("PostgresCommentOnTable", func(t *testing.T) {
+		instruction := &PostgresCommentOnTableInstruction{
+			Name:    "users",
+			Comment: "the people of the site",
+		}
+
+		require.Equal(t,
+			`COMMENT ON TABLE "users" IS 'the people of the site';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCommentOnTableThatRemovesTheComment", func(t *testing.T) {
+		instruction := &PostgresCommentOnTableInstruction{Name: "users"}
+
+		require.Equal(t, `COMMENT ON TABLE "users" IS NULL;`, instruction.String())
+	})
+
+	t.Run("PostgresCommentOnColumn", func(t *testing.T) {
+		instruction := &PostgresCommentOnColumnInstruction{
+			TableName:  "users",
+			ColumnName: "id",
+			Comment:    "the key",
+		}
+
+		require.Equal(t,
+			`COMMENT ON COLUMN "users"."id" IS 'the key';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCommentWithAQuote", func(t *testing.T) {
+		instruction := &PostgresCommentOnTableInstruction{
+			Name:    "users",
+			Comment: "the site's people",
+		}
+
+		require.Equal(t,
+			`COMMENT ON TABLE "users" IS 'the site''s people';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresEnableRowLevelSecurityAction", func(t *testing.T) {
+		action := &PostgresRowLevelSecurityAction{Mode: "ENABLE"}
+
+		require.Equal(t, `ENABLE ROW LEVEL SECURITY`, action.TableActionClause())
+	})
+
+	t.Run("PostgresNoForceRowLevelSecurityAction", func(t *testing.T) {
+		action := &PostgresRowLevelSecurityAction{Mode: "NO FORCE"}
+
+		require.Equal(t, `NO FORCE ROW LEVEL SECURITY`, action.TableActionClause())
+	})
+
+	t.Run("PostgresCreatePolicy", func(t *testing.T) {
+		instruction := &PostgresCreatePolicyInstruction{
+			Name:       "docs_read",
+			TableName:  "docs",
+			Permissive: "PERMISSIVE",
+			Command:    "SELECT",
+			Roles:      []string{"public"},
+			Using:      "(NOT secret)",
+		}
+
+		require.Equal(t,
+			`CREATE POLICY "docs_read" ON "docs" AS PERMISSIVE FOR SELECT TO public USING (NOT secret);`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreatePolicyWithACheck", func(t *testing.T) {
+		instruction := &PostgresCreatePolicyInstruction{
+			Name:       "docs_write",
+			TableName:  "docs",
+			Permissive: "PERMISSIVE",
+			Command:    "INSERT",
+			Roles:      []string{"public"},
+			WithCheck:  "(owner = CURRENT_USER)",
+		}
+
+		require.Equal(t,
+			`CREATE POLICY "docs_write" ON "docs" AS PERMISSIVE FOR INSERT TO public WITH CHECK (owner = CURRENT_USER);`,
+			instruction.String())
+	})
+
+	t.Run("PostgresDropPolicy", func(t *testing.T) {
+		instruction := &PostgresDropPolicyInstruction{
+			Name:      "docs_read",
+			TableName: "docs",
+		}
+
+		require.Equal(t, `DROP POLICY "docs_read" ON "docs";`, instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

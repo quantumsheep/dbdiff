@@ -587,6 +587,485 @@ func TestPostgresDriver(t *testing.T) {
 		}, rows)
 	})
 
+	// A partition inherits the columns and the indexes of its parent, so its statement
+	// names neither. The parent comes first, because a partition needs it.
+	t.Run("CreatePartitionedTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE events (id BIGINT, created DATE NOT NULL, label TEXT)
+				PARTITION BY RANGE (created);
+			CREATE TABLE events_2024 PARTITION OF events
+				FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+			CREATE TABLE events_default PARTITION OF events DEFAULT;
+			CREATE INDEX events_label ON events (label);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "events",
+				Columns: []*PostgresColumn{
+					{
+						Name: "id",
+						Type: "bigint",
+					},
+					{
+						Name:    "created",
+						Type:    "date",
+						NotNull: true,
+					},
+					{
+						Name: "label",
+						Type: "text",
+					},
+				},
+				PartitionKey: "RANGE (created)",
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX events_label ON events USING btree (label)",
+			},
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "events_2024",
+				ParentName: "events",
+				Bound:      "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+			},
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "events_default",
+				ParentName: "events",
+				Bound:      "DEFAULT",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A DROP TABLE statement of a parent removes every partition of it, so the diff prints
+	// no statement for a partition of a table that it drops.
+	t.Run("DropPartitionedTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE events (id BIGINT, created DATE NOT NULL)
+				PARTITION BY RANGE (created);
+			CREATE TABLE events_2024 PARTITION OF events
+				FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "events"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AddPartitionToExistingTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE events (id BIGINT, created DATE NOT NULL)
+				PARTITION BY RANGE (created);
+			CREATE TABLE events_2024 PARTITION OF events
+				FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+			CREATE TABLE events_2025 PARTITION OF events
+				FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE events (id BIGINT, created DATE NOT NULL)
+				PARTITION BY RANGE (created);
+			CREATE TABLE events_2024 PARTITION OF events
+				FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "events_2025",
+				ParentName: "events",
+				Bound:      "FOR VALUES FROM ('2025-01-01') TO ('2026-01-01')",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateMaterializedView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT, active BOOLEAN);
+			CREATE MATERIALIZED VIEW active_users AS SELECT id FROM users WHERE active;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE users (id INT, active BOOLEAN);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "active_users",
+				Query: " SELECT id\n   FROM users\n  WHERE active;",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropMaterializedView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropMaterializedViewInstruction{Name: "all_users"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("ModifyMaterializedView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT, active BOOLEAN);
+			CREATE MATERIALIZED VIEW selected_users AS SELECT id FROM users WHERE active;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT, active BOOLEAN);
+			CREATE MATERIALIZED VIEW selected_users AS SELECT id FROM users;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropMaterializedViewInstruction{Name: "selected_users"},
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "selected_users",
+				Query: " SELECT id\n   FROM users\n  WHERE active;",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A materialized view can read a second one, so the CREATE statements take the order of
+	// the dependency.
+	t.Run("CreateMaterializedViewsInDependencyOrder", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE MATERIALIZED VIEW first_view AS SELECT id FROM users;
+			CREATE MATERIALIZED VIEW second_view AS SELECT id FROM first_view;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "first_view",
+				Query: " SELECT id\n   FROM users;",
+			},
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "second_view",
+				Query: " SELECT id\n   FROM first_view;",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// An index of a materialized view belongs to that view, so the CREATE INDEX statement
+	// follows the CREATE MATERIALIZED VIEW statement.
+	t.Run("CreateMaterializedViewWithIndex", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
+			CREATE UNIQUE INDEX all_users_id ON all_users (id);
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "all_users",
+				Query: " SELECT id\n   FROM users;",
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE UNIQUE INDEX all_users_id ON all_users USING btree (id)",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateTableWithColumnCollation", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE people (name TEXT COLLATE "C", other TEXT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "people",
+				Columns: []*PostgresColumn{
+					{
+						Name:      "name",
+						Type:      "text",
+						Collation: "C",
+					},
+					{
+						Name: "other",
+						Type: "text",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterColumnCollation", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE people (name TEXT COLLATE "C");`)
+		driver.ExecOnTarget(`CREATE TABLE people (name TEXT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "people",
+				Actions: []AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "name",
+						DataType:   "text",
+						Collation:  "C",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateTableWithComments", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			COMMENT ON TABLE users IS 'the people';
+			COMMENT ON COLUMN users.id IS 'the key';
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						Comment: "the key",
+					},
+				},
+				Comment: "the people",
+			},
+			&PostgresCommentOnTableInstruction{
+				Name:    "users",
+				Comment: "the people",
+			},
+			&PostgresCommentOnColumnInstruction{
+				TableName:  "users",
+				ColumnName: "id",
+				Comment:    "the key",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("ModifyComments", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT, name TEXT);
+			COMMENT ON TABLE users IS 'the new comment';
+			COMMENT ON COLUMN users.id IS 'the new key';
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT, name TEXT);
+			COMMENT ON TABLE users IS 'the old comment';
+			COMMENT ON COLUMN users.id IS 'the old key';
+			COMMENT ON COLUMN users.name IS 'this one goes away';
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCommentOnTableInstruction{
+				Name:    "users",
+				Comment: "the new comment",
+			},
+			&PostgresCommentOnColumnInstruction{
+				TableName:  "users",
+				ColumnName: "id",
+				Comment:    "the new key",
+			},
+			&PostgresCommentOnColumnInstruction{
+				TableName:  "users",
+				ColumnName: "name",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateTableWithRowLevelSecurity", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (id INT, secret BOOLEAN);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+			ALTER TABLE docs FORCE ROW LEVEL SECURITY;
+			CREATE POLICY docs_read ON docs FOR SELECT USING (NOT secret);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "docs",
+				Columns: []*PostgresColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "secret",
+						Type: "boolean",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresRowLevelSecurityAction{Mode: "ENABLE"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresRowLevelSecurityAction{Mode: "FORCE"},
+				},
+			},
+			&PostgresCreatePolicyInstruction{
+				Name:       "docs_read",
+				TableName:  "docs",
+				Permissive: "PERMISSIVE",
+				Command:    "SELECT",
+				Roles:      []string{"public"},
+				Using:      "(NOT secret)",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DisableRowLevelSecurity", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE docs (id INT);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE docs (id INT);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresRowLevelSecurityAction{Mode: "DISABLE"},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// PostgreSQL holds no action that changes a policy, so the diff prints a DROP statement
+	// and a CREATE statement.
+	t.Run("ModifyPolicy", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (id INT, secret BOOLEAN);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY docs_read ON docs FOR SELECT USING (NOT secret);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE docs (id INT, secret BOOLEAN);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY docs_read ON docs FOR SELECT USING (secret);
+			CREATE POLICY docs_old ON docs FOR DELETE USING (true);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropPolicyInstruction{
+				Name:      "docs_read",
+				TableName: "docs",
+			},
+			&PostgresCreatePolicyInstruction{
+				Name:       "docs_read",
+				TableName:  "docs",
+				Permissive: "PERMISSIVE",
+				Command:    "SELECT",
+				Roles:      []string{"public"},
+				Using:      "(NOT secret)",
+			},
+			&PostgresDropPolicyInstruction{
+				Name:      "docs_old",
+				TableName: "docs",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// The name of a partition can sort before the name of its parent, so the order of the
+	// output comes from the dependency and not from the name.
+	t.Run("CreatePartitionThatSortsBeforeItsParent", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE zebra (id BIGINT, created DATE NOT NULL)
+				PARTITION BY RANGE (created);
+			CREATE TABLE alpha PARTITION OF zebra
+				FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "zebra",
+				Columns: []*PostgresColumn{
+					{
+						Name: "id",
+						Type: "bigint",
+					},
+					{
+						Name:    "created",
+						Type:    "date",
+						NotNull: true,
+					},
+				},
+				PartitionKey: "RANGE (created)",
+			},
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "alpha",
+				ParentName: "zebra",
+				Bound:      "FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

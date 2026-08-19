@@ -85,6 +85,7 @@ drivers/
 ├── sqlite_trigger.go          SQLiteTrigger
 ├── sqlite_view.go             SQLiteView
 ├── sqlite_foreign_key.go      SQLiteForeignKey
+├── sqlite_definition.go       The parser of a CREATE TABLE statement of SQLite
 ├── sqlite_data.go             The row comparison of SQLite
 ├── sqlite_sql_source.go       The temporary SQLite database of a SQL source
 ├── sqlite_test.go             The SQLite test harness and the tests
@@ -95,6 +96,8 @@ drivers/
 ├── postgres_constraint.go     PostgresConstraint
 ├── postgres_trigger.go        PostgresTrigger
 ├── postgres_view.go           PostgresView
+├── postgres_materialized_view.go PostgresMaterializedView
+├── postgres_policy.go         PostgresPolicy, a row level security policy
 ├── postgres_sequence.go       PostgresSequence
 ├── postgres_type.go           PostgresType, an enum type
 ├── postgres_domain.go         PostgresDomain
@@ -321,6 +324,25 @@ holds the type list that a recreation can convert: `TEXT`, `INTEGER`, `REAL`, an
 An incompatible type change becomes a `DROP COLUMN` statement and an `ADD COLUMN`
 statement.
 
+`GetTableColumns` reads `PRAGMA table_xinfo`. `PRAGMA table_info` gives no generated
+column, so it hides that column from the whole diff. The `hidden` value names the kind of
+the column: 1 is a hidden column of a virtual table, 2 is a VIRTUAL generated column, and 3
+is a STORED one. The PRAGMA gives no expression, so `parseGeneratedColumns` in
+`sqlite_generated_column.go` reads the expression from the CREATE TABLE statement of
+`sqlite_master`.
+
+`parseTableDefinition` in `sqlite_definition.go` reads every part of a `CREATE TABLE`
+statement that no PRAGMA reports: the collation of a column, the keyword `AUTOINCREMENT`,
+a check of a column, a check of a table, and the table options `WITHOUT ROWID` and
+`STRICT`. `GetTable` and `GetTableColumns` each call it one time. A change of one of these
+sets `TableOptionsChanged` or makes the column differ, and the table then needs a
+recreation.
+
+Two rules cover a generated column. The `INSERT` statement of a recreation names no such
+column, because SQLite computes it and refuses a value for it. SQLite also refuses an
+`ADD COLUMN` action that holds a STORED generated column, so `NeedsRecreation` answers true
+for that addition.
+
 `GetTableForeignKeys` sorts the foreign keys with `sort.SliceStable`, because SQLite gives
 no stable order. Keep that sort. Without it the output changes between two runs.
 
@@ -356,7 +378,8 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 
 | Data        | Source                                                   |
 | ----------- | -------------------------------------------------------- |
-| Tables      | `information_schema.tables`                              |
+| Tables      | `pg_class` with `relkind IN ('r', 'p')`                  |
+| Materialized views | `pg_matviews`                                     |
 | Columns     | `information_schema.columns`                             |
 | Views       | `information_schema.views`                               |
 | Constraints | `pg_constraint` with `pg_get_constraintdef(oid)`         |
@@ -370,11 +393,40 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Aggregates  | `pg_aggregate` with `pg_proc`                            |
 | Operators   | `pg_operator`                                            |
 | Extensions  | `pg_extension`                                           |
+| Policies    | `pg_policies`                                            |
+| Comments    | `obj_description` and `col_description`                  |
+| Collations  | `pg_collation`, when `attcollation` differs from `typcollation` |
 
-`Diff` prints ten sections in this order: extensions, enum types, domains, composite
-types, sequences, functions, aggregates, operators, tables, views. A table can use each of
-the first five, and an aggregate and an operator use a function. Keep that order when you
-add a section.
+`Diff` prints eleven sections in this order: extensions, enum types, domains, composite
+types, sequences, functions, aggregates, operators, tables, views, materialized views. A
+table can use each of the first five, an aggregate and an operator use a function, and a
+materialized view reads a table or a view. Keep that order when you add a section.
+
+`GetTables` reads `pg_class` with `relkind IN ('r', 'p')`, and not
+`information_schema.tables`. The value `p` names a partitioned table, and `relispartition`
+names a partition. The query reads `pg_get_partkeydef` and `pg_get_expr(relpartbound)`,
+because `information_schema` reports neither. A partition takes the columns, the
+constraints, and the indexes of its parent, so `DiffTable` returns no instruction for it
+and `Instructions` prints one `CREATE TABLE ... PARTITION OF` statement. The index query
+drops a row that `pg_inherits` names, because PostgreSQL builds that index from the index
+of the parent. It also removes the keyword `ONLY`, which PostgreSQL writes for the index of
+a partitioned table.
+
+`GetTables` sorts the tables with `sortTablesByPartitionParent`. The name of a partition
+can sort before the name of its parent, and a `CREATE TABLE ... PARTITION OF` statement
+needs the parent. Keep that sort.
+
+PostgreSQL accepts no comment and no row level security option in a `CREATE TABLE`
+statement, so `Instructions` prints a separate `COMMENT ON` statement and a separate
+`ALTER TABLE ... ROW LEVEL SECURITY` statement after the `CREATE TABLE` statement.
+
+The alias of `pg_collation` in the column query is `column_collation`. The word
+`collation` is a reserved word of PostgreSQL, and a query that uses it as an alias fails
+with a syntax error.
+
+`GetMaterializedViews` reads `pg_matviews`. `information_schema` reports no materialized
+view, so a query of `information_schema.views` finds none of them. The view keeps its
+indexes, because `pg_indexes` holds them and `GetTable` reads no index of a view.
 
 Each `Diff<Object>s` function returns a `SectionDiff`. That type holds an `EarlyRemovals`
 field, an `Additions` field, and a `Removals` field. The source loop writes into
@@ -793,6 +845,8 @@ item when your task touches it.
 
 - The data comparison prints no row of a table that the source only holds. The schema
   section creates that table, and the table stays empty.
+- dbdiff compares no privilege and no owner. It prints no `GRANT` statement and no
+  `REVOKE` statement.
 - The PostgreSQL driver compares one schema for each run. The `--schema` flag selects that
   schema. This item is a boundary of the tool, not a defect. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no

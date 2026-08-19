@@ -37,12 +37,17 @@ func (a *PostgresAddColumnAction) TableActionClause() string {
 type PostgresAlterColumnTypeAction struct {
 	ColumnName string
 	DataType   string
+	Collation  string
 	UsingCast  bool
 }
 
 func (a *PostgresAlterColumnTypeAction) TableActionClause() string {
 	clause := fmt.Sprintf("ALTER COLUMN %s TYPE %s",
 		quoteIdentifier(a.ColumnName), a.DataType)
+
+	if a.Collation != "" {
+		clause += " COLLATE " + quoteIdentifier(a.Collation)
+	}
 
 	if a.UsingCast {
 		clause += fmt.Sprintf(" USING %s::%s", quoteIdentifier(a.ColumnName), a.DataType)
@@ -147,6 +152,14 @@ type PostgresCreateTableInstruction struct {
 	Name        string
 	Columns     []*PostgresColumn
 	Constraints []*PostgresConstraint
+
+	// PartitionKey holds the key of a partitioned table, for example RANGE (created). It
+	// is empty for every other table.
+	PartitionKey string
+
+	// Comment holds the comment of the table. A separate COMMENT ON statement writes it,
+	// because CREATE TABLE accepts no comment.
+	Comment string
 }
 
 func (i *PostgresCreateTableInstruction) String() string {
@@ -160,8 +173,28 @@ func (i *PostgresCreateTableInstruction) String() string {
 		lines = append(lines, "\t"+constraint.Clause())
 	}
 
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);",
+	statement := fmt.Sprintf("CREATE TABLE %s (\n%s\n)",
 		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+
+	if i.PartitionKey != "" {
+		statement += " PARTITION BY " + i.PartitionKey
+	}
+
+	return statement + ";"
+}
+
+// CREATE TABLE name PARTITION OF parent_name bound
+// A partition takes the columns and the constraints of its parent, so the statement names
+// neither of them.
+type PostgresCreateTablePartitionInstruction struct {
+	Name       string
+	ParentName string
+	Bound      string
+}
+
+func (i *PostgresCreateTablePartitionInstruction) String() string {
+	return fmt.Sprintf("CREATE TABLE %s PARTITION OF %s %s;",
+		quoteIdentifier(i.Name), quoteIdentifier(i.ParentName), i.Bound)
 }
 
 // The definition comes from pg_indexes.indexdef, so dbdiff replays the text of the source.
@@ -191,6 +224,141 @@ type PostgresDropTriggerInstruction struct {
 func (i *PostgresDropTriggerInstruction) String() string {
 	return fmt.Sprintf("DROP TRIGGER %s ON %s;",
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+}
+
+// { ENABLE | DISABLE | FORCE | NO FORCE } ROW LEVEL SECURITY
+type PostgresRowLevelSecurityAction struct {
+	Mode string
+}
+
+func (a *PostgresRowLevelSecurityAction) TableActionClause() string {
+	return a.Mode + " ROW LEVEL SECURITY"
+}
+
+// CREATE POLICY name ON table_name AS permissive FOR command TO role [, ...]
+//
+//	[ USING ( expression ) ] [ WITH CHECK ( expression ) ]
+//
+// The keyword PUBLIC names every role, so that name takes no quotes.
+type PostgresCreatePolicyInstruction struct {
+	Name       string
+	TableName  string
+	Permissive string
+	Command    string
+	Roles      []string
+	Using      string
+	WithCheck  string
+}
+
+func (i *PostgresCreatePolicyInstruction) String() string {
+	statement := fmt.Sprintf("CREATE POLICY %s ON %s",
+		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+
+	if i.Permissive != "" {
+		statement += " AS " + i.Permissive
+	}
+
+	if i.Command != "" {
+		statement += " FOR " + i.Command
+	}
+
+	if len(i.Roles) > 0 {
+		statement += " TO " + strings.Join(policyRoleNames(i.Roles), ", ")
+	}
+
+	if i.Using != "" {
+		statement += " USING " + i.Using
+	}
+
+	if i.WithCheck != "" {
+		statement += " WITH CHECK " + i.WithCheck
+	}
+
+	return statement + ";"
+}
+
+// policyRoleNames quotes each role name. The name public is the keyword PUBLIC, so it
+// keeps no quotes.
+func policyRoleNames(roles []string) []string {
+	names := make([]string, 0, len(roles))
+
+	for _, role := range roles {
+		if strings.EqualFold(role, "public") {
+			names = append(names, role)
+			continue
+		}
+
+		names = append(names, quoteIdentifier(role))
+	}
+
+	return names
+}
+
+// DROP POLICY name ON table_name
+type PostgresDropPolicyInstruction struct {
+	Name      string
+	TableName string
+}
+
+func (i *PostgresDropPolicyInstruction) String() string {
+	return fmt.Sprintf("DROP POLICY %s ON %s;",
+		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+}
+
+// COMMENT ON TABLE name IS comment
+// An empty comment gives the keyword NULL, which removes the comment.
+type PostgresCommentOnTableInstruction struct {
+	Name    string
+	Comment string
+}
+
+func (i *PostgresCommentOnTableInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON TABLE %s IS %s;",
+		quoteIdentifier(i.Name), commentLiteral(i.Comment))
+}
+
+// COMMENT ON COLUMN table_name.column_name IS comment
+type PostgresCommentOnColumnInstruction struct {
+	TableName  string
+	ColumnName string
+	Comment    string
+}
+
+func (i *PostgresCommentOnColumnInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;",
+		quoteIdentifier(i.TableName), quoteIdentifier(i.ColumnName),
+		commentLiteral(i.Comment))
+}
+
+// commentLiteral gives the text of a comment, or the keyword NULL for an empty comment.
+func commentLiteral(comment string) string {
+	if comment == "" {
+		return sqlNullLiteral
+	}
+
+	return quoteLiteral(comment)
+}
+
+// CREATE MATERIALIZED VIEW name AS query
+// The query comes from pg_matviews.definition, and it ends with a semicolon. String
+// removes that semicolon and adds one, so every instruction ends the same way.
+type PostgresCreateMaterializedViewInstruction struct {
+	Name  string
+	Query string
+}
+
+func (i *PostgresCreateMaterializedViewInstruction) String() string {
+	return "CREATE MATERIALIZED VIEW " + quoteIdentifier(i.Name) + " AS " +
+		strings.TrimSuffix(i.Query, ";") + ";"
+}
+
+// DROP MATERIALIZED VIEW name
+type PostgresDropMaterializedViewInstruction struct {
+	Name string
+}
+
+func (i *PostgresDropMaterializedViewInstruction) String() string {
+	return "DROP MATERIALIZED VIEW " + quoteIdentifier(i.Name) + ";"
 }
 
 // CREATE VIEW name AS query

@@ -6,6 +6,87 @@ type PostgresTable struct {
 	Indexes     []*PostgresIndex
 	Constraints []*PostgresConstraint
 	Triggers    []*PostgresTrigger
+
+	// PartitionKey holds the key of a partitioned table. PartitionParent and PartitionBound
+	// hold the parent and the bound of a partition. A table that is neither keeps the three
+	// fields empty.
+	PartitionKey    string
+	PartitionParent string
+	PartitionBound  string
+
+	Comment string
+
+	RowLevelSecurity      bool
+	ForceRowLevelSecurity bool
+	Policies              []*PostgresPolicy
+}
+
+// RowLevelSecurityInstructions returns the statements that switch row level security on.
+// PostgreSQL accepts no such option in a CREATE TABLE statement.
+func (t *PostgresTable) RowLevelSecurityInstructions() []Instruction {
+	var instructions []Instruction
+
+	if t.RowLevelSecurity {
+		instructions = append(instructions, &PostgresAlterTableInstruction{
+			Name:    t.Name,
+			Actions: []AlterTableAction{&PostgresRowLevelSecurityAction{Mode: "ENABLE"}},
+		})
+	}
+
+	if t.ForceRowLevelSecurity {
+		instructions = append(instructions, &PostgresAlterTableInstruction{
+			Name:    t.Name,
+			Actions: []AlterTableAction{&PostgresRowLevelSecurityAction{Mode: "FORCE"}},
+		})
+	}
+
+	for _, policy := range t.Policies {
+		instructions = append(instructions, policy.CreateInstruction())
+	}
+
+	return instructions
+}
+
+func (t *PostgresTable) PolicyByName(name string) (*PostgresPolicy, bool) {
+	for _, policy := range t.Policies {
+		if policy.Name == name {
+			return policy, true
+		}
+	}
+
+	return nil, false
+}
+
+// CommentInstructions returns the statement of the comment of the table and the statement
+// of the comment of each column. PostgreSQL accepts a comment in no CREATE statement.
+func (t *PostgresTable) CommentInstructions() []Instruction {
+	var instructions []Instruction
+
+	if t.Comment != "" {
+		instructions = append(instructions, &PostgresCommentOnTableInstruction{
+			Name:    t.Name,
+			Comment: t.Comment,
+		})
+	}
+
+	for _, column := range t.Columns {
+		if column.Comment == "" {
+			continue
+		}
+
+		instructions = append(instructions, &PostgresCommentOnColumnInstruction{
+			TableName:  t.Name,
+			ColumnName: column.Name,
+			Comment:    column.Comment,
+		})
+	}
+
+	return instructions
+}
+
+// IsPartition tells if the table is a partition of another table.
+func (t *PostgresTable) IsPartition() bool {
+	return t.PartitionParent != ""
 }
 
 func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
@@ -20,6 +101,12 @@ func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
 
 func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) ([]Instruction, error) {
 	var instructions []Instruction
+
+	// A partition holds the columns, the constraints, and the indexes of its parent. The
+	// diff of the parent covers each of them.
+	if t.IsPartition() || other.IsPartition() {
+		return nil, nil
+	}
 
 	alterTable := func(action AlterTableAction) Instruction {
 		return &PostgresAlterTableInstruction{
@@ -63,7 +150,9 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				alterTable(&PostgresDropIdentityAction{ColumnName: sourceColumn.Name}))
 		}
 
-		if sourceColumn.Type != targetColumn.Type {
+		// PostgreSQL changes a collation through the TYPE action, so a new collation
+		// prints that action too.
+		if sourceColumn.Type != targetColumn.Type || sourceColumn.Collation != targetColumn.Collation {
 			usingCast, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
 			if err != nil {
 				return nil, err
@@ -72,6 +161,7 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 			instructions = append(instructions, alterTable(&PostgresAlterColumnTypeAction{
 				ColumnName: sourceColumn.Name,
 				DataType:   sourceColumn.Type,
+				Collation:  sourceColumn.Collation,
 				UsingCast:  usingCast,
 			}))
 		}
@@ -112,6 +202,30 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 					Identity:   sourceColumn.Identity,
 				}))
 			}
+		}
+	}
+
+	instructions = append(instructions, diffRowLevelSecurity(t, other)...)
+
+	if t.Comment != other.Comment {
+		instructions = append(instructions, &PostgresCommentOnTableInstruction{
+			Name:    t.Name,
+			Comment: t.Comment,
+		})
+	}
+
+	for _, sourceColumn := range t.Columns {
+		targetColumn, found := other.ColumnByName(sourceColumn.Name)
+		if !found {
+			continue
+		}
+
+		if sourceColumn.Comment != targetColumn.Comment {
+			instructions = append(instructions, &PostgresCommentOnColumnInstruction{
+				TableName:  t.Name,
+				ColumnName: sourceColumn.Name,
+				Comment:    sourceColumn.Comment,
+			})
 		}
 	}
 
@@ -201,6 +315,94 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	return instructions, nil
 }
 
+// sortTablesByPartitionParent orders the tables so that a partition comes after its
+// parent. The name of a partition can sort before the name of its parent, and a
+// CREATE TABLE ... PARTITION OF statement needs the parent. A partition of a partition
+// keeps the same rule, because the walk visits the parent first.
+func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
+	tableByName := make(map[string]*PostgresTable, len(tables))
+
+	for _, table := range tables {
+		tableByName[table.Name] = table
+	}
+
+	sorted := make([]*PostgresTable, 0, len(tables))
+	visited := make(map[string]bool, len(tables))
+
+	var visit func(table *PostgresTable)
+
+	visit = func(table *PostgresTable) {
+		if visited[table.Name] {
+			return
+		}
+
+		visited[table.Name] = true
+
+		parent, isPartition := tableByName[table.PartitionParent]
+		if isPartition {
+			visit(parent)
+		}
+
+		sorted = append(sorted, table)
+	}
+
+	for _, table := range tables {
+		visit(table)
+	}
+
+	return sorted
+}
+
+// diffRowLevelSecurity compares the two switches of row level security and every policy.
+func diffRowLevelSecurity(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
+	var instructions []Instruction
+
+	alterTable := func(mode string) Instruction {
+		return &PostgresAlterTableInstruction{
+			Name:    sourceTable.Name,
+			Actions: []AlterTableAction{&PostgresRowLevelSecurityAction{Mode: mode}},
+		}
+	}
+
+	if sourceTable.RowLevelSecurity != targetTable.RowLevelSecurity {
+		if sourceTable.RowLevelSecurity {
+			instructions = append(instructions, alterTable("ENABLE"))
+		} else {
+			instructions = append(instructions, alterTable("DISABLE"))
+		}
+	}
+
+	if sourceTable.ForceRowLevelSecurity != targetTable.ForceRowLevelSecurity {
+		if sourceTable.ForceRowLevelSecurity {
+			instructions = append(instructions, alterTable("FORCE"))
+		} else {
+			instructions = append(instructions, alterTable("NO FORCE"))
+		}
+	}
+
+	for _, sourcePolicy := range sourceTable.Policies {
+		targetPolicy, found := targetTable.PolicyByName(sourcePolicy.Name)
+		if !found {
+			instructions = append(instructions, sourcePolicy.CreateInstruction())
+			continue
+		}
+
+		if !sourcePolicy.Equal(targetPolicy) {
+			instructions = append(instructions,
+				targetPolicy.DropInstruction(), sourcePolicy.CreateInstruction())
+		}
+	}
+
+	for _, targetPolicy := range targetTable.Policies {
+		_, found := sourceTable.PolicyByName(targetPolicy.Name)
+		if !found {
+			instructions = append(instructions, targetPolicy.DropInstruction())
+		}
+	}
+
+	return instructions
+}
+
 func (t *PostgresTable) ConstraintByName(name string) (*PostgresConstraint, bool) {
 	for _, c := range t.Constraints {
 		if c.Name == name {
@@ -233,16 +435,30 @@ func (t *PostgresTable) TriggerByName(name string) (*PostgresTrigger, bool) {
 
 func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction {
 	return &PostgresCreateTableInstruction{
-		Name:        t.Name,
-		Columns:     t.Columns,
-		Constraints: t.Constraints,
+		Name:         t.Name,
+		Columns:      t.Columns,
+		Constraints:  t.Constraints,
+		PartitionKey: t.PartitionKey,
+		Comment:      t.Comment,
 	}
 }
 
 // Instructions returns the statement that creates the table, then the statements of its
 // indexes, then the statements of its triggers.
 func (t *PostgresTable) Instructions() []Instruction {
+	if t.IsPartition() {
+		return []Instruction{
+			&PostgresCreateTablePartitionInstruction{
+				Name:       t.Name,
+				ParentName: t.PartitionParent,
+				Bound:      t.PartitionBound,
+			},
+		}
+	}
+
 	instructions := []Instruction{t.CreateTableInstruction()}
+	instructions = append(instructions, t.CommentInstructions()...)
+	instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 
 	for _, index := range t.Indexes {
 		instructions = append(instructions, index.CreateInstruction())
