@@ -7,8 +7,8 @@ import (
 
 type AutomaticCastLookup func(oldType string, newType string) (bool, error)
 
-// columnUsingClause reports whether the type change needs a USING cast. PostgreSQL casts
-// automatically in the assignment context, and a cast of another kind needs the clause.
+// PostgreSQL casts automatically in the assignment context, and a cast of another kind
+// needs the clause.
 func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, hasAutomaticCast AutomaticCastLookup) (bool, error) {
 	automatic, err := hasAutomaticCast(oldColumn.Type, newColumn.Type)
 	if err != nil {

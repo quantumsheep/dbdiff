@@ -20,8 +20,8 @@ type PostgresTableData struct {
 	Rows map[string]map[string]string
 }
 
-// DiffData compares the rows of each table that both schemas hold. The schema section
-// already creates or drops the other tables.
+// The comparison covers a table that both schemas hold. The schema section already
+// creates or drops the other tables.
 func (d *PostgresDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
 
@@ -254,8 +254,7 @@ func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName
 
 const postgresTimeLayout = "2006-01-02 15:04:05.999999-07:00"
 
-// formatPostgresValue returns the SQL literal of one value. The diff compares two rows
-// through these literals, so NULL never equals the text 'NULL'.
+// The diff compares two rows through these literals, so NULL never equals the text 'NULL'.
 func formatPostgresValue(value any) string {
 	if value == nil {
 		return sqlNullLiteral

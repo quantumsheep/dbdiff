@@ -29,7 +29,6 @@ func deferrableClause(tokens []string) string {
 	return ""
 }
 
-// conflictResolution returns the resolution of an ON CONFLICT clause in these tokens.
 func conflictResolution(tokens []string) string {
 	for position, token := range tokens {
 		if !strings.EqualFold(token, "ON") || position+2 >= len(tokens) {
@@ -44,7 +43,6 @@ func conflictResolution(tokens []string) string {
 	return ""
 }
 
-// constraintColumnNames reads the names of a column list, for example "(a, b)".
 func constraintColumnNames(list string) []string {
 	inner := strings.TrimSuffix(strings.TrimPrefix(list, "("), ")")
 
@@ -111,8 +109,7 @@ func parseTableOptions(definition string) (withoutRowID bool, strict bool) {
 	return withoutRowID, strict
 }
 
-// indexAfterColumnList returns the position that follows the parenthesis which closes the
-// column list. A definition with no column list gives the length of the text.
+// A definition with no column list gives the length of the text.
 func indexAfterColumnList(definition string) int {
 	start := indexOfKeyList(definition)
 	if start < 0 {
@@ -169,34 +166,27 @@ type SQLiteTableDefinition struct {
 	Strict             bool
 }
 
-// UniqueConflictOf returns the resolution of the ON CONFLICT clause of the table
-// constraint that holds these columns.
 func (d *SQLiteTableDefinition) UniqueConflictOf(columns []string) string {
 	return d.UniqueConflicts[strings.Join(columns, ",")]
 }
 
-// DeferrableOf returns the DEFERRABLE clause of the foreign key that holds these columns.
 func (d *SQLiteTableDefinition) DeferrableOf(columns []string) string {
 	return d.ForeignKeyDefers[strings.Join(columns, ",")]
 }
 
-// UniqueNameOf returns the name of the UNIQUE table constraint that holds these columns.
 func (d *SQLiteTableDefinition) UniqueNameOf(columns []string) string {
 	return d.UniqueNames[strings.Join(columns, ",")]
 }
 
-// ForeignKeyNameOf returns the name of the foreign key that holds these columns.
 func (d *SQLiteTableDefinition) ForeignKeyNameOf(columns []string) string {
 	return d.ForeignKeyNames[strings.Join(columns, ",")]
 }
 
-// ColumnByName returns the parsed attributes of one column.
 func (d *SQLiteTableDefinition) ColumnByName(name string) (*SQLiteColumn, bool) {
 	column, found := d.Columns[name]
 	return column, found
 }
 
-// parseTableDefinition reads the CREATE TABLE statement of sqlite_master.
 func parseTableDefinition(definition string) *SQLiteTableDefinition {
 	parsed := &SQLiteTableDefinition{
 		Columns:          make(map[string]*SQLiteColumn),
@@ -334,8 +324,7 @@ func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
 	return column
 }
 
-// splitColumnDefinitions returns the parts of the list that follows the table name. A table
-// constraint gives a part too, and parseTableDefinition drops it.
+// A table constraint gives a part too, and parseTableDefinition drops it.
 func splitColumnDefinitions(definition string) []string {
 	start := indexOfKeyList(definition)
 	if start < 0 {
@@ -467,7 +456,6 @@ func splitTopLevelTokens(part string) []string {
 	return tokens
 }
 
-// unquoteIdentifier removes the quotes that SQLite accepts around a name.
 func unquoteIdentifier(token string) string {
 	if len(token) < 2 {
 		return token

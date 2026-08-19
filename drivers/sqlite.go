@@ -188,9 +188,9 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]Instruction, error) {
 	return instructions, nil
 }
 
-// GetTables returns the ordinary tables of the database. PRAGMA table_list names the kind
-// of each table. A virtual table takes its own statement, and a shadow table belongs to the
-// module of a virtual table, so this method returns neither of the two.
+// PRAGMA table_list names the kind of each table. A virtual table takes its own statement,
+// and a shadow table belongs to the module of a virtual table, so this method returns
+// neither of the two.
 //
 // The order comes from sqlite_master, which holds the tables in the order of the creation.
 // A table that holds a foreign key comes after the table that it names, so keep that order.
@@ -261,8 +261,6 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 
 	parsed := parseTableDefinition(definition)
 
-	// A UNIQUE constraint of one column belongs to the definition of that column.
-	// A constraint of two or more columns is a table constraint.
 	var uniqueConstraints []*SQLiteUniqueConstraint
 
 	for _, key := range uniqueKeys {
@@ -336,10 +334,6 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 	}, nil
 }
 
-// GetTableDefinition returns the CREATE TABLE statement of the table. sqlite_master holds
-// no row for an internal table, and the caller then reads an empty definition.
-// GetVirtualTables returns the virtual tables of the database, with the text of each
-// CREATE VIRTUAL TABLE statement.
 func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQLiteVirtualTable, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT master.name, master.sql
@@ -378,7 +372,6 @@ func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQL
 	return tables, nil
 }
 
-// DiffVirtualTables compares the virtual tables of the two databases.
 func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]Instruction, error) {
 	sourceTables, err := d.GetVirtualTables(ctx, d.SourceDatabaseConnection)
 	if err != nil {
@@ -437,7 +430,6 @@ func (d *SQLiteDriver) GetTableDefinition(ctx context.Context, db *sql.DB, table
 	return definition.String, nil
 }
 
-// The hidden value of PRAGMA table_xinfo names the kind of each column.
 const (
 	hiddenColumnOfAVirtualTable = 1
 	virtualGeneratedColumn      = 2
@@ -529,8 +521,7 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 	return columns, nil
 }
 
-// GetTablePrimaryKey returns the columns of a primary key of two or more columns, in the
-// order of the key. A key of one column gives an empty list.
+// A key of one column gives an empty list, because it stays a column constraint.
 func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdentifier(tableName)+");")
 	if err != nil {
@@ -589,8 +580,7 @@ func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, table
 	return names, nil
 }
 
-// GetTableUniqueKeys returns the columns of each UNIQUE constraint of a table. It sorts the
-// keys, because SQLite gives no stable order.
+// This method sorts the keys, because SQLite gives no stable order.
 func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, tableName string) ([][]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+quoteIdentifier(tableName)+");")
 	if err != nil {
@@ -735,8 +725,8 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 	return indexes, nil
 }
 
-// GetIndexDefinitions returns the text of each index of a table. An index that a UNIQUE
-// constraint or a PRIMARY KEY builds holds no text, and the map holds no entry for it.
+// An index that a UNIQUE constraint or a PRIMARY KEY builds holds no text, and the map
+// holds no entry for it.
 func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tableName string) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
 	if err != nil {
@@ -766,10 +756,9 @@ func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tabl
 	return definitions, nil
 }
 
-// GetIndexKeys returns the SQL text of each key part of an index. PRAGMA index_info gives
-// no name for a key that an expression builds, so that key comes from definitionKeys. The
-// PRAGMA also gives no direction and no collation, so indexKeyModifiers reads those two
-// parts from the same text.
+// PRAGMA index_info gives no name for a key that an expression builds, so that key comes
+// from definitionKeys. The PRAGMA also gives no direction and no collation, so
+// indexKeyModifiers reads those two parts from the same text.
 func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName string, definitionKeys []string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
 	if err != nil {

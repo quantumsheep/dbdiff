@@ -39,9 +39,8 @@ func (d *TestingSQLiteDriver) ExecOnTarget(sqlStatements string) {
 	require.NoError(d.tb, err)
 }
 
-// RequireInstructions compares the instructions of the diff. The SQL text of each kind
-// belongs to instruction_test.go, so this method compares no text. It returns the rendered
-// diff, so the caller applies it to the target.
+// The SQL text of each kind belongs to instruction_test.go, so this method compares no
+// text. It returns the rendered diff, so the caller applies it to the target.
 func (d *TestingSQLiteDriver) RequireInstructions(expected []Instruction) string {
 	d.tb.Helper()
 
@@ -126,7 +125,6 @@ func WriteSQLFile(tb testing.TB, directory string, name string, content string) 
 	return path
 }
 
-// A read method must return this error through rows.Err.
 var errRowIteration = errors.New("row iteration failed")
 
 // failingRows yields a fixed set of rows, then fails. It simulates a connection that
@@ -400,7 +398,6 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		// Two target columns hold the same attributes, so the rename guess is unsafe.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name:   "users",
@@ -501,8 +498,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, a, b) VALUES (1, 'Alice', 30);
 		`)
 
-		// The distinct types of x and y give each rename exactly one candidate, so the
-		// detection is unambiguous. The order must follow the source columns: x before y.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "users",
@@ -795,8 +790,6 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// SQLite refuses an ADD COLUMN action that holds a STORED generated column, so this
-	// change needs a new table.
 	t.Run("AddStoredGeneratedColumnRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -853,8 +846,6 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// The INSERT statement of a recreation names no generated column, because SQLite
-	// computes that column.
 	t.Run("RecreateTableWithGeneratedColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1013,8 +1004,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A table option belongs to the CREATE TABLE statement, so a change of that option
-	// needs a new table.
 	t.Run("AddStrictRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1127,7 +1116,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// SQLite holds no ALTER COLUMN action, so a new collation needs a new table.
 	t.Run("ModifyColumnCollationRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1170,8 +1158,6 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// A table constraint belongs to the CREATE TABLE statement, so a new check needs a new
-	// table.
 	t.Run("AddTableCheckRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1219,8 +1205,6 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// A table constraint can hold a name, so the parser reads the keyword CHECK after the
-	// keyword CONSTRAINT too.
 	t.Run("CreateTableWithANamedCheck", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1250,8 +1234,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// PRAGMA index_info gives the name of a key column, and it gives no direction and no
-	// collation. Those two parts come from the CREATE INDEX statement.
 	t.Run("CreateIndexWithDirectionAndCollation", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1273,8 +1255,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A direction that changes makes a different index, so the diff prints a DROP statement
-	// and a CREATE statement.
 	t.Run("ModifyIndexDirection", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1300,8 +1280,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// The keyword ASC is the default, so an index that names it equals an index that does
-	// not. Without this rule the diff prints a statement for two equal indexes.
 	t.Run("IndexWithExplicitAscMatchesTheDefault", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1318,8 +1296,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
-	// No PRAGMA statement reports an ON CONFLICT clause, so the parser reads it from the
-	// CREATE TABLE statement. The clause belongs to the constraint before it.
 	t.Run("CreateTableWithConflictClauses", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1394,7 +1370,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A new conflict clause changes the constraint, so the table needs a recreation.
 	t.Run("ModifyConflictClauseRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1438,8 +1413,6 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// PRAGMA foreign_key_list reports no DEFERRABLE clause, so the parser reads it from the
-	// CREATE TABLE statement.
 	t.Run("CreateTableWithADeferredForeignKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1493,7 +1466,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A new DEFERRABLE clause changes the foreign key, so the table needs a recreation.
 	t.Run("ModifyForeignKeyDeferrable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1561,9 +1533,6 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// dbdiff writes a key of one column as a table constraint, so a second run reads that
-	// form while the source keeps the column form. The two forms name the same key, so the
-	// clause must come from either one. Without that rule the diff never settles.
 	t.Run("DeferrableOfATableForeignKeyOfOneColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1587,9 +1556,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
-	// No PRAGMA statement reports the name of a constraint, so the parser reads it from the
-	// CREATE TABLE statement. A named UNIQUE constraint of one column stays a table
-	// constraint, because a column constraint holds no name.
 	t.Run("CreateTableWithNamedConstraints", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1656,7 +1622,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A new name makes a different constraint, so the table needs a recreation.
 	t.Run("ModifyConstraintNameRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1707,8 +1672,6 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// Two equal checks give no statement. The comparison reads the value of each check, and
-	// not the address of it, so a pointer that differs changes nothing.
 	t.Run("EqualCheckConstraints", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1723,8 +1686,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
-	// A virtual table takes a CREATE VIRTUAL TABLE statement, and its module builds the
-	// shadow tables. The diff replays the statement, and it names no shadow table.
 	t.Run("CreateVirtualTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1764,8 +1725,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// SQLite holds no ALTER statement for a virtual table, so a new definition prints a
-	// DROP statement and a CREATE statement.
 	t.Run("ModifyVirtualTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -2084,7 +2043,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name, active) VALUES (1, 'Alice', 1), (2, 'Bob', 0);
 		`)
 
-		// The recreation of the table drops the index. The last statement builds it again.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2155,7 +2113,6 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		// The UNIQUE constraint builds an index. That index stays out of the diff.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateIndexInstruction{
 				Name:      "idx_users_name",
@@ -2188,8 +2145,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, email, age) VALUES (1, 'alice@example.com', '30'), (2, 'bob@example.com', '25');
 		`)
 
-		// The recreation keeps the constraint in the definition of the column. SQLite
-		// refuses a CREATE INDEX statement with the name of the index of a constraint.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2232,7 +2187,6 @@ func TestSQLiteDriver(t *testing.T) {
 			{"id": int64(2), "email": "bob@example.com", "age": int64(25)},
 		}, rows)
 
-		// The new table refuses a second row with the email of the first row.
 		_, err := driver.TargetDatabaseConnection.Exec(`INSERT INTO users (id, email, age) VALUES (3, 'alice@example.com', 40);`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: users.email")
 	})
@@ -2249,7 +2203,6 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		// A UNIQUE constraint of two or more columns keeps the order of its columns.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2306,7 +2259,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice'), (2, 'blue', 'Bob');
 		`)
 
-		// SQLite adds no table constraint, so the new constraint needs a recreation.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2366,7 +2318,6 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		// The key order differs from the column order of the table.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2408,8 +2359,6 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		// An INTEGER PRIMARY KEY is the alias of the rowid. The form of a table constraint
-		// changes the type of the key, so the key keeps the column constraint form.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2461,7 +2410,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO memberships (team, member, level) VALUES ('red', 'Alice', '3'), ('blue', 'Bob', '1');
 		`)
 
-		// The type of the column "level" changes, so the new table keeps the whole key.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2529,7 +2477,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');
 		`)
 
-		// The primary key of the target holds another column.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2595,7 +2542,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (email, age) VALUES ('alice@example.com', '30'), ('bob@example.com', '25');
 		`)
 
-		// The recreation prints the explicit index only, and no index of the PRIMARY KEY.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2659,8 +2605,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, age) VALUES (1, '30');
 		`)
 
-		// The recreation builds each index of the source. The index diff prints no second
-		// statement for the same index.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2723,8 +2667,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, age) VALUES (1, '30');
 		`)
 
-		// The DROP TABLE statement of the recreation removes the index of the target. The
-		// index diff prints no DROP INDEX statement for that index.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2783,8 +2725,6 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, age) VALUES (1, '30');
 		`)
 
-		// The DROP TABLE statement of the recreation removes the trigger of the target. The
-		// recreation builds each trigger of the source again.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -3152,7 +3092,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE TABLE items (identifier INTEGER PRIMARY KEY, label TEXT);`)
 		driver.ExecOnTarget(`INSERT INTO items (identifier, label) VALUES (1, 'old');`)
 
-		// The target holds no column with the name of the key.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "items",
@@ -3239,7 +3178,6 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver := &SQLiteDriver{}
 
-		// The read method must return the failure of Next through rows.Err.
 		_, err = driver.GetTableColumns(t.Context(), db, "users")
 		require.ErrorIs(t, err, errRowIteration)
 	})

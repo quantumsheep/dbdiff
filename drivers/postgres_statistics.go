@@ -1,8 +1,5 @@
 package drivers
 
-// A PostgresStatistics is an extended statistics object. It tells the planner about the
-// correlation of two or more columns of one table.
-//
 // PostgreSQL holds no action that changes the columns of such an object, so a new
 // definition prints a DROP statement and a CREATE statement.
 type PostgresStatistics struct {

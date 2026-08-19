@@ -8,8 +8,6 @@ import (
 	"github.com/samber/lo"
 )
 
-// CREATE TYPE name AS ENUM ( label [, ...] )
-// A label holds raw text. String() quotes each label.
 type PostgresCreateEnumTypeInstruction struct {
 	Name   string
 	Labels []string
@@ -24,7 +22,6 @@ func (i *PostgresCreateEnumTypeInstruction) String() string {
 		quoteIdentifier(i.Name), strings.Join(labels, ", "))
 }
 
-// ALTER TYPE name ADD VALUE new_enum_value
 type PostgresAlterTypeAddValueInstruction struct {
 	Name  string
 	Value string
@@ -35,8 +32,6 @@ func (i *PostgresAlterTypeAddValueInstruction) String() string {
 		quoteIdentifier(i.Name), quoteLiteral(i.Value))
 }
 
-// DROP TYPE name
-// The enum type and the composite type both use this instruction.
 type PostgresDropTypeInstruction struct {
 	Name string
 }
@@ -45,7 +40,6 @@ func (i *PostgresDropTypeInstruction) String() string {
 	return "DROP TYPE " + quoteIdentifier(i.Name) + ";"
 }
 
-// CREATE TYPE name AS ( attribute_name data_type [, ...] )
 type PostgresCreateCompositeTypeInstruction struct {
 	Name       string
 	Attributes []*PostgresCompositeTypeAttribute
@@ -60,9 +54,6 @@ func (i *PostgresCreateCompositeTypeInstruction) String() string {
 		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
 }
 
-// CREATE DOMAIN name AS data_type [ DEFAULT expression ] [ NOT NULL ]
-//
-//	[ CONSTRAINT constraint_name definition ] [ ... ]
 type PostgresCreateDomainInstruction struct {
 	Name        string
 	BaseType    string
@@ -94,7 +85,6 @@ func (i *PostgresCreateDomainInstruction) String() string {
 	return statement + ";"
 }
 
-// DROP DOMAIN name
 type PostgresDropDomainInstruction struct {
 	Name string
 }
@@ -103,7 +93,6 @@ func (i *PostgresDropDomainInstruction) String() string {
 	return "DROP DOMAIN " + quoteIdentifier(i.Name) + ";"
 }
 
-// ALTER DOMAIN name action
 type PostgresAlterDomainInstruction struct {
 	Name   string
 	Action AlterDomainAction
@@ -114,7 +103,6 @@ func (i *PostgresAlterDomainInstruction) String() string {
 		quoteIdentifier(i.Name), i.Action.DomainActionClause())
 }
 
-// SET DEFAULT expression
 type PostgresSetDomainDefaultAction struct {
 	Expression string
 }
@@ -123,28 +111,24 @@ func (a *PostgresSetDomainDefaultAction) DomainActionClause() string {
 	return "SET DEFAULT " + a.Expression
 }
 
-// DROP DEFAULT
 type PostgresDropDomainDefaultAction struct{}
 
 func (a *PostgresDropDomainDefaultAction) DomainActionClause() string {
 	return "DROP DEFAULT"
 }
 
-// SET NOT NULL
 type PostgresSetDomainNotNullAction struct{}
 
 func (a *PostgresSetDomainNotNullAction) DomainActionClause() string {
 	return "SET NOT NULL"
 }
 
-// DROP NOT NULL
 type PostgresDropDomainNotNullAction struct{}
 
 func (a *PostgresDropDomainNotNullAction) DomainActionClause() string {
 	return "DROP NOT NULL"
 }
 
-// ADD CONSTRAINT constraint_name definition
 type PostgresAddDomainConstraintAction struct {
 	ConstraintName string
 	Definition     string
@@ -155,7 +139,6 @@ func (a *PostgresAddDomainConstraintAction) DomainActionClause() string {
 		quoteIdentifier(a.ConstraintName), a.Definition)
 }
 
-// DROP CONSTRAINT constraint_name
 type PostgresDropDomainConstraintAction struct {
 	ConstraintName string
 }

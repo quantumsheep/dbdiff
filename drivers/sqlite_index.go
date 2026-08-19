@@ -57,7 +57,6 @@ func closingQuote(character rune) rune {
 	return noQuote
 }
 
-// parseIndexDefinition reads the key parts and the condition of a CREATE INDEX statement.
 // PRAGMA index_info gives no name for an expression key, and it gives no condition.
 func parseIndexDefinition(definition string) ([]string, string) {
 	start := indexOfKeyList(definition)
@@ -151,8 +150,7 @@ func indexOfKeyList(definition string) int {
 	return -1
 }
 
-// parseIndexCondition reads the condition of a partial index. The text starts after the
-// parenthesis that closes the key list.
+// The text starts after the parenthesis that closes the key list.
 func parseIndexCondition(text string) string {
 	const whereKeyword = "WHERE"
 

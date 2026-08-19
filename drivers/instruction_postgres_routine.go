@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// The definition comes from pg_get_functiondef, so dbdiff replays the text of the source.
 type PostgresCreateFunctionInstruction struct {
 	Definition string
 }
@@ -15,7 +14,6 @@ func (i *PostgresCreateFunctionInstruction) String() string {
 	return i.Definition + ";"
 }
 
-// DROP FUNCTION name ( argument_type [, ...] )
 type PostgresDropFunctionInstruction struct {
 	Name      string
 	Arguments string
@@ -25,9 +23,6 @@ func (i *PostgresDropFunctionInstruction) String() string {
 	return fmt.Sprintf("DROP FUNCTION %s(%s);", quoteIdentifier(i.Name), i.Arguments)
 }
 
-// CREATE AGGREGATE name ( argument_type [, ...] ) ( SFUNC = sfunc, STYPE = state_type
-//
-//	[, FINALFUNC = ffunc ] [, INITCOND = initial_condition ] )
 type PostgresCreateAggregateInstruction struct {
 	Name               string
 	Arguments          string
@@ -57,7 +52,6 @@ func (i *PostgresCreateAggregateInstruction) String() string {
 		quoteIdentifier(i.Name), i.Arguments, strings.Join(options, ", "))
 }
 
-// DROP AGGREGATE name ( argument_type [, ...] )
 type PostgresDropAggregateInstruction struct {
 	Name      string
 	Arguments string
@@ -67,10 +61,6 @@ func (i *PostgresDropAggregateInstruction) String() string {
 	return fmt.Sprintf("DROP AGGREGATE %s(%s);", quoteIdentifier(i.Name), i.Arguments)
 }
 
-// CREATE OPERATOR name ( FUNCTION = function_name [, LEFTARG = left_type ]
-//
-//	[, RIGHTARG = right_type ] )
-//
 // The name of an operator holds punctuation marks only, so it takes no quotes.
 type PostgresCreateOperatorInstruction struct {
 	Name          string
@@ -93,8 +83,6 @@ func (i *PostgresCreateOperatorInstruction) String() string {
 	return fmt.Sprintf("CREATE OPERATOR %s (%s);", i.Name, strings.Join(options, ", "))
 }
 
-// DROP OPERATOR name ( left_type, right_type )
-// An argument that the operator does not hold prints NONE.
 type PostgresDropOperatorInstruction struct {
 	Name          string
 	LeftArgument  sql.NullString

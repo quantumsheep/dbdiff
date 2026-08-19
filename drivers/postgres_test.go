@@ -24,7 +24,6 @@ const postgresTestConnectionString = "postgres://user:password@localhost:5432/db
 // build. A silent skip hides that failure.
 const skipPostgresServerVariable = "DBDIFF_TEST_SKIP_POSTGRES"
 
-// skipWithoutPostgresServer stops the test when the environment names no server.
 func skipWithoutPostgresServer(tb testing.TB) {
 	tb.Helper()
 
@@ -164,8 +163,7 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 	}
 }
 
-// NewTestPostgresDriverWithPrivileges builds a driver that compares the privileges. It
-// creates the role that the tests name, because a role belongs to the server.
+// This harness creates the role that the tests name, because a role belongs to the server.
 func NewTestPostgresDriverWithPrivileges(tb testing.TB) *TestingPostgresDriver {
 	tb.Helper()
 
@@ -187,9 +185,8 @@ func (d *TestingPostgresDriver) ExecOnTarget(sqlStatements string) {
 	require.NoError(d.tb, err)
 }
 
-// RequireInstructions compares the instructions of the diff. The SQL text of each kind
-// belongs to instruction_test.go, so this method compares no text. It returns the rendered
-// diff, so the caller applies it to the target.
+// The SQL text of each kind belongs to instruction_test.go, so this method compares no
+// text. It returns the rendered diff, so the caller applies it to the target.
 func (d *TestingPostgresDriver) RequireInstructions(expected []Instruction) string {
 	d.tb.Helper()
 
@@ -336,7 +333,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, score INT);`)
 		driver.ExecOnTarget(`INSERT INTO users (id, score) VALUES (1, 42);`)
 
-		// PostgreSQL casts an integer to a bigint, so the statement needs no USING clause.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -365,7 +361,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, score TEXT);`)
 		driver.ExecOnTarget(`INSERT INTO users (id, score) VALUES (1, '42');`)
 
-		// PostgreSQL casts no text to an integer, so the statement needs a USING clause.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -450,8 +445,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, tags INT[]);`)
 		driver.ExecOnTarget(`INSERT INTO users (id, tags) VALUES (1, ARRAY[5, 6]);`)
 
-		// information_schema.columns gives the text ARRAY for both types. format_type gives
-		// the exact type name, so the statement below is valid SQL.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -631,8 +624,6 @@ func TestPostgresDriver(t *testing.T) {
 		}, rows)
 	})
 
-	// A partition inherits the columns and the indexes of its parent, so its statement
-	// names neither. The parent comes first, because a partition needs it.
 	t.Run("CreatePartitionedTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -683,8 +674,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A DROP TABLE statement of a parent removes every partition of it, so the diff prints
-	// no statement for a partition of a table that it drops.
 	t.Run("DropPartitionedTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -792,8 +781,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A materialized view can read a second one, so the CREATE statements take the order of
-	// the dependency.
 	t.Run("CreateMaterializedViewsInDependencyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -819,8 +806,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// An index of a materialized view belongs to that view, so the CREATE INDEX statement
-	// follows the CREATE MATERIALIZED VIEW statement.
 	t.Run("CreateMaterializedViewWithIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1032,8 +1017,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// PostgreSQL holds no action that changes a policy, so the diff prints a DROP statement
-	// and a CREATE statement.
 	t.Run("ModifyPolicy", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1072,8 +1055,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// The name of a partition can sort before the name of its parent, so the order of the
-	// output comes from the dependency and not from the name.
 	t.Run("CreatePartitionThatSortsBeforeItsParent", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1110,8 +1091,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A table of INHERITS is no partition. pg_inherits names the parent of both kinds, so
-	// relispartition gives the difference.
 	t.Run("CreateTableThatInheritsAnotherTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1149,8 +1128,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// The sequence of an identity column holds its options. PostgreSQL omits an option that
-	// keeps the default of the type.
 	t.Run("CreateTableWithIdentityOptions", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1293,8 +1270,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// The mode USING INDEX names an index, so the statement comes after the CREATE INDEX
-	// statement of that index.
 	t.Run("ReplicaIdentityUsingAnIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1323,8 +1298,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// PostgreSQL refuses to drop the index that the replica identity of the target holds,
-	// so the mode changes before the DROP INDEX statement.
 	t.Run("ReplicaIdentityBeforeAnIndexRemoval", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1389,7 +1362,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A parameter that the source does not hold goes back to its default value.
 	t.Run("ResetStorageParameters", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1410,8 +1382,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// information_schema.views reports the check option beside the query, and the query
-	// text holds none of it.
 	t.Run("CreateViewWithACheckOption", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1433,7 +1403,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A new check option keeps the query text equal, so the option gives the difference.
 	t.Run("ModifyViewCheckOption", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1459,8 +1428,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// pg_rules writes the name of the schema into the definition, so the query removes that
-	// prefix. Without that step the statement builds the rule in the source schema.
 	t.Run("CreateRule", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1499,8 +1466,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// PostgreSQL holds no action that changes a rule, so a new definition prints a DROP
-	// statement and a CREATE statement.
 	t.Run("ModifyRule", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1527,7 +1492,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A view holds an implicit _RETURN rule. The diff names no such rule.
 	t.Run("ViewRuleIsIgnored", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1544,8 +1508,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
-	// The action of a rule can name a second table, so every rule comes after every table.
-	// Without that order the statement names a table that is not there.
 	t.Run("CreateRuleThatNamesASecondTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1582,8 +1544,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// pg_get_statisticsobjdef writes the name of the schema, so the query removes that
-	// prefix. The statistics come after the tables, because they name a table.
 	t.Run("CreateStatistics", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1619,8 +1579,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// PostgreSQL holds no action that changes the columns of a statistics object, so a new
-	// definition prints a DROP statement and a CREATE statement.
 	t.Run("ModifyStatistics", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1644,8 +1602,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A role name belongs to the server and not to the schema, so the comparison of the
-	// privileges needs the ComparePrivileges field. The default value is false.
 	t.Run("ComparePrivilegesIsOffByDefault", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1681,7 +1637,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A privilege that the source does not hold takes a REVOKE statement.
 	t.Run("RevokePrivileges", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
@@ -1742,7 +1697,6 @@ func TestPostgresDriver(t *testing.T) {
 		})
 	})
 
-	// A column definition accepts no storage mode, so the mode comes in a second statement.
 	t.Run("CreateTableWithAColumnStorage", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1803,7 +1757,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A source column that keeps the mode of its type takes the mode DEFAULT.
 	t.Run("ResetColumnStorage", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1828,8 +1781,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A TYPE action gives the column the storage mode of the new type, so the mode of the
-	// source comes again after that action.
 	t.Run("ColumnStorageAfterATypeChange", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1866,8 +1817,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A column definition accepts no statistics target, so the target comes in a second
-	// statement.
 	t.Run("CreateTableWithAStatisticsTarget", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1928,7 +1877,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// The value -1 gives the column the default target of the server again.
 	t.Run("ResetColumnStatisticsTarget", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -1953,8 +1901,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A new column takes its storage mode and its statistics target after the ADD COLUMN
-	// action, because a column definition accepts neither.
 	t.Run("AddColumnWithAStorageAndAStatisticsTarget", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -2088,7 +2034,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, code INT, CONSTRAINT pk_users PRIMARY KEY (code));`)
 
-		// PostgreSQL drops the constraint with the column, so its drop comes first.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2144,7 +2089,6 @@ func TestPostgresDriver(t *testing.T) {
 			);
 		`)
 
-		// The primary key covers no removed column, so the diff keeps it.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2228,8 +2172,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT); CREATE INDEX idx_email ON users(email);`)
 
-		// A DROP COLUMN statement drops every index of that column, so the DROP INDEX
-		// statement must print first.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropIndexInstruction{Name: "idx_email"},
 			&PostgresAlterTableInstruction{
@@ -2269,7 +2211,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT); CREATE UNIQUE INDEX idx_name ON users(name);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email); CREATE INDEX idx_name ON users(name);`)
 
-		// The two statements of the modified index must stay adjacent.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropIndexInstruction{Name: "idx_name"},
 			&PostgresCreateIndexInstruction{Definition: "CREATE UNIQUE INDEX idx_name ON users USING btree (name)"},
@@ -2314,7 +2255,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A CREATE TRIGGER statement accepts no mode, so the mode comes in a second statement.
 	t.Run("CreateADisabledTrigger", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -2354,7 +2294,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// The two sides hold the same definition, so the mode alone gives the statement.
 	t.Run("AlterTriggerEnableMode", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -2390,8 +2329,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
-	// A DROP TRIGGER statement and a CREATE TRIGGER statement give the mode ENABLE, so the
-	// mode of the source comes after that pair.
 	t.Run("AlterTriggerDefinitionAndEnableMode", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -2536,7 +2473,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE SEQUENCE counter MINVALUE 100 START WITH 100;`)
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		// The current value stays below the new minimum, so MINVALUE needs a RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter');`)
 
 		diff := driver.RequireInstructions([]Instruction{
@@ -2566,7 +2502,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE SEQUENCE counter MAXVALUE 5;`)
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		// The current value climbs above the new maximum, so MAXVALUE needs a RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter') FROM generate_series(1, 10);`)
 
 		diff := driver.RequireInstructions([]Instruction{
@@ -2592,7 +2527,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
 		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
 
-		// The current value stays inside the new range, so the diff holds no RESTART.
 		driver.ExecOnTarget(`SELECT nextval('counter');`)
 
 		diff := driver.RequireInstructions([]Instruction{
@@ -2621,7 +2555,6 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id SERIAL);`)
 
-		// The table creates its own sequence. The diff holds the table only.
 		driver.RequireInstructions([]Instruction{
 			&PostgresCreateTableInstruction{
 				Name: "users",
@@ -2677,7 +2610,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad');`)
 		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
 
-		// PostgreSQL removes no value from an enum. The type needs a recreation.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropTypeInstruction{Name: "mood"},
 			&PostgresCreateEnumTypeInstruction{
@@ -2760,7 +2692,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE DOMAIN short_text AS varchar(10);`)
 		driver.ExecOnTarget(`CREATE DOMAIN short_text AS integer;`)
 
-		// PostgreSQL changes no base type of a domain, so the diff recreates the domain.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropDomainInstruction{Name: "short_text"},
 			&PostgresCreateDomainInstruction{
@@ -2881,7 +2812,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '10');`)
 
-		// PostgreSQL changes no option of an aggregate, so the diff recreates it.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropAggregateInstruction{
 				Name:      "total",
@@ -3008,7 +2938,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 		driver.ExecOnTarget(`CREATE OPERATOR === (FUNCTION = int_sub, LEFTARG = integer, RIGHTARG = integer);`)
 
-		// PostgreSQL changes no function of an operator, so the diff recreates it.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropOperatorInstruction{
 				Name: "===",
@@ -3120,7 +3049,6 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(`CREATE FUNCTION calculate(a integer) RETURNS text AS $$ BEGIN RETURN a::text; END; $$ LANGUAGE plpgsql;`)
 		driver.ExecOnTarget(`CREATE FUNCTION calculate(a integer) RETURNS integer AS $$ BEGIN RETURN a; END; $$ LANGUAGE plpgsql;`)
 
-		// PostgreSQL refuses CREATE OR REPLACE FUNCTION when the return type changes.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresDropFunctionInstruction{
 				Name:      "calculate",
@@ -3181,7 +3109,6 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE events (id INT, feeling mood);
 		`)
 
-		// The table uses the type, so the table goes away first.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropTableInstruction{Name: "events"},
 			&PostgresDropTypeInstruction{Name: "mood"},
@@ -3198,7 +3125,6 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE VIEW user_ids AS SELECT id FROM users;
 		`)
 
-		// The view uses the table, so the view goes away first.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropViewInstruction{Name: "user_ids"},
 			&SQLDropTableInstruction{Name: "users"},
@@ -3216,7 +3142,6 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE VIEW user_labels AS SELECT label FROM users;
 		`)
 
-		// The view reads the column, so the view goes away before the column.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropViewInstruction{Name: "user_labels"},
 			&PostgresAlterTableInstruction{
@@ -3242,7 +3167,6 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE VIEW user_labels AS SELECT label FROM users;
 		`)
 
-		// The definition stays equal, but the view reads a column that changes its type.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropViewInstruction{Name: "user_labels"},
 			&PostgresAlterTableInstruction{
@@ -3273,7 +3197,6 @@ func TestPostgresDriver(t *testing.T) {
 		`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
 
-		// view_a reads view_b, so the diff creates view_b first, against the name order.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresCreateViewInstruction{
 				Name:  "view_b",
@@ -3297,7 +3220,6 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE VIEW view_a AS SELECT id FROM view_b;
 		`)
 
-		// PostgreSQL refuses to drop view_b while view_a still reads it.
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropViewInstruction{Name: "view_a"},
 			&SQLDropViewInstruction{Name: "view_b"},
@@ -3468,7 +3390,6 @@ func TestPostgresDriver(t *testing.T) {
 		// A new NOT NULL column needs an empty table, so the target holds no row here.
 		driver.ExecOnTarget(`CREATE TABLE items (label TEXT);`)
 
-		// The target holds no column with the name of the key.
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "items",

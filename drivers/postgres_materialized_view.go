@@ -34,8 +34,6 @@ func (v *PostgresMaterializedView) DropInstruction() *PostgresDropMaterializedVi
 	return &PostgresDropMaterializedViewInstruction{Name: v.Name}
 }
 
-// Instructions returns the statement that creates the view, then the statements of its
-// indexes.
 func (v *PostgresMaterializedView) Instructions() []Instruction {
 	instructions := []Instruction{v.CreateInstruction()}
 
@@ -56,8 +54,7 @@ func (v *PostgresMaterializedView) IndexByName(name string) (*PostgresIndex, boo
 	return nil, false
 }
 
-// sortMaterializedViewsByDependency orders the views so that a view comes after every view
-// that it reads. Two independent views keep the order that the query gives.
+// Two independent views keep the order that the query gives.
 func sortMaterializedViewsByDependency(views []*PostgresMaterializedView) []*PostgresMaterializedView {
 	viewByName := make(map[string]*PostgresMaterializedView, len(views))
 

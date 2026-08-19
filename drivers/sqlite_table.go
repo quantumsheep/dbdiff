@@ -104,8 +104,6 @@ func (t *SQLiteTable) TriggerInstructions() []Instruction {
 	})
 }
 
-// Instructions returns the statement that creates the table, then the statements of its
-// indexes, then the statements of its triggers.
 func (t *SQLiteTable) Instructions() []Instruction {
 	instructions := []Instruction{t.CreateTableInstruction()}
 	instructions = append(instructions, t.IndexInstructions()...)
@@ -127,10 +125,10 @@ type SQLiteTableColumnsDiff struct {
 	AddsStoredGeneratedColumn bool
 }
 
-// NeedsRecreation tells if the change needs a new table. SQLite supports no ALTER COLUMN,
-// so a modified column, a changed foreign key, a changed table constraint, or a changed
-// table option needs one. A new STORED generated column needs one too, because SQLite
-// refuses an ADD COLUMN action that holds such a column.
+// SQLite supports no ALTER COLUMN, so a modified column, a changed foreign key, a changed
+// table constraint, or a changed table option needs a new table. A new STORED generated
+// column needs one too, because SQLite refuses an ADD COLUMN action that holds such a
+// column.
 func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
 	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged ||
 		d.TableOptionsChanged || d.AddsStoredGeneratedColumn

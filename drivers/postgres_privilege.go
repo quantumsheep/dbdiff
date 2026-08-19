@@ -17,12 +17,10 @@ type PostgresPrivilege struct {
 	Privileges []string
 }
 
-// Key names the object and the role, so the diff pairs the two sides.
 func (p *PostgresPrivilege) Key() string {
 	return p.ObjectType + " " + p.ObjectName + " " + p.Grantee
 }
 
-// GrantInstruction returns the statement that gives these privileges.
 func (p *PostgresPrivilege) GrantInstruction(privileges []string) *PostgresGrantInstruction {
 	return &PostgresGrantInstruction{
 		Privileges: privileges,
@@ -32,7 +30,6 @@ func (p *PostgresPrivilege) GrantInstruction(privileges []string) *PostgresGrant
 	}
 }
 
-// RevokeInstruction returns the statement that removes these privileges.
 func (p *PostgresPrivilege) RevokeInstruction(privileges []string) *PostgresRevokeInstruction {
 	return &PostgresRevokeInstruction{
 		Privileges: privileges,
@@ -42,7 +39,6 @@ func (p *PostgresPrivilege) RevokeInstruction(privileges []string) *PostgresRevo
 	}
 }
 
-// missingPrivileges returns the privileges of first that second does not hold.
 func missingPrivileges(first []string, second []string) []string {
 	var missing []string
 
@@ -55,7 +51,6 @@ func missingPrivileges(first []string, second []string) []string {
 	return missing
 }
 
-// A PostgresOwner names the role that owns one object.
 type PostgresOwner struct {
 	ObjectType string
 	ObjectName string
@@ -70,8 +65,8 @@ func (o *PostgresOwner) SetInstruction() *PostgresSetOwnerInstruction {
 	}
 }
 
-// privilegeObjectType turns the relkind of pg_class into the keyword of a GRANT statement.
-// PostgreSQL names a view and a materialized view with the keyword TABLE there.
+// PostgreSQL names a view and a materialized view with the keyword TABLE in a GRANT
+// statement.
 func privilegeObjectType(relkind string) string {
 	if relkind == "S" {
 		return "SEQUENCE"
@@ -80,8 +75,8 @@ func privilegeObjectType(relkind string) string {
 	return "TABLE"
 }
 
-// ownerObjectType turns the relkind of pg_class into the keyword of an ALTER statement.
-// That keyword names the exact kind of the object, unlike the keyword of a GRANT statement.
+// The keyword of an ALTER statement names the exact kind of the object, unlike the
+// keyword of a GRANT statement.
 func ownerObjectType(relkind string) string {
 	switch relkind {
 	case "S":
@@ -103,7 +98,6 @@ func sortedPrivileges(privileges []string) []string {
 	return sorted
 }
 
-// joinPrivileges builds the list of a GRANT statement or of a REVOKE statement.
 func joinPrivileges(privileges []string) string {
 	return strings.Join(privileges, ", ")
 }

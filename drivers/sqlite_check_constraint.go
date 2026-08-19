@@ -3,8 +3,6 @@ package drivers
 // A SQLiteCheckConstraint is a CHECK constraint of a table. No PRAGMA statement reports it,
 // so parseTableDefinition reads it from the CREATE TABLE statement.
 type SQLiteCheckConstraint struct {
-	// Name holds the name of the constraint. It is empty for a constraint that the schema
-	// declares with no name.
 	Name string
 
 	// Expression holds the check, with the enclosing parentheses.

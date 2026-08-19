@@ -13,9 +13,6 @@ type PostgresTable struct {
 	Triggers    []*PostgresTrigger
 	Rules       []*PostgresRule
 
-	// PartitionKey holds the key of a partitioned table. PartitionParent and PartitionBound
-	// hold the parent and the bound of a partition. A table that is neither keeps the three
-	// fields empty.
 	PartitionKey    string
 	PartitionParent string
 	PartitionBound  string
@@ -26,18 +23,12 @@ type PostgresTable struct {
 
 	Comment string
 
-	// Unlogged marks a table that keeps no write ahead log.
 	Unlogged bool
 
-	// StorageParameters holds the WITH options of the table.
 	StorageParameters []string
 
-	// ReplicaIdentity names the mode of the replica identity: DEFAULT, FULL, NOTHING, or
-	// USING INDEX. Logical replication reads that mode to identify a row.
 	ReplicaIdentity string
 
-	// ReplicaIdentityIndex names the index of the mode USING INDEX. Every other mode keeps
-	// this field empty.
 	ReplicaIdentityIndex string
 
 	RowLevelSecurity      bool
@@ -45,8 +36,7 @@ type PostgresTable struct {
 	Policies              []*PostgresPolicy
 }
 
-// RowLevelSecurityInstructions returns the statements that switch row level security on.
-// PostgreSQL accepts no such option in a CREATE TABLE statement.
+// PostgreSQL accepts no row level security option in a CREATE TABLE statement.
 func (t *PostgresTable) RowLevelSecurityInstructions() []Instruction {
 	var instructions []Instruction
 
@@ -71,9 +61,8 @@ func (t *PostgresTable) RowLevelSecurityInstructions() []Instruction {
 	return instructions
 }
 
-// ReplicaIdentityInstructions returns the statement that sets the replica identity of the
-// table. PostgreSQL accepts no such option in a CREATE TABLE statement. It returns nothing
-// for the mode DEFAULT, because every new table holds that mode.
+// PostgreSQL accepts no replica identity in a CREATE TABLE statement. The mode DEFAULT
+// needs no statement, because every new table holds that mode.
 func (t *PostgresTable) ReplicaIdentityInstructions() []Instruction {
 	if t.ReplicaIdentity == "" || t.ReplicaIdentity == "DEFAULT" {
 		return nil
@@ -98,8 +87,7 @@ func (t *PostgresTable) PolicyByName(name string) (*PostgresPolicy, bool) {
 	return nil, false
 }
 
-// CommentInstructions returns the statement of the comment of the table and the statement
-// of the comment of each column. PostgreSQL accepts a comment in no CREATE statement.
+// PostgreSQL accepts a comment in no CREATE statement.
 func (t *PostgresTable) CommentInstructions() []Instruction {
 	var instructions []Instruction
 
@@ -125,7 +113,6 @@ func (t *PostgresTable) CommentInstructions() []Instruction {
 	return instructions
 }
 
-// IsPartition tells if the table is a partition of another table.
 func (t *PostgresTable) IsPartition() bool {
 	return t.PartitionParent != ""
 }
@@ -484,8 +471,8 @@ func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
 	return sorted
 }
 
-// DiffRules compares the rules of one table. The action of a rule can name a second table,
-// so DiffTables prints these instructions after every table.
+// The action of a rule can name a second table, so DiffTables prints these instructions
+// after every table.
 func (t *PostgresTable) DiffRules(other *PostgresTable) []Instruction {
 	var instructions []Instruction
 
@@ -512,7 +499,6 @@ func (t *PostgresTable) DiffRules(other *PostgresTable) []Instruction {
 	return instructions
 }
 
-// RuleInstructions returns the statement of each rule of the table.
 func (t *PostgresTable) RuleInstructions() []Instruction {
 	var instructions []Instruction
 
@@ -523,8 +509,6 @@ func (t *PostgresTable) RuleInstructions() []Instruction {
 	return instructions
 }
 
-// diffStorageParameters compares the WITH options of a table. A parameter that the source
-// does not hold takes a RESET action, which gives it its default value again.
 func diffStorageParameters(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
 	if slices.Equal(sourceTable.StorageParameters, targetTable.StorageParameters) {
 		return nil
@@ -565,7 +549,6 @@ func diffStorageParameters(sourceTable *PostgresTable, targetTable *PostgresTabl
 	return instructions
 }
 
-// storageParameterName returns the name of a parameter, with no value.
 func storageParameterName(parameter string) string {
 	name, _, found := strings.Cut(parameter, "=")
 	if !found {
@@ -575,7 +558,6 @@ func storageParameterName(parameter string) string {
 	return name
 }
 
-// diffRowLevelSecurity compares the two switches of row level security and every policy.
 func diffRowLevelSecurity(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
 	var instructions []Instruction
 
@@ -679,9 +661,8 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 	}
 }
 
-// Instructions returns the statement that creates the table, then the statements of its
-// indexes, then the statements of its triggers. It returns no rule, because the action of
-// a rule can name a second table. DiffTables prints every rule after every table.
+// The list holds no rule, because the action of a rule can name a second table. DiffTables
+// prints every rule after every table.
 func (t *PostgresTable) Instructions() []Instruction {
 	if t.IsPartition() {
 		return []Instruction{

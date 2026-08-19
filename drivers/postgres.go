@@ -181,7 +181,6 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 	return instructions, nil
 }
 
-// sectionRules holds the parts that differ between two kinds of schema object.
 type sectionRules[T any] struct {
 	Get    func(ctx context.Context, db *sql.DB) ([]T, error)
 	Key    func(object T) string
@@ -190,9 +189,6 @@ type sectionRules[T any] struct {
 	Drop   func(target T) Instruction
 }
 
-// diffSection compares the objects of one kind. It creates an object that the target does
-// not hold, it changes an object that differs, and it drops an object that the source does
-// not hold.
 func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules sectionRules[T]) (*SectionDiff, error) {
 	var additions []Instruction
 	var removals []Instruction
@@ -414,7 +410,6 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	}, nil
 }
 
-// isTableDropped tells if the source holds no table with this name, so the diff drops it.
 func isTableDropped(name string, sourceTables []*PostgresTable) bool {
 	_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
 		return table.Name == name
@@ -505,8 +500,6 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		return nil, err
 	}
 
-	// sourceViews holds a view after every view that it reads, so a forward walk creates
-	// each view after the views that it depends on.
 	for _, sourceView := range sourceViews {
 		targetView, found := lo.Find(targetViews, func(view *PostgresView) bool {
 			return view.Name == sourceView.Name
@@ -561,8 +554,6 @@ func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDif
 		return nil, err
 	}
 
-	// sourceViews holds a view after every view that it reads, so a forward walk creates
-	// each view after the views that it depends on.
 	for _, sourceView := range sourceViews {
 		targetView, found := lo.Find(targetViews, func(view *PostgresMaterializedView) bool {
 			return view.Name == sourceView.Name
@@ -604,7 +595,6 @@ func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDif
 	}, nil
 }
 
-// diffMaterializedViewIndexes compares the indexes of a view that did not change.
 func diffMaterializedViewIndexes(sourceView *PostgresMaterializedView, targetView *PostgresMaterializedView) []Instruction {
 	var instructions []Instruction
 
@@ -632,9 +622,6 @@ func diffMaterializedViewIndexes(sourceView *PostgresMaterializedView, targetVie
 	return instructions
 }
 
-// GetMaterializedViews returns the materialized views of the schema, each one after the
-// views that it reads. information_schema reports no materialized view, so the query reads
-// pg_matviews.
 func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) ([]*PostgresMaterializedView, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT m.matviewname, m.definition
@@ -691,8 +678,6 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 	return sortMaterializedViewsByDependency(views), nil
 }
 
-// GetMaterializedViewIndexes returns the indexes of one materialized view. pg_indexes holds
-// them beside the indexes of a table.
 func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresIndex, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT
@@ -733,8 +718,6 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql
 	return indexes, nil
 }
 
-// GetTablePolicies returns the row level security policies of one table. pg_policies gives
-// the text of each expression, so the diff replays that text.
 func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresPolicy, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT
@@ -1220,8 +1203,7 @@ func (d *PostgresDriver) GetTableRules(ctx context.Context, db *sql.DB, tableNam
 	return rules, nil
 }
 
-// DiffStatistics compares the extended statistics objects of the schema. Each object names
-// a table, so this section comes after the tables.
+// An extended statistics object names a table, so this section comes after the tables.
 func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*SectionDiff, error) {
 	var additions []Instruction
 	var removals []Instruction
@@ -1266,7 +1248,6 @@ func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*SectionDiff, erro
 	}, nil
 }
 
-// GetStatistics returns the extended statistics objects of the schema.
 // pg_get_statisticsobjdef writes the name of the schema, so the query removes the prefix of
 // the current schema. Without that step the statement builds the object in the source
 // schema.
@@ -1315,12 +1296,6 @@ func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*Post
 	return statistics, nil
 }
 
-// DiffPrivileges compares the owner and the privileges of each object of the schema. The
-// section stays empty while ComparePrivileges is false.
-//
-// A role belongs to the server and not to the schema, so this comparison is off by default.
-// A target server holds other role names in most cases, and a GRANT statement of an absent
-// role fails.
 func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, error) {
 	if !d.ComparePrivileges {
 		return &SectionDiff{}, nil
@@ -1394,7 +1369,6 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 	return &SectionDiff{Additions: additions}, nil
 }
 
-// GetOwners returns the owner of each object of the schema.
 func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT c.relname, c.relkind, pg_get_userbyid(c.relowner)
@@ -1439,8 +1413,8 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 	return owners, nil
 }
 
-// GetPrivileges returns the privileges that each role holds on each object of the schema.
-// It reads no privilege of the owner, because PostgreSQL gives those with the object.
+// This method reads no privilege of the owner, because PostgreSQL gives those with the
+// object.
 func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT
@@ -1572,7 +1546,6 @@ func sortViewsByDependency(views []*PostgresView) []*PostgresView {
 	return sorted
 }
 
-// GetViewColumns returns the columns of the tables and of the views that one view reads.
 // The type of each column comes with it, because a type change makes the view invalid.
 func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresViewColumn, error) {
 	rows, err := db.QueryContext(ctx, `

@@ -15,9 +15,6 @@ import (
 // that sets no value reads the version of the module.
 var version = ""
 
-// commandVersion returns the version of the build. A build of a release holds the tag. A
-// build of go install holds the version of the module. Another build holds the text
-// "unknown".
 func commandVersion() string {
 	if version != "" {
 		return version

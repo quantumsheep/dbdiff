@@ -7,8 +7,6 @@ import (
 	"github.com/samber/lo"
 )
 
-// ALTER TABLE name action [, ...]
-// PostgreSQL accepts a list of actions for one statement.
 type PostgresAlterTableInstruction struct {
 	Name    string
 	Actions []AlterTableAction
@@ -23,7 +21,6 @@ func (i *PostgresAlterTableInstruction) String() string {
 		quoteIdentifier(i.Name), strings.Join(clauses, ", "))
 }
 
-// ADD COLUMN column_definition
 type PostgresAddColumnAction struct {
 	Column *PostgresColumn
 }
@@ -32,8 +29,6 @@ func (a *PostgresAddColumnAction) TableActionClause() string {
 	return "ADD COLUMN " + a.Column.Definition()
 }
 
-// ALTER COLUMN column_name TYPE data_type [ USING expression ]
-// UsingCast adds the cast that PostgreSQL needs when no automatic cast exists.
 type PostgresAlterColumnTypeAction struct {
 	ColumnName string
 	DataType   string
@@ -56,13 +51,9 @@ func (a *PostgresAlterColumnTypeAction) TableActionClause() string {
 	return clause
 }
 
-// ALTER COLUMN column_name SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT }
 type PostgresSetStorageAction struct {
 	ColumnName string
-
-	// Storage holds PLAIN, EXTERNAL, EXTENDED, MAIN, or DEFAULT. The mode DEFAULT gives
-	// the column the mode of its type again, and PostgreSQL 16 accepts that mode.
-	Storage string
+	Storage    string
 }
 
 func (a *PostgresSetStorageAction) TableActionClause() string {
@@ -70,8 +61,6 @@ func (a *PostgresSetStorageAction) TableActionClause() string {
 		quoteIdentifier(a.ColumnName), a.Storage)
 }
 
-// ALTER COLUMN column_name SET STATISTICS integer
-// The value -1 gives the column the default target of the server again.
 type PostgresSetStatisticsAction struct {
 	ColumnName string
 	Target     int64
@@ -82,7 +71,6 @@ func (a *PostgresSetStatisticsAction) TableActionClause() string {
 		quoteIdentifier(a.ColumnName), a.Target)
 }
 
-// ALTER COLUMN column_name SET NOT NULL
 type PostgresSetNotNullAction struct {
 	ColumnName string
 }
@@ -91,7 +79,6 @@ func (a *PostgresSetNotNullAction) TableActionClause() string {
 	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " SET NOT NULL"
 }
 
-// ALTER COLUMN column_name DROP NOT NULL
 type PostgresDropNotNullAction struct {
 	ColumnName string
 }
@@ -100,7 +87,6 @@ func (a *PostgresDropNotNullAction) TableActionClause() string {
 	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP NOT NULL"
 }
 
-// ALTER COLUMN column_name SET DEFAULT expression
 type PostgresSetDefaultAction struct {
 	ColumnName string
 	Expression string
@@ -111,7 +97,6 @@ func (a *PostgresSetDefaultAction) TableActionClause() string {
 		quoteIdentifier(a.ColumnName), a.Expression)
 }
 
-// ALTER COLUMN column_name DROP DEFAULT
 type PostgresDropDefaultAction struct {
 	ColumnName string
 }
@@ -120,9 +105,6 @@ func (a *PostgresDropDefaultAction) TableActionClause() string {
 	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP DEFAULT"
 }
 
-// ALTER COLUMN column_name ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY
-// PostgreSQL refuses this action while the column accepts a null value, so the diff sets
-// the NOT NULL flag of the column first.
 type PostgresAddIdentityAction struct {
 	ColumnName string
 	Identity   string
@@ -133,7 +115,6 @@ func (a *PostgresAddIdentityAction) TableActionClause() string {
 		quoteIdentifier(a.ColumnName), a.Identity)
 }
 
-// ALTER COLUMN column_name SET GENERATED { ALWAYS | BY DEFAULT }
 type PostgresSetIdentityAction struct {
 	ColumnName string
 	Identity   string
@@ -144,9 +125,6 @@ func (a *PostgresSetIdentityAction) TableActionClause() string {
 		quoteIdentifier(a.ColumnName), a.Identity)
 }
 
-// ALTER COLUMN column_name SET option [ ... ]
-// PostgreSQL accepts the options of an identity column after the keyword SET, with no
-// parentheses.
 type PostgresSetIdentityOptionsAction struct {
 	ColumnName string
 	Options    string
@@ -157,9 +135,6 @@ func (a *PostgresSetIdentityOptionsAction) TableActionClause() string {
 		quoteIdentifier(a.ColumnName), a.Options)
 }
 
-// ALTER COLUMN column_name DROP IDENTITY
-// This action keeps the NOT NULL flag of the column. PostgreSQL refuses to remove that
-// flag from an identity column, so the diff prints this action first.
 type PostgresDropIdentityAction struct {
 	ColumnName string
 }
@@ -168,7 +143,6 @@ func (a *PostgresDropIdentityAction) TableActionClause() string {
 	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP IDENTITY"
 }
 
-// ADD table_constraint
 type PostgresAddConstraintAction struct {
 	Constraint *PostgresConstraint
 }
@@ -177,7 +151,6 @@ func (a *PostgresAddConstraintAction) TableActionClause() string {
 	return "ADD " + a.Constraint.Clause()
 }
 
-// DROP CONSTRAINT constraint_name
 type PostgresDropConstraintAction struct {
 	ConstraintName string
 }
@@ -186,30 +159,18 @@ func (a *PostgresDropConstraintAction) TableActionClause() string {
 	return "DROP CONSTRAINT " + quoteIdentifier(a.ConstraintName)
 }
 
-// CREATE TABLE name ( column_definition [, ...] [, table_constraint [, ...] ] )
 type PostgresCreateTableInstruction struct {
-	Name        string
-	Columns     []*PostgresColumn
-	Constraints []*PostgresConstraint
-
-	// PartitionKey holds the key of a partitioned table, for example RANGE (created). It
-	// is empty for every other table.
-	PartitionKey string
-
-	// Comment holds the comment of the table. A separate COMMENT ON statement writes it,
-	// because CREATE TABLE accepts no comment.
-	Comment string
-
-	// Inherits names the parent of a table of INHERITS. PostgreSQL merges a column that
-	// the two tables both declare, so the statement keeps every column.
-	Inherits []string
-
-	// Unlogged marks a table that keeps no write ahead log. Such a table loses its rows
-	// after a crash, and it costs less to write.
-	Unlogged bool
-
-	// StorageParameters holds the WITH options of the table, for example fillfactor=70.
+	Name              string
+	Columns           []*PostgresColumn
+	Constraints       []*PostgresConstraint
+	PartitionKey      string
+	Inherits          []string
+	Unlogged          bool
 	StorageParameters []string
+
+	// String writes no comment, because CREATE TABLE accepts none.
+	// PostgresTable.CommentInstructions prints a separate COMMENT ON statement.
+	Comment string
 }
 
 func (i *PostgresCreateTableInstruction) String() string {
@@ -246,9 +207,6 @@ func (i *PostgresCreateTableInstruction) String() string {
 	return statement + ";"
 }
 
-// CREATE TABLE name PARTITION OF parent_name bound
-// A partition takes the columns and the constraints of its parent, so the statement names
-// neither of them.
 type PostgresCreateTablePartitionInstruction struct {
 	Name       string
 	ParentName string
@@ -260,7 +218,6 @@ func (i *PostgresCreateTablePartitionInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.ParentName), i.Bound)
 }
 
-// The definition comes from pg_indexes.indexdef, so dbdiff replays the text of the source.
 type PostgresCreateIndexInstruction struct {
 	Definition string
 }
@@ -269,7 +226,6 @@ func (i *PostgresCreateIndexInstruction) String() string {
 	return i.Definition + ";"
 }
 
-// The definition comes from pg_get_triggerdef, so dbdiff replays the text of the source.
 type PostgresCreateTriggerInstruction struct {
 	Definition string
 }
@@ -278,7 +234,6 @@ func (i *PostgresCreateTriggerInstruction) String() string {
 	return i.Definition + ";"
 }
 
-// DROP TRIGGER name ON table_name
 type PostgresDropTriggerInstruction struct {
 	Name      string
 	TableName string
@@ -289,9 +244,7 @@ func (i *PostgresDropTriggerInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
 }
 
-// { ENABLE | ENABLE REPLICA | ENABLE ALWAYS | DISABLE } TRIGGER name
 type PostgresTriggerEnableAction struct {
-	// Mode holds ENABLE, DISABLE, ENABLE REPLICA, or ENABLE ALWAYS.
 	Mode string
 
 	TriggerName string
@@ -301,7 +254,6 @@ func (a *PostgresTriggerEnableAction) TableActionClause() string {
 	return a.Mode + " TRIGGER " + quoteIdentifier(a.TriggerName)
 }
 
-// SET ( storage_parameter [= value] [, ...] )
 type PostgresSetStorageParametersAction struct {
 	Parameters []string
 }
@@ -310,8 +262,6 @@ func (a *PostgresSetStorageParametersAction) TableActionClause() string {
 	return "SET (" + strings.Join(a.Parameters, ", ") + ")"
 }
 
-// RESET ( storage_parameter [, ...] )
-// A parameter that goes back to its default value takes this action.
 type PostgresResetStorageParametersAction struct {
 	Names []string
 }
@@ -320,7 +270,6 @@ func (a *PostgresResetStorageParametersAction) TableActionClause() string {
 	return "RESET (" + strings.Join(a.Names, ", ") + ")"
 }
 
-// SET { LOGGED | UNLOGGED }
 type PostgresSetPersistenceAction struct {
 	Persistence string
 }
@@ -329,12 +278,8 @@ func (a *PostgresSetPersistenceAction) TableActionClause() string {
 	return "SET " + a.Persistence
 }
 
-// REPLICA IDENTITY { DEFAULT | USING INDEX index_name | FULL | NOTHING }
 type PostgresReplicaIdentityAction struct {
-	// Mode holds DEFAULT, FULL, NOTHING, or USING INDEX.
-	Mode string
-
-	// IndexName names the index of the mode USING INDEX. Every other mode keeps it empty.
+	Mode      string
 	IndexName string
 }
 
@@ -346,7 +291,6 @@ func (a *PostgresReplicaIdentityAction) TableActionClause() string {
 	return "REPLICA IDENTITY " + a.Mode
 }
 
-// { ENABLE | DISABLE | FORCE | NO FORCE } ROW LEVEL SECURITY
 type PostgresRowLevelSecurityAction struct {
 	Mode string
 }
@@ -355,11 +299,6 @@ func (a *PostgresRowLevelSecurityAction) TableActionClause() string {
 	return a.Mode + " ROW LEVEL SECURITY"
 }
 
-// CREATE POLICY name ON table_name AS permissive FOR command TO role [, ...]
-//
-//	[ USING ( expression ) ] [ WITH CHECK ( expression ) ]
-//
-// The keyword PUBLIC names every role, so that name takes no quotes.
 type PostgresCreatePolicyInstruction struct {
 	Name       string
 	TableName  string
@@ -397,8 +336,6 @@ func (i *PostgresCreatePolicyInstruction) String() string {
 	return statement + ";"
 }
 
-// policyRoleNames quotes each role name. The name public is the keyword PUBLIC, so it
-// keeps no quotes.
 func policyRoleNames(roles []string) []string {
 	names := make([]string, 0, len(roles))
 
@@ -414,7 +351,6 @@ func policyRoleNames(roles []string) []string {
 	return names
 }
 
-// DROP POLICY name ON table_name
 type PostgresDropPolicyInstruction struct {
 	Name      string
 	TableName string
@@ -425,8 +361,7 @@ func (i *PostgresDropPolicyInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
 }
 
-// The definition comes from pg_rules, and that text ends with a semicolon. String adds no
-// second one.
+// The definition of pg_rules ends with a semicolon, so String adds no second one.
 type PostgresCreateRuleInstruction struct {
 	Definition string
 }
@@ -435,7 +370,6 @@ func (i *PostgresCreateRuleInstruction) String() string {
 	return i.Definition
 }
 
-// DROP RULE name ON table_name
 type PostgresDropRuleInstruction struct {
 	Name      string
 	TableName string
@@ -446,8 +380,6 @@ func (i *PostgresDropRuleInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
 }
 
-// COMMENT ON TABLE name IS comment
-// An empty comment gives the keyword NULL, which removes the comment.
 type PostgresCommentOnTableInstruction struct {
 	Name    string
 	Comment string
@@ -458,7 +390,6 @@ func (i *PostgresCommentOnTableInstruction) String() string {
 		quoteIdentifier(i.Name), commentLiteral(i.Comment))
 }
 
-// COMMENT ON COLUMN table_name.column_name IS comment
 type PostgresCommentOnColumnInstruction struct {
 	TableName  string
 	ColumnName string
@@ -471,7 +402,6 @@ func (i *PostgresCommentOnColumnInstruction) String() string {
 		commentLiteral(i.Comment))
 }
 
-// commentLiteral gives the text of a comment, or the keyword NULL for an empty comment.
 func commentLiteral(comment string) string {
 	if comment == "" {
 		return sqlNullLiteral
@@ -480,9 +410,6 @@ func commentLiteral(comment string) string {
 	return quoteLiteral(comment)
 }
 
-// CREATE MATERIALIZED VIEW name AS query
-// The query comes from pg_matviews.definition, and it ends with a semicolon. String
-// removes that semicolon and adds one, so every instruction ends the same way.
 type PostgresCreateMaterializedViewInstruction struct {
 	Name  string
 	Query string
@@ -493,7 +420,6 @@ func (i *PostgresCreateMaterializedViewInstruction) String() string {
 		strings.TrimSuffix(i.Query, ";") + ";"
 }
 
-// DROP MATERIALIZED VIEW name
 type PostgresDropMaterializedViewInstruction struct {
 	Name string
 }
@@ -502,16 +428,9 @@ func (i *PostgresDropMaterializedViewInstruction) String() string {
 	return "DROP MATERIALIZED VIEW " + quoteIdentifier(i.Name) + ";"
 }
 
-// CREATE VIEW name AS query
-// The query comes from information_schema.views, and it ends with a semicolon. String
-// removes that semicolon and adds one, so every instruction ends the same way. The query
-// keeps its leading space, so the output text does not change.
 type PostgresCreateViewInstruction struct {
-	Name  string
-	Query string
-
-	// CheckOption holds LOCAL or CASCADED for a view that validates a write through it. It
-	// is empty for every other view, and information_schema reports the value NONE there.
+	Name        string
+	Query       string
 	CheckOption string
 }
 

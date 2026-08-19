@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// ALTER TABLE name action
-// SQLite accepts one action for each statement.
 type SQLiteAlterTableInstruction struct {
 	Name   string
 	Action AlterTableAction
@@ -17,7 +15,6 @@ func (i *SQLiteAlterTableInstruction) String() string {
 		quoteIdentifier(i.Name), i.Action.TableActionClause())
 }
 
-// ADD COLUMN column_definition
 type SQLiteAddColumnAction struct {
 	Column *SQLiteColumn
 }
@@ -26,9 +23,8 @@ func (a *SQLiteAddColumnAction) TableActionClause() string {
 	return "ADD COLUMN " + a.Column.Definition()
 }
 
-// CREATE TABLE name ( column_definition [, ...] [, table_constraint [, ...] ] )
-// A key or a constraint of one column stays in the definition of that column. PrimaryKey
-// and UniqueConstraints hold a group of two or more columns only.
+// PrimaryKey and UniqueConstraints hold a group of two or more columns only. A key or a
+// constraint of one column stays in the definition of that column.
 type SQLiteCreateTableInstruction struct {
 	Name               string
 	Columns            []*SQLiteColumn
@@ -37,7 +33,6 @@ type SQLiteCreateTableInstruction struct {
 	UniqueConstraints  []*SQLiteUniqueConstraint
 	ForeignKeys        []*SQLiteForeignKey
 	CheckConstraints   []*SQLiteCheckConstraint
-
 	// SQLite accepts a table option after the closing parenthesis. WITHOUT ROWID comes
 	// first, because SQLite refuses the reverse order.
 	WithoutRowID bool
@@ -89,7 +84,6 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	return statement + ";"
 }
 
-// The definition comes from sqlite_master, so dbdiff replays the text of the source.
 type SQLiteCreateVirtualTableInstruction struct {
 	Definition string
 }
@@ -98,8 +92,6 @@ func (i *SQLiteCreateVirtualTableInstruction) String() string {
 	return i.Definition + ";"
 }
 
-// CREATE [ UNIQUE ] INDEX name ON table_name ( key [, ...] ) [ WHERE condition ]
-// A key holds the quoted name of a column, or the text of an expression.
 type SQLiteCreateIndexInstruction struct {
 	Unique    bool
 	Name      string
@@ -127,7 +119,6 @@ func (i *SQLiteCreateIndexInstruction) String() string {
 	return statement + ";"
 }
 
-// The definition comes from sqlite_master, so dbdiff replays the text of the source.
 type SQLiteCreateTriggerInstruction struct {
 	Definition string
 }
@@ -136,7 +127,6 @@ func (i *SQLiteCreateTriggerInstruction) String() string {
 	return i.Definition + ";"
 }
 
-// The definition comes from sqlite_master, so dbdiff replays the text of the source.
 type SQLiteCreateViewInstruction struct {
 	Definition string
 }
@@ -145,8 +135,6 @@ func (i *SQLiteCreateViewInstruction) String() string {
 	return i.Definition + ";"
 }
 
-// DROP TRIGGER name
-// SQLite accepts no ON clause.
 type SQLiteDropTriggerInstruction struct {
 	Name string
 }

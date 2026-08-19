@@ -17,28 +17,18 @@ type SQLiteColumn struct {
 
 	Default sql.NullString
 
-	// GeneratedExpression holds the expression of a generated column, with the enclosing
-	// parentheses. It is empty for every other column.
+	// GeneratedExpression holds the expression with the enclosing parentheses.
 	GeneratedExpression string
 
-	// GeneratedStored is true for a STORED generated column. A generated column that holds
-	// false is a VIRTUAL one.
 	GeneratedStored bool
 
-	// AutoIncrement is true for an INTEGER PRIMARY KEY AUTOINCREMENT column.
 	AutoIncrement bool
 
-	// Collation names the collating sequence of the column, for example NOCASE. It is
-	// empty for the default collating sequence.
 	Collation string
 
-	// Check holds the check of the column, with the enclosing parentheses. It is empty for
-	// a column with no check.
+	// Check holds the check with the enclosing parentheses.
 	Check string
 
-	// These three fields hold the resolution of the ON CONFLICT clause of each constraint
-	// of the column, for example REPLACE. A constraint with no such clause keeps an empty
-	// value.
 	PrimaryKeyConflict string
 	UniqueConflict     string
 	NotNullConflict    string

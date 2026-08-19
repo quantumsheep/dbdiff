@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// CREATE EXTENSION name
 type PostgresCreateExtensionInstruction struct {
 	Name string
 }
@@ -15,7 +14,6 @@ func (i *PostgresCreateExtensionInstruction) String() string {
 	return "CREATE EXTENSION " + quoteIdentifier(i.Name) + ";"
 }
 
-// ALTER EXTENSION name UPDATE TO new_version
 type PostgresAlterExtensionInstruction struct {
 	Name       string
 	NewVersion string
@@ -26,7 +24,6 @@ func (i *PostgresAlterExtensionInstruction) String() string {
 		quoteIdentifier(i.Name), quoteLiteral(i.NewVersion))
 }
 
-// DROP EXTENSION name
 type PostgresDropExtensionInstruction struct {
 	Name string
 }
@@ -35,7 +32,6 @@ func (i *PostgresDropExtensionInstruction) String() string {
 	return "DROP EXTENSION " + quoteIdentifier(i.Name) + ";"
 }
 
-// sequenceCycleClause returns the keyword of the cycle option.
 func sequenceCycleClause(cycle bool) string {
 	if cycle {
 		return "CYCLE"
@@ -44,9 +40,6 @@ func sequenceCycleClause(cycle bool) string {
 	return "NO CYCLE"
 }
 
-// CREATE SEQUENCE name AS data_type INCREMENT BY increment MINVALUE minvalue
-//
-//	MAXVALUE maxvalue START WITH start [ NO ] CYCLE
 type PostgresCreateSequenceInstruction struct {
 	Name      string
 	DataType  string
@@ -70,10 +63,6 @@ func (i *PostgresCreateSequenceInstruction) String() string {
 	)
 }
 
-// ALTER SEQUENCE name [ AS data_type ] [ INCREMENT BY increment ] [ MINVALUE minvalue ]
-//
-//	[ MAXVALUE maxvalue ] [ START WITH start ] [ [ NO ] CYCLE ] [ RESTART WITH restart ]
-//
 // One statement holds every clause that changes. Separate statements can fail, because a
 // new minimum above the current value is invalid.
 type PostgresAlterSequenceInstruction struct {
@@ -122,7 +111,6 @@ func (i *PostgresAlterSequenceInstruction) String() string {
 		quoteIdentifier(i.Name), strings.Join(clauses, " "))
 }
 
-// DROP SEQUENCE name
 type PostgresDropSequenceInstruction struct {
 	Name string
 }
@@ -131,8 +119,6 @@ func (i *PostgresDropSequenceInstruction) String() string {
 	return "DROP SEQUENCE " + quoteIdentifier(i.Name) + ";"
 }
 
-// The definition comes from pg_get_statisticsobjdef, so dbdiff replays the text of the
-// source.
 type PostgresCreateStatisticsInstruction struct {
 	Definition string
 }
@@ -141,7 +127,6 @@ func (i *PostgresCreateStatisticsInstruction) String() string {
 	return i.Definition + ";"
 }
 
-// DROP STATISTICS name
 type PostgresDropStatisticsInstruction struct {
 	Name string
 }
@@ -150,7 +135,6 @@ func (i *PostgresDropStatisticsInstruction) String() string {
 	return "DROP STATISTICS " + quoteIdentifier(i.Name) + ";"
 }
 
-// GRANT privilege [, ...] ON object_type name TO role_name
 type PostgresGrantInstruction struct {
 	Privileges []string
 	ObjectType string
@@ -164,7 +148,6 @@ func (i *PostgresGrantInstruction) String() string {
 		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
 }
 
-// REVOKE privilege [, ...] ON object_type name FROM role_name
 type PostgresRevokeInstruction struct {
 	Privileges []string
 	ObjectType string
@@ -178,7 +161,6 @@ func (i *PostgresRevokeInstruction) String() string {
 		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
 }
 
-// ALTER object_type name OWNER TO role_name
 type PostgresSetOwnerInstruction struct {
 	ObjectType string
 	ObjectName string

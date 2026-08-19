@@ -480,8 +480,6 @@ func TestInstructions(t *testing.T) {
 );`, instruction.String())
 	})
 
-	// SQLite accepts a column with no type. The short form of a generated column, for
-	// example "total AS (price * quantity)", holds no type in most schemas.
 	t.Run("SQLiteCreateTableWithATypelessGeneratedColumn", func(t *testing.T) {
 		instruction := &SQLiteCreateTableInstruction{
 			Name: "lines",
@@ -1648,7 +1646,6 @@ func TestInstructions(t *testing.T) {
 	})
 }
 
-// testInstruction covers RenderInstructions without a statement type of the catalogue.
 type testInstruction struct {
 	statement string
 }

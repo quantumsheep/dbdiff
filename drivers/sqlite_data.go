@@ -36,8 +36,8 @@ func (t *SQLiteTable) PrimaryKeyColumnNames() []string {
 	return names
 }
 
-// DiffData compares the rows of each table that both databases hold. The schema section
-// already creates or drops the other tables.
+// The comparison covers a table that both databases hold. The schema section already
+// creates or drops the other tables.
 func (d *SQLiteDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
 
@@ -230,8 +230,7 @@ func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName s
 
 const sqliteTimeLayout = "2006-01-02 15:04:05.999999999-07:00"
 
-// formatSQLiteValue returns the SQL literal of one value. The diff compares two rows
-// through these literals, so NULL never equals the text 'NULL'.
+// The diff compares two rows through these literals, so NULL never equals the text 'NULL'.
 func formatSQLiteValue(value any) string {
 	if value == nil {
 		return sqlNullLiteral

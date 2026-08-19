@@ -102,8 +102,6 @@ func (s *PostgresSequence) Diff(other *PostgresSequence) []Instruction {
 	return []Instruction{instruction}
 }
 
-// RestartValue returns the start value of the sequence when that value fits the new range.
-// It clamps the value to the nearest bound otherwise.
 func (s *PostgresSequence) RestartValue() int64 {
 	value := s.Start
 	if value < s.Min {

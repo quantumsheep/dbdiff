@@ -6,8 +6,6 @@ import (
 )
 
 type SQLiteForeignKey struct {
-	// Name holds the name of the constraint. It is empty for a key that the schema declares
-	// with no name.
 	Name string
 
 	Table    string
@@ -16,8 +14,6 @@ type SQLiteForeignKey struct {
 	OnUpdate string
 	OnDelete string
 
-	// Deferrable holds the text of the DEFERRABLE clause, for example
-	// "DEFERRABLE INITIALLY DEFERRED". It is empty for a key with no such clause.
 	Deferrable string
 }
 
