@@ -1118,7 +1118,9 @@ func TestSQLiteDriver(t *testing.T) {
 						Check: "(age > 0)",
 					},
 				},
-				CheckConstraints: []string{"(length(name) < 100)"},
+				CheckConstraints: []*SQLiteCheckConstraint{
+					{Expression: "(length(name) < 100)"},
+				},
 			},
 		})
 
@@ -1192,7 +1194,9 @@ func TestSQLiteDriver(t *testing.T) {
 						Type: "TEXT",
 					},
 				},
-				CheckConstraints: []string{"(length(name) < 100)"},
+				CheckConstraints: []*SQLiteCheckConstraint{
+					{Expression: "(length(name) < 100)"},
+				},
 			},
 			&SQLInsertSelectInstruction{
 				TableName:         "_people_temp",
@@ -1234,7 +1238,12 @@ func TestSQLiteDriver(t *testing.T) {
 						Type: "INTEGER",
 					},
 				},
-				CheckConstraints: []string{"(age > 0)"},
+				CheckConstraints: []*SQLiteCheckConstraint{
+					{
+						Name:       "age_is_positive",
+						Expression: "(age > 0)",
+					},
+				},
 			},
 		})
 
@@ -1573,6 +1582,142 @@ func TestSQLiteDriver(t *testing.T) {
 				parent INTEGER,
 				FOREIGN KEY ("parent") REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
 			);
+		`)
+
+		driver.RequireInstructions(nil)
+	})
+
+	// No PRAGMA statement reports the name of a constraint, so the parser reads it from the
+	// CREATE TABLE statement. A named UNIQUE constraint of one column stays a table
+	// constraint, because a column constraint holds no name.
+	t.Run("CreateTableWithNamedConstraints", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE items (
+				id INTEGER,
+				owner INTEGER,
+				CONSTRAINT items_positive CHECK (id > 0),
+				CONSTRAINT items_unique UNIQUE (id),
+				CONSTRAINT items_owner FOREIGN KEY (owner) REFERENCES parents(id)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "parents",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+				},
+			},
+			&SQLiteCreateTableInstruction{
+				Name: "items",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "id",
+						Type: "INTEGER",
+					},
+					{
+						Name: "owner",
+						Type: "INTEGER",
+					},
+				},
+				UniqueConstraints: []*SQLiteUniqueConstraint{
+					{
+						Name:    "items_unique",
+						Columns: []string{"id"},
+					},
+				},
+				CheckConstraints: []*SQLiteCheckConstraint{
+					{
+						Name:       "items_positive",
+						Expression: "(id > 0)",
+					},
+				},
+				ForeignKeys: []*SQLiteForeignKey{
+					{
+						Name:     "items_owner",
+						Table:    "parents",
+						From:     []string{"owner"},
+						To:       []string{"id"},
+						OnUpdate: "NO ACTION",
+						OnDelete: "NO ACTION",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A new name makes a different constraint, so the table needs a recreation.
+	t.Run("ModifyConstraintNameRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE items (id INTEGER, CONSTRAINT items_new CHECK (id > 0));
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE items (id INTEGER, CONSTRAINT items_old CHECK (id > 0));
+			INSERT INTO items (id) VALUES (5);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_items_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "id",
+						Type: "INTEGER",
+					},
+				},
+				CheckConstraints: []*SQLiteCheckConstraint{
+					{
+						Name:       "items_new",
+						Expression: "(id > 0)",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_items_temp",
+				ColumnNames:       []string{"id"},
+				SelectExpressions: []string{`"id"`},
+				SourceTableName:   "items",
+			},
+			&SQLDropTableInstruction{Name: "items"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_items_temp",
+				Action: &SQLRenameTableAction{NewName: "items"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("items", "")
+		require.Equal(t, []map[string]any{
+			{"id": int64(5)},
+		}, rows)
+	})
+
+	// Two equal checks give no statement. The comparison reads the value of each check, and
+	// not the address of it, so a pointer that differs changes nothing.
+	t.Run("EqualCheckConstraints", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE items (id INTEGER, CONSTRAINT items_positive CHECK (id > 0));
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE items (id INTEGER, CONSTRAINT items_positive CHECK (id > 0));
 		`)
 
 		driver.RequireInstructions(nil)

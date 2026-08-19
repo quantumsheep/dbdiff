@@ -364,6 +364,9 @@ columns.
 
 dbdiff does not support MySQL.
 
+The SQLite driver keeps the name of a table constraint. A column constraint holds no name,
+so a named `UNIQUE` constraint of one column stays a table constraint.
+
 The SQLite driver keeps the `DEFERRABLE` clause of a foreign key. SQLite writes a key of
 one column as a column constraint or as a table constraint, and the driver reads the clause
 from either form.

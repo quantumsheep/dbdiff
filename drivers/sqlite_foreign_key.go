@@ -6,6 +6,10 @@ import (
 )
 
 type SQLiteForeignKey struct {
+	// Name holds the name of the constraint. It is empty for a key that the schema declares
+	// with no name.
+	Name string
+
 	Table    string
 	From     []string
 	To       []string
@@ -21,7 +25,8 @@ func (fk *SQLiteForeignKey) Clause() string {
 	fromColumns := strings.Join(quoteIdentifiers(fk.From), ", ")
 	toColumns := strings.Join(quoteIdentifiers(fk.To), ", ")
 
-	statement := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)", fromColumns, quoteIdentifier(fk.Table), toColumns)
+	statement := fmt.Sprintf("%sFOREIGN KEY (%s) REFERENCES %s (%s)",
+		constraintNameClause(fk.Name), fromColumns, quoteIdentifier(fk.Table), toColumns)
 
 	if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "" {
 		statement += fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate)
@@ -39,7 +44,11 @@ func (fk *SQLiteForeignKey) Clause() string {
 }
 
 func (fk *SQLiteForeignKey) Equal(other *SQLiteForeignKey) bool {
-	if fk.Table != other.Table || fk.OnUpdate != other.OnUpdate || fk.OnDelete != other.OnDelete {
+	if fk.Name != other.Name || fk.Table != other.Table {
+		return false
+	}
+
+	if fk.OnUpdate != other.OnUpdate || fk.OnDelete != other.OnDelete {
 		return false
 	}
 

@@ -243,8 +243,13 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 	var uniqueConstraints []*SQLiteUniqueConstraint
 
 	for _, key := range uniqueKeys {
-		if len(key) != 1 {
+		constraintName := parsed.UniqueNameOf(key)
+
+		// A column constraint holds no name, so a named constraint of one column stays a
+		// table constraint. Without that rule the name goes away.
+		if len(key) != 1 || constraintName != "" {
 			uniqueConstraints = append(uniqueConstraints, &SQLiteUniqueConstraint{
+				Name:     constraintName,
 				Columns:  key,
 				Conflict: parsed.UniqueConflictOf(key),
 			})
@@ -280,6 +285,7 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 	// form, so a key of one column reads either place. Without that rule a diff of the two
 	// forms never settles.
 	for _, foreignKey := range foreignKeys {
+		foreignKey.Name = parsed.ForeignKeyNameOf(foreignKey.From)
 		foreignKey.Deferrable = parsed.DeferrableOf(foreignKey.From)
 
 		if foreignKey.Deferrable != "" || len(foreignKey.From) != 1 {

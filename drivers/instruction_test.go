@@ -607,7 +607,9 @@ func TestInstructions(t *testing.T) {
 					Type: "TEXT",
 				},
 			},
-			CheckConstraints: []string{"(length(name) < 100)"},
+			CheckConstraints: []*SQLiteCheckConstraint{
+				{Expression: "(length(name) < 100)"},
+			},
 		}
 
 		require.Equal(t, `CREATE TABLE "people" (

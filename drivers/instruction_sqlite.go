@@ -36,7 +36,7 @@ type SQLiteCreateTableInstruction struct {
 	PrimaryKeyConflict string
 	UniqueConstraints  []*SQLiteUniqueConstraint
 	ForeignKeys        []*SQLiteForeignKey
-	CheckConstraints   []string
+	CheckConstraints   []*SQLiteCheckConstraint
 
 	// SQLite accepts a table option after the closing parenthesis. WITHOUT ROWID comes
 	// first, because SQLite refuses the reverse order.
@@ -62,7 +62,7 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	}
 
 	for _, check := range i.CheckConstraints {
-		lines = append(lines, "\tCHECK "+check)
+		lines = append(lines, "\t"+check.Clause())
 	}
 
 	for _, foreignKey := range i.ForeignKeys {

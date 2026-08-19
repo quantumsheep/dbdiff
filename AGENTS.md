@@ -87,6 +87,7 @@ drivers/
 ├── sqlite_foreign_key.go      SQLiteForeignKey
 ├── sqlite_definition.go       The parser of a CREATE TABLE statement of SQLite
 ├── sqlite_unique_constraint.go SQLiteUniqueConstraint, a key of two or more columns
+├── sqlite_check_constraint.go SQLiteCheckConstraint, a check of a table
 ├── sqlite_data.go             The row comparison of SQLite
 ├── sqlite_sql_source.go       The temporary SQLite database of a SQL source
 ├── sqlite_test.go             The SQLite test harness and the tests

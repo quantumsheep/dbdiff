@@ -7,6 +7,15 @@ import (
 	"github.com/samber/lo"
 )
 
+// equalCheckConstraints compares the value of each check. The slice holds a pointer, so
+// slices.Equal compares the address and never the check.
+func equalCheckConstraints(first []*SQLiteCheckConstraint, second []*SQLiteCheckConstraint) bool {
+	return slices.EqualFunc(first, second,
+		func(firstCheck *SQLiteCheckConstraint, secondCheck *SQLiteCheckConstraint) bool {
+			return firstCheck.Equal(secondCheck)
+		})
+}
+
 func equalUniqueConstraints(first []*SQLiteUniqueConstraint, second []*SQLiteUniqueConstraint) bool {
 	return slices.EqualFunc(first, second,
 		func(firstConstraint *SQLiteUniqueConstraint, secondConstraint *SQLiteUniqueConstraint) bool {
@@ -28,7 +37,7 @@ type SQLiteTable struct {
 	Triggers    []*SQLiteTrigger
 	ForeignKeys []*SQLiteForeignKey
 
-	CheckConstraints []string
+	CheckConstraints []*SQLiteCheckConstraint
 
 	WithoutRowID bool
 	Strict       bool
@@ -138,7 +147,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 			t.PrimaryKeyConflict != other.PrimaryKeyConflict ||
 			!equalUniqueConstraints(t.UniqueConstraints, other.UniqueConstraints),
 		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||
-			!slices.Equal(t.CheckConstraints, other.CheckConstraints),
+			!equalCheckConstraints(t.CheckConstraints, other.CheckConstraints),
 	}
 
 	for _, sourceColumn := range t.Columns {

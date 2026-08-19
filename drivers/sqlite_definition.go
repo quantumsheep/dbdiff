@@ -159,7 +159,9 @@ func indexAfterColumnList(definition string) int {
 // reports a collation, the keyword AUTOINCREMENT, or a check.
 type SQLiteTableDefinition struct {
 	Columns            map[string]*SQLiteColumn
-	CheckConstraints   []string
+	CheckConstraints   []*SQLiteCheckConstraint
+	UniqueNames        map[string]string
+	ForeignKeyNames    map[string]string
 	UniqueConflicts    map[string]string
 	ForeignKeyDefers   map[string]string
 	PrimaryKeyConflict string
@@ -178,6 +180,16 @@ func (d *SQLiteTableDefinition) DeferrableOf(columns []string) string {
 	return d.ForeignKeyDefers[strings.Join(columns, ",")]
 }
 
+// UniqueNameOf returns the name of the UNIQUE table constraint that holds these columns.
+func (d *SQLiteTableDefinition) UniqueNameOf(columns []string) string {
+	return d.UniqueNames[strings.Join(columns, ",")]
+}
+
+// ForeignKeyNameOf returns the name of the foreign key that holds these columns.
+func (d *SQLiteTableDefinition) ForeignKeyNameOf(columns []string) string {
+	return d.ForeignKeyNames[strings.Join(columns, ",")]
+}
+
 // ColumnByName returns the parsed attributes of one column.
 func (d *SQLiteTableDefinition) ColumnByName(name string) (*SQLiteColumn, bool) {
 	column, found := d.Columns[name]
@@ -190,6 +202,8 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 		Columns:          make(map[string]*SQLiteColumn),
 		UniqueConflicts:  make(map[string]string),
 		ForeignKeyDefers: make(map[string]string),
+		UniqueNames:      make(map[string]string),
+		ForeignKeyNames:  make(map[string]string),
 	}
 
 	parsed.WithoutRowID, parsed.Strict = parseTableOptions(definition)
@@ -204,18 +218,24 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 		// CONSTRAINT and a name can come before that keyword.
 		if isTableConstraintKeyword(tokens[0]) {
 			constraint := tokens
+			constraintName := ""
 
 			if strings.EqualFold(constraint[0], "CONSTRAINT") && len(constraint) > 2 {
+				constraintName = unquoteIdentifier(constraint[1])
 				constraint = constraint[2:]
 			}
 
 			if strings.EqualFold(constraint[0], "CHECK") && len(constraint) > 1 {
-				parsed.CheckConstraints = append(parsed.CheckConstraints, constraint[1])
+				parsed.CheckConstraints = append(parsed.CheckConstraints, &SQLiteCheckConstraint{
+					Name:       constraintName,
+					Expression: constraint[1],
+				})
 			}
 
 			if strings.EqualFold(constraint[0], "UNIQUE") && len(constraint) > 1 {
 				key := strings.Join(constraintColumnNames(constraint[1]), ",")
 				parsed.UniqueConflicts[key] = conflictResolution(constraint[1:])
+				parsed.UniqueNames[key] = constraintName
 			}
 
 			if strings.EqualFold(constraint[0], "PRIMARY") && len(constraint) > 2 {
@@ -225,6 +245,7 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 			if strings.EqualFold(constraint[0], "FOREIGN") && len(constraint) > 2 {
 				key := strings.Join(constraintColumnNames(constraint[2]), ",")
 				parsed.ForeignKeyDefers[key] = deferrableClause(constraint[2:])
+				parsed.ForeignKeyNames[key] = constraintName
 			}
 
 			continue
