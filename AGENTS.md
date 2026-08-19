@@ -20,9 +20,8 @@ Read this section before you write any code.
 
 1. **Write for a human reader.** Another person must understand the code on the first
    read. Use full words in names. Keep the format that `gofmt` produces.
-2. **Let the code explain itself.** A good name and a small function replace a comment.
-   Write a comment only when the logic stays unclear without it. That case is rare. Never
-   write a comment that repeats the code.
+2. **Let the code explain itself.** Write no comment by default. A comment stays only when
+   its removal lets a reader break the code. See [Comments](#comments).
 3. **Keep the file architecture.** One file holds one schema object of one engine. See
    [Repo layout](#repo-layout).
 4. **Copy the diff algorithm of the drivers that exist.** Every driver walks the source
@@ -716,6 +715,43 @@ of the command.
 - Use a placeholder for a value: `?` for SQLite and `$1` for PostgreSQL.
 - The `drivers` package exports its types and its methods, because the tests and the CLI
   use them.
+
+## Comments
+
+Write no comment. That is the default. A good name and a small function tell the reader what
+the code does.
+
+One test decides each comment. If the removal of the comment lets a reader break the code,
+keep the comment. In every other case, delete the comment.
+
+Four kinds of comment pass the test:
+
+- An order that a later change can break. Example: "PostgreSQL refuses to drop the index
+  that the replica identity of the target holds, so this block comes first."
+- A rule of the engine that the code cannot show. Example: "SQLite refuses an ADD COLUMN
+  action that holds a STORED generated column."
+- A step that looks unnecessary. Name what breaks without the step. Example: "Without this
+  step the diff prints a DROP statement for an object that did not change."
+- A field or a branch that the code near it ignores. Example: "String writes no comment,
+  because CREATE TABLE accepts none."
+
+Delete every other comment. These five kinds fail the test:
+
+- A sentence that repeats the name of a function, of a type, or of a field. Delete
+  `// GetOwners returns the owner of each object of the schema.`
+- A sentence that reads the code aloud. Delete `// The loop walks the source columns and it
+  appends each new column.`
+- The SQL synopsis above an instruction type. The `String` method below holds the same text.
+- The same reason in two places. Keep the reason at the place that a reader changes first.
+  A test gets no copy of a reason that the driver holds already.
+- The empty value of a field. The declaration `Collation string` tells enough.
+
+Write the reason alone. Do not open a comment with the name of the item below it. Write
+"PostgreSQL accepts a comment in no CREATE statement." Do not write "CommentInstructions
+returns the statement of the comment. PostgreSQL accepts a comment in no CREATE statement."
+
+This rule covers a test file too. A subtest name is a short noun phrase, and that name
+replaces a comment above the subtest.
 
 ## Blocks
 
