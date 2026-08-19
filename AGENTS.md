@@ -823,7 +823,8 @@ is a free download at asd-ste100.org.
 - Mark a breaking change with `!`: `feat(cli)!: rename the driver flag`.
 - Write the subject in lowercase, in the imperative, with no final period.
 - Write the subject only. The subject gives enough information, so a commit takes no body.
-  A trailer, for example `Claude-Session:`, is not a body.
+- Write no trailer. Do not add a `Claude-Session:` trailer, and do not add another trailer.
+  This rule covers a new commit and a commit that you write again.
 - Update the support table of `README.md` in the same commit as the feature.
 - A tag with the form `v*.*.*` starts the release workflow. It builds five binaries and
   publishes them.
