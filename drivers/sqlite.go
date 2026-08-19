@@ -3,6 +3,7 @@ package drivers
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -263,6 +264,13 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
+	definition, err := d.GetTableDefinition(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	parsed := parseTableDefinition(definition)
+
 	return &SQLiteTable{
 		Name:              tableName,
 		Columns:           columns,
@@ -271,11 +279,51 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		Indexes:           indexes,
 		Triggers:          triggers,
 		ForeignKeys:       foreignKeys,
+		CheckConstraints:  parsed.CheckConstraints,
+		WithoutRowID:      parsed.WithoutRowID,
+		Strict:            parsed.Strict,
 	}, nil
 }
 
+// GetTableDefinition returns the CREATE TABLE statement of the table. sqlite_master holds
+// no row for an internal table, and the caller then reads an empty definition.
+func (d *SQLiteDriver) GetTableDefinition(ctx context.Context, db *sql.DB, tableName string) (string, error) {
+	row := db.QueryRowContext(ctx,
+		"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?;", tableName)
+
+	var definition sql.NullString
+
+	err := row.Scan(&definition)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	return definition.String, nil
+}
+
+// The hidden value of PRAGMA table_xinfo names the kind of each column.
+const (
+	hiddenColumnOfAVirtualTable = 1
+	virtualGeneratedColumn      = 2
+	storedGeneratedColumn       = 3
+)
+
+// GetTableColumns reads PRAGMA table_xinfo, because PRAGMA table_info gives no generated
+// column. The PRAGMA gives no expression for such a column, so parseGeneratedColumns reads
+// the expression from the CREATE TABLE statement of the table.
 func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdentifier(tableName)+");")
+	definition, err := d.GetTableDefinition(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	parsed := parseTableDefinition(definition)
+
+	rows, err := db.QueryContext(ctx, "PRAGMA table_xinfo("+quoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -292,10 +340,15 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		var isNotNull int
 		var defaultValue sql.NullString
 		var primaryKeyPosition int
+		var hidden int
 
-		err := rows.Scan(&columnID, &name, &columnType, &isNotNull, &defaultValue, &primaryKeyPosition)
+		err := rows.Scan(&columnID, &name, &columnType, &isNotNull, &defaultValue, &primaryKeyPosition, &hidden)
 		if err != nil {
 			return nil, err
+		}
+
+		if hidden == hiddenColumnOfAVirtualTable {
+			continue
 		}
 
 		column := &SQLiteColumn{
@@ -303,6 +356,21 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 			Type:    columnType,
 			NotNull: isNotNull == 1,
 			Default: defaultValue,
+		}
+
+		attributes, found := parsed.ColumnByName(name)
+		if found {
+			column.AutoIncrement = attributes.AutoIncrement
+			column.Collation = attributes.Collation
+			column.Check = attributes.Check
+
+			if hidden == virtualGeneratedColumn || hidden == storedGeneratedColumn {
+				column.GeneratedExpression = attributes.GeneratedExpression
+			}
+		}
+
+		if hidden == virtualGeneratedColumn || hidden == storedGeneratedColumn {
+			column.GeneratedStored = hidden == storedGeneratedColumn
 		}
 
 		columns = append(columns, column)

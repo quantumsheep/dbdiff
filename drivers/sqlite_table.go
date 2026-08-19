@@ -25,6 +25,11 @@ type SQLiteTable struct {
 	Indexes     []*SQLiteIndex
 	Triggers    []*SQLiteTrigger
 	ForeignKeys []*SQLiteForeignKey
+
+	CheckConstraints []string
+
+	WithoutRowID bool
+	Strict       bool
 }
 
 func (t *SQLiteTable) Copy() *SQLiteTable {
@@ -69,6 +74,9 @@ func (t *SQLiteTable) CreateTableInstruction() *SQLiteCreateTableInstruction {
 		PrimaryKey:        t.PrimaryKey,
 		UniqueConstraints: t.UniqueConstraints,
 		ForeignKeys:       t.ForeignKeys,
+		CheckConstraints:  t.CheckConstraints,
+		WithoutRowID:      t.WithoutRowID,
+		Strict:            t.Strict,
 	}
 }
 
@@ -100,14 +108,20 @@ type SQLiteTableColumnsDiff struct {
 	Removed  []string
 	Renamed  map[string]string
 
-	ForeignKeysChanged bool
-	ConstraintsChanged bool
+	ForeignKeysChanged  bool
+	ConstraintsChanged  bool
+	TableOptionsChanged bool
+
+	AddsStoredGeneratedColumn bool
 }
 
 // NeedsRecreation tells if the change needs a new table. SQLite supports no ALTER COLUMN,
-// so a modified column, a changed foreign key, or a changed table constraint needs one.
+// so a modified column, a changed foreign key, a changed table constraint, or a changed
+// table option needs one. A new STORED generated column needs one too, because SQLite
+// refuses an ADD COLUMN action that holds such a column.
 func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
-	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged
+	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged ||
+		d.TableOptionsChanged || d.AddsStoredGeneratedColumn
 }
 
 func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
@@ -118,6 +132,8 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		Renamed:            make(map[string]string),
 		ForeignKeysChanged: false,
 		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) || !equalColumnGroups(t.UniqueConstraints, other.UniqueConstraints),
+		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||
+			!slices.Equal(t.CheckConstraints, other.CheckConstraints),
 	}
 
 	for _, sourceColumn := range t.Columns {
@@ -137,6 +153,11 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 			}
 
 			diff.Added = append(diff.Added, sourceColumn.Name)
+
+			if sourceColumn.IsGenerated() && sourceColumn.GeneratedStored {
+				diff.AddsStoredGeneratedColumn = true
+			}
+
 			continue
 		}
 
@@ -199,6 +220,11 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 		var selectColumns []string
 
 		for _, newColumn := range t.Columns {
+			// SQLite computes a generated column, and it refuses a value for that column.
+			if newColumn.IsGenerated() {
+				continue
+			}
+
 			insertColumns = append(insertColumns, newColumn.Name)
 
 			_, ok := other.ColumnByName(newColumn.Name)

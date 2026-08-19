@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -181,7 +182,19 @@ type failingConn struct {
 	rows    [][]driver.Value
 }
 
+// GetTableColumns reads the definition of the table first, and it reads PRAGMA table_xinfo
+// second. The definition query answers with one row, so the failure of Next belongs to the
+// PRAGMA alone.
 func (c *failingConn) Prepare(query string) (driver.Stmt, error) {
+	if strings.Contains(query, "sqlite_master") {
+		return &failingStmt{
+			columns: []string{"sql"},
+			rows: [][]driver.Value{
+				{"CREATE TABLE users (id INTEGER PRIMARY KEY)"},
+			},
+		}, nil
+	}
+
 	return &failingStmt{columns: c.columns, rows: c.rows}, nil
 }
 
@@ -205,9 +218,9 @@ func (d *failingDriver) Open(name string) (driver.Conn, error) {
 // A second call to sql.Register with the same name panics.
 func init() {
 	sql.Register("sqlite3_failing_rows", &failingDriver{
-		columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+		columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk", "hidden"},
 		rows: [][]driver.Value{
-			{int64(0), "id", "INTEGER", int64(0), nil, int64(1)},
+			{int64(0), "id", "INTEGER", int64(0), nil, int64(1), int64(0)},
 		},
 	})
 }
@@ -692,6 +705,513 @@ func TestSQLiteDriver(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice"},
 			{"id": int64(2), "name": "Bob"},
+		}, rows)
+	})
+
+	t.Run("CreateTableWithGeneratedColumns", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE measures (
+				value INTEGER,
+				stored_double INTEGER GENERATED ALWAYS AS (value * 2) STORED,
+				virtual_triple INTEGER GENERATED ALWAYS AS (value * 3) VIRTUAL
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "measures",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "value",
+						Type: "INTEGER",
+					},
+					{
+						Name:                "stored_double",
+						Type:                "INTEGER",
+						GeneratedExpression: "(value * 2)",
+						GeneratedStored:     true,
+					},
+					{
+						Name:                "virtual_triple",
+						Type:                "INTEGER",
+						GeneratedExpression: "(value * 3)",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+		driver.ExecOnTarget(`INSERT INTO measures (value) VALUES (4);`)
+
+		rows := driver.FetchAllFromTarget("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":          int64(4),
+				"stored_double":  int64(8),
+				"virtual_triple": int64(12),
+			},
+		}, rows)
+	})
+
+	t.Run("AddVirtualGeneratedColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE measures (
+				value INTEGER,
+				triple INTEGER GENERATED ALWAYS AS (value * 3) VIRTUAL
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE measures (value INTEGER);
+			INSERT INTO measures (value) VALUES (2);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "measures",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name:                "triple",
+						Type:                "INTEGER",
+						GeneratedExpression: "(value * 3)",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":  int64(2),
+				"triple": int64(6),
+			},
+		}, rows)
+	})
+
+	// SQLite refuses an ADD COLUMN action that holds a STORED generated column, so this
+	// change needs a new table.
+	t.Run("AddStoredGeneratedColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE measures (
+				value INTEGER,
+				double INTEGER GENERATED ALWAYS AS (value * 2) STORED
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE measures (value INTEGER);
+			INSERT INTO measures (value) VALUES (3);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_measures_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "value",
+						Type: "INTEGER",
+					},
+					{
+						Name:                "double",
+						Type:                "INTEGER",
+						GeneratedExpression: "(value * 2)",
+						GeneratedStored:     true,
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_measures_temp",
+				ColumnNames:       []string{"value"},
+				SelectExpressions: []string{`"value"`},
+				SourceTableName:   "measures",
+			},
+			&SQLDropTableInstruction{Name: "measures"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_measures_temp",
+				Action: &SQLRenameTableAction{NewName: "measures"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":  int64(3),
+				"double": int64(6),
+			},
+		}, rows)
+	})
+
+	// The INSERT statement of a recreation names no generated column, because SQLite
+	// computes that column.
+	t.Run("RecreateTableWithGeneratedColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE measures (
+				label TEXT,
+				value INTEGER,
+				double INTEGER GENERATED ALWAYS AS (value * 2) STORED
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE measures (
+				label INTEGER,
+				value INTEGER,
+				double INTEGER GENERATED ALWAYS AS (value * 2) STORED
+			);
+
+			INSERT INTO measures (label, value) VALUES (7, 5);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_measures_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "label",
+						Type: "TEXT",
+					},
+					{
+						Name: "value",
+						Type: "INTEGER",
+					},
+					{
+						Name:                "double",
+						Type:                "INTEGER",
+						GeneratedExpression: "(value * 2)",
+						GeneratedStored:     true,
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_measures_temp",
+				ColumnNames:       []string{"label", "value"},
+				SelectExpressions: []string{`"label"`, `"value"`},
+				SourceTableName:   "measures",
+			},
+			&SQLDropTableInstruction{Name: "measures"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_measures_temp",
+				Action: &SQLRenameTableAction{NewName: "measures"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"label":  "7",
+				"value":  int64(5),
+				"double": int64(10),
+			},
+		}, rows)
+	})
+
+	t.Run("ModifyGeneratedExpression", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE measures (
+				value INTEGER,
+				multiple INTEGER GENERATED ALWAYS AS (value * 5) STORED
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE measures (
+				value INTEGER,
+				multiple INTEGER GENERATED ALWAYS AS (value * 2) STORED
+			);
+
+			INSERT INTO measures (value) VALUES (3);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_measures_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "value",
+						Type: "INTEGER",
+					},
+					{
+						Name:                "multiple",
+						Type:                "INTEGER",
+						GeneratedExpression: "(value * 5)",
+						GeneratedStored:     true,
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_measures_temp",
+				ColumnNames:       []string{"value"},
+				SelectExpressions: []string{`"value"`},
+				SourceTableName:   "measures",
+			},
+			&SQLDropTableInstruction{Name: "measures"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_measures_temp",
+				Action: &SQLRenameTableAction{NewName: "measures"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":    int64(3),
+				"multiple": int64(15),
+			},
+		}, rows)
+	})
+
+	t.Run("CreateTableWithoutRowIDAndStrict", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE sessions (id TEXT PRIMARY KEY, token TEXT) WITHOUT ROWID, STRICT;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "sessions",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "TEXT",
+						NotNull:    true,
+						PrimaryKey: true,
+					},
+					{
+						Name: "token",
+						Type: "TEXT",
+					},
+				},
+				WithoutRowID: true,
+				Strict:       true,
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A table option belongs to the CREATE TABLE statement, so a change of that option
+	// needs a new table.
+	t.Run("AddStrictRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE events (id INTEGER, label TEXT) STRICT;`)
+		driver.ExecOnTarget(`
+			CREATE TABLE events (id INTEGER, label TEXT);
+			INSERT INTO events (id, label) VALUES (1, 'start');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_events_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "id",
+						Type: "INTEGER",
+					},
+					{
+						Name: "label",
+						Type: "TEXT",
+					},
+				},
+				Strict: true,
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_events_temp",
+				ColumnNames:       []string{"id", "label"},
+				SelectExpressions: []string{`"id"`, `"label"`},
+				SourceTableName:   "events",
+			},
+			&SQLDropTableInstruction{Name: "events"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_events_temp",
+				Action: &SQLRenameTableAction{NewName: "events"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("events", "")
+		require.Equal(t, []map[string]any{
+			{
+				"id":    int64(1),
+				"label": "start",
+			},
+		}, rows)
+	})
+
+	t.Run("CreateTableWithAutoIncrement", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "logs",
+				Columns: []*SQLiteColumn{
+					{
+						Name:          "id",
+						Type:          "INTEGER",
+						PrimaryKey:    true,
+						AutoIncrement: true,
+					},
+					{
+						Name: "body",
+						Type: "TEXT",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateTableWithCollationAndChecks", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE people (
+				name TEXT COLLATE NOCASE,
+				age INTEGER CHECK (age > 0),
+				CHECK (length(name) < 100)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "people",
+				Columns: []*SQLiteColumn{
+					{
+						Name:      "name",
+						Type:      "TEXT",
+						Collation: "NOCASE",
+					},
+					{
+						Name:  "age",
+						Type:  "INTEGER",
+						Check: "(age > 0)",
+					},
+				},
+				CheckConstraints: []string{"(length(name) < 100)"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// SQLite holds no ALTER COLUMN action, so a new collation needs a new table.
+	t.Run("ModifyColumnCollationRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE people (name TEXT COLLATE NOCASE);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE people (name TEXT);
+			INSERT INTO people (name) VALUES ('Ada');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_people_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:      "name",
+						Type:      "TEXT",
+						Collation: "NOCASE",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_people_temp",
+				ColumnNames:       []string{"name"},
+				SelectExpressions: []string{`"name"`},
+				SourceTableName:   "people",
+			},
+			&SQLDropTableInstruction{Name: "people"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_people_temp",
+				Action: &SQLRenameTableAction{NewName: "people"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("people", "")
+		require.Equal(t, []map[string]any{
+			{"name": "Ada"},
+		}, rows)
+	})
+
+	// A table constraint belongs to the CREATE TABLE statement, so a new check needs a new
+	// table.
+	t.Run("AddTableCheckRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE people (name TEXT, CHECK (length(name) < 100));
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE people (name TEXT);
+			INSERT INTO people (name) VALUES ('Ada');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_people_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "name",
+						Type: "TEXT",
+					},
+				},
+				CheckConstraints: []string{"(length(name) < 100)"},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_people_temp",
+				ColumnNames:       []string{"name"},
+				SelectExpressions: []string{`"name"`},
+				SourceTableName:   "people",
+			},
+			&SQLDropTableInstruction{Name: "people"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_people_temp",
+				Action: &SQLRenameTableAction{NewName: "people"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("people", "")
+		require.Equal(t, []map[string]any{
+			{"name": "Ada"},
 		}, rows)
 	})
 

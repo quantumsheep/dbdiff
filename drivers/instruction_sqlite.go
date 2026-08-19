@@ -35,6 +35,12 @@ type SQLiteCreateTableInstruction struct {
 	PrimaryKey        []string
 	UniqueConstraints [][]string
 	ForeignKeys       []*SQLiteForeignKey
+	CheckConstraints  []string
+
+	// SQLite accepts a table option after the closing parenthesis. WITHOUT ROWID comes
+	// first, because SQLite refuses the reverse order.
+	WithoutRowID bool
+	Strict       bool
 }
 
 func (i *SQLiteCreateTableInstruction) String() string {
@@ -54,12 +60,32 @@ func (i *SQLiteCreateTableInstruction) String() string {
 			strings.Join(quoteIdentifiers(constraint), ", ")))
 	}
 
+	for _, check := range i.CheckConstraints {
+		lines = append(lines, "\tCHECK "+check)
+	}
+
 	for _, foreignKey := range i.ForeignKeys {
 		lines = append(lines, "\t"+foreignKey.Clause())
 	}
 
-	return fmt.Sprintf("CREATE TABLE %s (\n%s\n);",
+	var options []string
+
+	if i.WithoutRowID {
+		options = append(options, "WITHOUT ROWID")
+	}
+
+	if i.Strict {
+		options = append(options, "STRICT")
+	}
+
+	statement := fmt.Sprintf("CREATE TABLE %s (\n%s\n)",
 		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+
+	if len(options) > 0 {
+		statement += " " + strings.Join(options, ", ")
+	}
+
+	return statement + ";"
 }
 
 // CREATE [ UNIQUE ] INDEX name ON table_name ( key [, ...] ) [ WHERE condition ]
