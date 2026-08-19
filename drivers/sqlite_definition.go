@@ -97,10 +97,17 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 			continue
 		}
 
-		// A table constraint starts with its keyword, so it names no column.
+		// A table constraint starts with its keyword, so it names no column. The keyword
+		// CONSTRAINT and a name can come before that keyword.
 		if isTableConstraintKeyword(tokens[0]) {
-			if strings.EqualFold(tokens[0], "CHECK") && len(tokens) > 1 {
-				parsed.CheckConstraints = append(parsed.CheckConstraints, tokens[1])
+			constraint := tokens
+
+			if strings.EqualFold(constraint[0], "CONSTRAINT") && len(constraint) > 2 {
+				constraint = constraint[2:]
+			}
+
+			if strings.EqualFold(constraint[0], "CHECK") && len(constraint) > 1 {
+				parsed.CheckConstraints = append(parsed.CheckConstraints, constraint[1])
 			}
 
 			continue

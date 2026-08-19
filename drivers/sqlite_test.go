@@ -1215,6 +1215,32 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	// A table constraint can hold a name, so the parser reads the keyword CHECK after the
+	// keyword CONSTRAINT too.
+	t.Run("CreateTableWithANamedCheck", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE people (age INTEGER, CONSTRAINT age_is_positive CHECK (age > 0));
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "people",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
+				},
+				CheckConstraints: []string{"(age > 0)"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("DropTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
