@@ -249,6 +249,10 @@ keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 `CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
 PostgreSQL merges a column that the parent and the child both declare.
 
+**View check options.** The driver keeps `WITH LOCAL CHECK OPTION` and
+`WITH CASCADED CHECK OPTION`. The query text of a view holds none of that clause, so a new
+option alone prints a `DROP VIEW` statement and a `CREATE VIEW` statement.
+
 **Materialized views.** The driver compares the query and the indexes of a materialized
 view. A changed query prints a `DROP MATERIALIZED VIEW` statement and a
 `CREATE MATERIALIZED VIEW` statement, because PostgreSQL holds no action that replaces the

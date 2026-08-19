@@ -897,6 +897,18 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `RESET (fillfactor, autovacuum_enabled)`, action.TableActionClause())
 	})
 
+	t.Run("PostgresCreateViewWithACheckOption", func(t *testing.T) {
+		instruction := &PostgresCreateViewInstruction{
+			Name:        "positive",
+			Query:       " SELECT a\n   FROM base\n  WHERE (a > 0);",
+			CheckOption: "CASCADED",
+		}
+
+		require.Equal(t, `CREATE VIEW "positive" AS  SELECT a
+   FROM base
+  WHERE (a > 0) WITH CASCADED CHECK OPTION;`, instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

@@ -505,7 +505,8 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 
 		// A type change of a column that the view reads keeps the definition text equal,
 		// so the columns give the second condition.
-		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
+		if sourceView.Def != targetView.Def || sourceView.CheckOption != targetView.CheckOption ||
+			!sourceView.HasEqualColumns(targetView) {
 			additions = append(additions, sourceView.CreateInstruction())
 		}
 	}
@@ -521,7 +522,8 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 			continue
 		}
 
-		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
+		if sourceView.Def != targetView.Def || sourceView.CheckOption != targetView.CheckOption ||
+			!sourceView.HasEqualColumns(targetView) {
 			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: targetView.Name})
 		}
 	}
@@ -1161,7 +1163,8 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {
 	viewRows, err := db.QueryContext(ctx, `
-		SELECT table_name, view_definition
+		SELECT table_name, view_definition,
+			CASE WHEN check_option = 'NONE' THEN '' ELSE check_option END
 		FROM information_schema.views
 		WHERE table_schema = current_schema()
 		ORDER BY table_name
@@ -1177,7 +1180,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 	for viewRows.Next() {
 		view := &PostgresView{}
 
-		err := viewRows.Scan(&view.Name, &view.Def)
+		err := viewRows.Scan(&view.Name, &view.Def, &view.CheckOption)
 		if err != nil {
 			return nil, err
 		}

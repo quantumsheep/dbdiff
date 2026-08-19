@@ -12,6 +12,10 @@ type PostgresView struct {
 	Name    string
 	Def     string
 	Columns []*PostgresViewColumn
+
+	// CheckOption holds LOCAL or CASCADED. The query text of the view holds none of it, so
+	// the diff compares this field beside the text.
+	CheckOption string
 }
 
 func (v *PostgresView) HasEqualColumns(other *PostgresView) bool {
@@ -30,7 +34,8 @@ func (v *PostgresView) HasEqualColumns(other *PostgresView) bool {
 
 func (v *PostgresView) CreateInstruction() *PostgresCreateViewInstruction {
 	return &PostgresCreateViewInstruction{
-		Name:  v.Name,
-		Query: v.Def,
+		Name:        v.Name,
+		Query:       v.Def,
+		CheckOption: v.CheckOption,
 	}
 }

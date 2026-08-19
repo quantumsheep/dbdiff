@@ -1261,6 +1261,55 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	// information_schema.views reports the check option beside the query, and the query
+	// text holds none of it.
+	t.Run("CreateViewWithACheckOption", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE base (a INT);
+			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0 WITH CASCADED CHECK OPTION;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE base (a INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateViewInstruction{
+				Name:        "positive",
+				Query:       " SELECT a\n   FROM base\n  WHERE (a > 0);",
+				CheckOption: "CASCADED",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A new check option keeps the query text equal, so the option gives the difference.
+	t.Run("ModifyViewCheckOption", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE base (a INT);
+			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0 WITH LOCAL CHECK OPTION;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE base (a INT);
+			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "positive"},
+			&PostgresCreateViewInstruction{
+				Name:        "positive",
+				Query:       " SELECT a\n   FROM base\n  WHERE (a > 0);",
+				CheckOption: "LOCAL",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

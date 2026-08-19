@@ -433,9 +433,19 @@ func (i *PostgresDropMaterializedViewInstruction) String() string {
 type PostgresCreateViewInstruction struct {
 	Name  string
 	Query string
+
+	// CheckOption holds LOCAL or CASCADED for a view that validates a write through it. It
+	// is empty for every other view, and information_schema reports the value NONE there.
+	CheckOption string
 }
 
 func (i *PostgresCreateViewInstruction) String() string {
-	return "CREATE VIEW " + quoteIdentifier(i.Name) + " AS " +
-		strings.TrimSuffix(i.Query, ";") + ";"
+	statement := "CREATE VIEW " + quoteIdentifier(i.Name) + " AS " +
+		strings.TrimSuffix(i.Query, ";")
+
+	if i.CheckOption != "" {
+		statement += " WITH " + i.CheckOption + " CHECK OPTION"
+	}
+
+	return statement + ";"
 }
