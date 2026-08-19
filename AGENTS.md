@@ -101,6 +101,8 @@ drivers/
 ├── postgres_view.go           PostgresView
 ├── postgres_materialized_view.go PostgresMaterializedView
 ├── postgres_policy.go         PostgresPolicy, a row level security policy
+├── postgres_rule.go           PostgresRule, a rule of a table
+├── postgres_statistics.go     PostgresStatistics, an extended statistics object
 ├── postgres_sequence.go       PostgresSequence
 ├── postgres_type.go           PostgresType, an enum type
 ├── postgres_domain.go         PostgresDomain
@@ -402,14 +404,17 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Aggregates  | `pg_aggregate` with `pg_proc`                            |
 | Operators   | `pg_operator`                                            |
 | Extensions  | `pg_extension`                                           |
+| Rules       | `pg_rules`                                               |
+| Extended statistics | `pg_statistic_ext` with `pg_get_statisticsobjdef` |
 | Policies    | `pg_policies`                                            |
 | Comments    | `obj_description` and `col_description`                  |
 | Collations  | `pg_collation`, when `attcollation` differs from `typcollation` |
 
-`Diff` prints eleven sections in this order: extensions, enum types, domains, composite
-types, sequences, functions, aggregates, operators, tables, views, materialized views. A
-table can use each of the first five, an aggregate and an operator use a function, and a
-materialized view reads a table or a view. Keep that order when you add a section.
+`Diff` prints twelve sections in this order: extensions, enum types, domains, composite
+types, sequences, functions, aggregates, operators, tables, extended statistics, views,
+materialized views. A table can use each of the first five, an aggregate and an operator
+use a function, an extended statistics object names a table, and a materialized view reads
+a table or a view. Keep that order when you add a section.
 
 `GetTables` reads `pg_class` with `relkind IN ('r', 'p')`, and not
 `information_schema.tables`. The value `p` names a partitioned table, and `relispartition`

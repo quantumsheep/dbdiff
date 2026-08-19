@@ -1433,6 +1433,68 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	// pg_get_statisticsobjdef writes the name of the schema, so the query removes that
+	// prefix. The statistics come after the tables, because they name a table.
+	t.Run("CreateStatistics", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE t (a INT, b INT);
+			CREATE STATISTICS st_ab ON a, b FROM t;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE t (a INT, b INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateStatisticsInstruction{
+				Definition: "CREATE STATISTICS st_ab ON a, b FROM t",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropStatistics", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE t (a INT, b INT);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE t (a INT, b INT);
+			CREATE STATISTICS st_ab ON a, b FROM t;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropStatisticsInstruction{Name: "st_ab"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// PostgreSQL holds no action that changes the columns of a statistics object, so a new
+	// definition prints a DROP statement and a CREATE statement.
+	t.Run("ModifyStatistics", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE t (a INT, b INT, c INT);
+			CREATE STATISTICS st_ab ON a, c FROM t;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE t (a INT, b INT, c INT);
+			CREATE STATISTICS st_ab ON a, b FROM t;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropStatisticsInstruction{Name: "st_ab"},
+			&PostgresCreateStatisticsInstruction{
+				Definition: "CREATE STATISTICS st_ab ON a, c FROM t",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

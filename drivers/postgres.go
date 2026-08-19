@@ -132,6 +132,7 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 		d.DiffAggregates,
 		d.DiffOperators,
 		d.DiffTables,
+		d.DiffStatistics,
 		d.DiffViews,
 		d.DiffMaterializedViews,
 	}
@@ -1213,6 +1214,101 @@ func (d *PostgresDriver) GetTableRules(ctx context.Context, db *sql.DB, tableNam
 	}
 
 	return rules, nil
+}
+
+// DiffStatistics compares the extended statistics objects of the schema. Each object names
+// a table, so this section comes after the tables.
+func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*SectionDiff, error) {
+	var additions []Instruction
+	var removals []Instruction
+
+	sourceStatistics, err := d.GetStatistics(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	targetStatistics, err := d.GetStatistics(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sourceObject := range sourceStatistics {
+		targetObject, found := lo.Find(targetStatistics, func(object *PostgresStatistics) bool {
+			return object.Name == sourceObject.Name
+		})
+		if !found {
+			additions = append(additions, sourceObject.CreateInstruction())
+			continue
+		}
+
+		if sourceObject.Def != targetObject.Def {
+			additions = append(additions,
+				targetObject.DropInstruction(), sourceObject.CreateInstruction())
+		}
+	}
+
+	for _, targetObject := range targetStatistics {
+		_, found := lo.Find(sourceStatistics, func(object *PostgresStatistics) bool {
+			return object.Name == targetObject.Name
+		})
+		if !found {
+			removals = append(removals, targetObject.DropInstruction())
+		}
+	}
+
+	return &SectionDiff{
+		Additions: additions,
+		Removals:  removals,
+	}, nil
+}
+
+// GetStatistics returns the extended statistics objects of the schema.
+// pg_get_statisticsobjdef writes the name of the schema, so the query removes the prefix of
+// the current schema. Without that step the statement builds the object in the source
+// schema.
+func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*PostgresStatistics, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			stxname,
+			regexp_replace(
+				pg_get_statisticsobjdef(oid),
+				'\m' || quote_ident(current_schema()) || '\.',
+				'',
+				'g'
+			)
+		FROM pg_statistic_ext
+		WHERE stxnamespace = current_schema()::regnamespace
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = pg_statistic_ext.oid AND d.deptype = 'e'
+		)
+		ORDER BY stxname
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var statistics []*PostgresStatistics
+
+	for rows.Next() {
+		object := &PostgresStatistics{}
+
+		err := rows.Scan(&object.Name, &object.Def)
+		if err != nil {
+			return nil, err
+		}
+
+		statistics = append(statistics, object)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return statistics, nil
 }
 
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {

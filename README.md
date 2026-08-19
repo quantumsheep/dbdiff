@@ -209,8 +209,8 @@ gives an error.
 
 ```
 extensions → enum types → domains → composite types → sequences
-  → functions → aggregates → operators → tables → views
-  → materialized views
+  → functions → aggregates → operators → tables → extended statistics
+  → views → materialized views
 ```
 
 A table can use each of the first five objects. A materialized view reads a table or a
@@ -248,6 +248,11 @@ keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 **Table inheritance.** A table of `INHERITS` is no partition. The driver prints a
 `CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
 PostgreSQL merges a column that the parent and the child both declare.
+
+**Extended statistics.** The driver compares each `CREATE STATISTICS` object. Such an
+object names a table, so the output prints it after the tables. PostgreSQL holds no action
+that changes the columns of the object, so a new definition prints a `DROP` statement and a
+`CREATE` statement.
 
 **Rules.** The driver compares the rules of a table. PostgreSQL holds no action that
 changes a rule, so a new definition prints a `DROP RULE` statement and a `CREATE RULE`
@@ -365,6 +370,7 @@ the same treatment.
 | Views           | ✅                                      | ✅         |
 | Materialized views | ➖                                   | ✅         |
 | Rules             | ➖                                    | ✅         |
+| Extended statistics | ➖                                  | ✅         |
 | Partitioned tables | ➖                                   | ✅         |
 | Sequences       | ➖                                      | ✅         |
 | Enum types      | ➖                                      | ✅         |

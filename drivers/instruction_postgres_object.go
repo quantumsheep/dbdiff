@@ -130,3 +130,22 @@ type PostgresDropSequenceInstruction struct {
 func (i *PostgresDropSequenceInstruction) String() string {
 	return "DROP SEQUENCE " + quoteIdentifier(i.Name) + ";"
 }
+
+// The definition comes from pg_get_statisticsobjdef, so dbdiff replays the text of the
+// source.
+type PostgresCreateStatisticsInstruction struct {
+	Definition string
+}
+
+func (i *PostgresCreateStatisticsInstruction) String() string {
+	return i.Definition + ";"
+}
+
+// DROP STATISTICS name
+type PostgresDropStatisticsInstruction struct {
+	Name string
+}
+
+func (i *PostgresDropStatisticsInstruction) String() string {
+	return "DROP STATISTICS " + quoteIdentifier(i.Name) + ";"
+}

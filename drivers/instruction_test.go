@@ -927,6 +927,20 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `DROP RULE "no_delete" ON "base";`, instruction.String())
 	})
 
+	t.Run("PostgresCreateStatistics", func(t *testing.T) {
+		instruction := &PostgresCreateStatisticsInstruction{
+			Definition: "CREATE STATISTICS st_ab ON a, b FROM t",
+		}
+
+		require.Equal(t, `CREATE STATISTICS st_ab ON a, b FROM t;`, instruction.String())
+	})
+
+	t.Run("PostgresDropStatistics", func(t *testing.T) {
+		instruction := &PostgresDropStatisticsInstruction{Name: "st_ab"}
+
+		require.Equal(t, `DROP STATISTICS "st_ab";`, instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",
