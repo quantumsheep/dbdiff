@@ -411,6 +411,8 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Policies    | `pg_policies`                                            |
 | Comments    | `obj_description` and `col_description`                  |
 | Collations  | `pg_collation`, when `attcollation` differs from `typcollation` |
+| Column storage | `pg_attribute.attstorage`, when it differs from `pg_type.typstorage` |
+| Column statistics | `pg_attribute.attstattarget`                          |
 
 `Diff` prints thirteen sections in this order: extensions, enum types, domains, composite
 types, sequences, functions, aggregates, operators, tables, extended statistics, views,

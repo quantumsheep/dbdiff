@@ -1742,6 +1742,266 @@ func TestPostgresDriver(t *testing.T) {
 		})
 	})
 
+	// A column definition accepts no storage mode, so the mode comes in a second statement.
+	t.Run("CreateTableWithAColumnStorage", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "docs",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "body",
+						Type:    "text",
+						Storage: "MAIN",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStorageAction{
+						ColumnName: "body",
+						Storage:    "MAIN",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterColumnStorage", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
+		`)
+		driver.ExecOnTarget(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STORAGE EXTERNAL;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStorageAction{
+						ColumnName: "body",
+						Storage:    "MAIN",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A source column that keeps the mode of its type takes the mode DEFAULT.
+	t.Run("ResetColumnStorage", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE docs (body TEXT);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStorageAction{
+						ColumnName: "body",
+						Storage:    "DEFAULT",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A TYPE action gives the column the storage mode of the new type, so the mode of the
+	// source comes again after that action.
+	t.Run("ColumnStorageAfterATypeChange", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
+		`)
+		driver.ExecOnTarget(`
+			CREATE TABLE docs (body VARCHAR(200));
+			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "body",
+						DataType:   "text",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStorageAction{
+						ColumnName: "body",
+						Storage:    "MAIN",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A column definition accepts no statistics target, so the target comes in a second
+	// statement.
+	t.Run("CreateTableWithAStatisticsTarget", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 500;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "docs",
+				Columns: []*PostgresColumn{
+					{
+						Name:             "body",
+						Type:             "text",
+						StatisticsTarget: sql.NullInt64{Int64: 500, Valid: true},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStatisticsAction{
+						ColumnName: "body",
+						Target:     500,
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterColumnStatisticsTarget", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 500;
+		`)
+		driver.ExecOnTarget(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 100;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStatisticsAction{
+						ColumnName: "body",
+						Target:     500,
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// The value -1 gives the column the default target of the server again.
+	t.Run("ResetColumnStatisticsTarget", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE docs (body TEXT);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE docs (body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 500;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStatisticsAction{
+						ColumnName: "body",
+						Target:     -1,
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A new column takes its storage mode and its statistics target after the ADD COLUMN
+	// action, because a column definition accepts neither.
+	t.Run("AddColumnWithAStorageAndAStatisticsTarget", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE docs (id INT, body TEXT);
+			ALTER TABLE docs ALTER COLUMN body SET STORAGE EXTERNAL;
+			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 250;
+		`)
+		driver.ExecOnTarget(`CREATE TABLE docs (id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:             "body",
+							Type:             "text",
+							Storage:          "EXTERNAL",
+							StatisticsTarget: sql.NullInt64{Int64: 250, Valid: true},
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStorageAction{
+						ColumnName: "body",
+						Storage:    "EXTERNAL",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []AlterTableAction{
+					&PostgresSetStatisticsAction{
+						ColumnName: "body",
+						Target:     250,
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("ConstraintsPrimaryKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

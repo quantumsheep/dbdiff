@@ -864,6 +864,42 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `SET LOGGED`, action.TableActionClause())
 	})
 
+	t.Run("PostgresSetStorageAction", func(t *testing.T) {
+		action := &PostgresSetStorageAction{
+			ColumnName: "body",
+			Storage:    "MAIN",
+		}
+
+		require.Equal(t, `ALTER COLUMN "body" SET STORAGE MAIN`, action.TableActionClause())
+	})
+
+	t.Run("PostgresSetStorageDefaultAction", func(t *testing.T) {
+		action := &PostgresSetStorageAction{
+			ColumnName: "body",
+			Storage:    "DEFAULT",
+		}
+
+		require.Equal(t, `ALTER COLUMN "body" SET STORAGE DEFAULT`, action.TableActionClause())
+	})
+
+	t.Run("PostgresSetStatisticsAction", func(t *testing.T) {
+		action := &PostgresSetStatisticsAction{
+			ColumnName: "body",
+			Target:     500,
+		}
+
+		require.Equal(t, `ALTER COLUMN "body" SET STATISTICS 500`, action.TableActionClause())
+	})
+
+	t.Run("PostgresResetStatisticsAction", func(t *testing.T) {
+		action := &PostgresSetStatisticsAction{
+			ColumnName: "body",
+			Target:     -1,
+		}
+
+		require.Equal(t, `ALTER COLUMN "body" SET STATISTICS -1`, action.TableActionClause())
+	})
+
 	t.Run("PostgresTriggerEnableAction", func(t *testing.T) {
 		action := &PostgresTriggerEnableAction{
 			Mode:        "ENABLE ALWAYS",

@@ -161,6 +161,8 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		if !found {
 			instructions = append(instructions,
 				alterTable(&PostgresAddColumnAction{Column: sourceColumn}))
+			instructions = append(instructions, sourceColumn.StorageInstructions(t.Name)...)
+			instructions = append(instructions, sourceColumn.StatisticsInstructions(t.Name)...)
 
 			continue
 		}
@@ -191,9 +193,12 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				alterTable(&PostgresDropIdentityAction{ColumnName: sourceColumn.Name}))
 		}
 
+		typeChanged := sourceColumn.Type != targetColumn.Type ||
+			sourceColumn.Collation != targetColumn.Collation
+
 		// PostgreSQL changes a collation through the TYPE action, so a new collation
 		// prints that action too.
-		if sourceColumn.Type != targetColumn.Type || sourceColumn.Collation != targetColumn.Collation {
+		if typeChanged {
 			usingCast, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
 			if err != nil {
 				return nil, err
@@ -227,6 +232,37 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				instructions = append(instructions,
 					alterTable(&PostgresDropDefaultAction{ColumnName: sourceColumn.Name}))
 			}
+		}
+
+		// A TYPE action gives the column the storage mode of the new type, so a column
+		// that changes its type and holds a mode takes that mode again. That action comes
+		// above, so this action always follows it. The mode DEFAULT gives the column the
+		// mode of its type again, and PostgreSQL 16 accepts that mode.
+		if sourceColumn.Storage != targetColumn.Storage ||
+			(typeChanged && sourceColumn.Storage != "") {
+			storage := sourceColumn.Storage
+			if storage == "" {
+				storage = "DEFAULT"
+			}
+
+			instructions = append(instructions, alterTable(&PostgresSetStorageAction{
+				ColumnName: sourceColumn.Name,
+				Storage:    storage,
+			}))
+		}
+
+		// A TYPE action keeps the statistics target, so this action needs no such test.
+		// The value -1 gives the column the default target of the server again.
+		if sourceColumn.StatisticsTarget != targetColumn.StatisticsTarget {
+			target := int64(-1)
+			if sourceColumn.StatisticsTarget.Valid {
+				target = sourceColumn.StatisticsTarget.Int64
+			}
+
+			instructions = append(instructions, alterTable(&PostgresSetStatisticsAction{
+				ColumnName: sourceColumn.Name,
+				Target:     target,
+			}))
 		}
 
 		// The options of an identity column live in its sequence, so this action changes
@@ -658,6 +694,12 @@ func (t *PostgresTable) Instructions() []Instruction {
 	}
 
 	instructions := []Instruction{t.CreateTableInstruction()}
+
+	for _, column := range t.Columns {
+		instructions = append(instructions, column.StorageInstructions(t.Name)...)
+		instructions = append(instructions, column.StatisticsInstructions(t.Name)...)
+	}
+
 	instructions = append(instructions, t.CommentInstructions()...)
 	instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 

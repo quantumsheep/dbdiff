@@ -30,6 +30,49 @@ type PostgresColumn struct {
 	// Comment holds the comment of the column. Definition writes no comment, because a
 	// column definition accepts none.
 	Comment string
+
+	// Storage names the storage mode of the column: PLAIN, EXTERNAL, EXTENDED, or MAIN.
+	// The mode tells PostgreSQL to compress the value of the column, or to move it into a
+	// TOAST table. It is empty when the column keeps the mode of its type.
+	Storage string
+
+	// StatisticsTarget holds the statistics target of the column. It is absent when the
+	// column keeps the default target of the server.
+	StatisticsTarget sql.NullInt64
+}
+
+// StorageInstructions returns the statement that sets the storage mode of the column. A
+// column definition accepts no storage mode before PostgreSQL 16, so a separate statement
+// holds it. The statement is absent when the column keeps the mode of its type.
+func (c *PostgresColumn) StorageInstructions(tableName string) []Instruction {
+	if c.Storage == "" {
+		return nil
+	}
+
+	return []Instruction{&PostgresAlterTableInstruction{
+		Name: tableName,
+		Actions: []AlterTableAction{&PostgresSetStorageAction{
+			ColumnName: c.Name,
+			Storage:    c.Storage,
+		}},
+	}}
+}
+
+// StatisticsInstructions returns the statement that sets the statistics target of the
+// column. A column definition accepts no statistics target. The statement is absent when
+// the column keeps the default target of the server.
+func (c *PostgresColumn) StatisticsInstructions(tableName string) []Instruction {
+	if !c.StatisticsTarget.Valid {
+		return nil
+	}
+
+	return []Instruction{&PostgresAlterTableInstruction{
+		Name: tableName,
+		Actions: []AlterTableAction{&PostgresSetStatisticsAction{
+			ColumnName: c.Name,
+			Target:     c.StatisticsTarget.Int64,
+		}},
+	}}
 }
 
 func (c *PostgresColumn) Copy() *PostgresColumn {

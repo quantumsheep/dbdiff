@@ -56,6 +56,32 @@ func (a *PostgresAlterColumnTypeAction) TableActionClause() string {
 	return clause
 }
 
+// ALTER COLUMN column_name SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT }
+type PostgresSetStorageAction struct {
+	ColumnName string
+
+	// Storage holds PLAIN, EXTERNAL, EXTENDED, MAIN, or DEFAULT. The mode DEFAULT gives
+	// the column the mode of its type again, and PostgreSQL 16 accepts that mode.
+	Storage string
+}
+
+func (a *PostgresSetStorageAction) TableActionClause() string {
+	return fmt.Sprintf("ALTER COLUMN %s SET STORAGE %s",
+		quoteIdentifier(a.ColumnName), a.Storage)
+}
+
+// ALTER COLUMN column_name SET STATISTICS integer
+// The value -1 gives the column the default target of the server again.
+type PostgresSetStatisticsAction struct {
+	ColumnName string
+	Target     int64
+}
+
+func (a *PostgresSetStatisticsAction) TableActionClause() string {
+	return fmt.Sprintf("ALTER COLUMN %s SET STATISTICS %d",
+		quoteIdentifier(a.ColumnName), a.Target)
+}
+
 // ALTER COLUMN column_name SET NOT NULL
 type PostgresSetNotNullAction struct {
 	ColumnName string

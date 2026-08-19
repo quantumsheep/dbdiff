@@ -246,6 +246,14 @@ that parameter its default value again.
 **Unlogged tables.** The driver keeps the `UNLOGGED` keyword of a table. A change of that
 keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 
+**Column storage and statistics.** The driver keeps the storage mode of a column, and it
+keeps the statistics target of a column. A column definition accepts neither, so the output
+prints a separate `ALTER TABLE ... ALTER COLUMN` statement after the `CREATE TABLE`
+statement. An `ALTER COLUMN ... TYPE` action gives the column the storage mode of the new
+type, so the output sets the mode again after that action. A column that keeps the mode of
+its type takes `SET STORAGE DEFAULT`, and PostgreSQL 16 accepts that mode. A column that
+keeps the default target of the server takes `SET STATISTICS -1`.
+
 **Trigger modes.** The driver keeps the mode of a trigger: `ENABLE`, `DISABLE`,
 `ENABLE REPLICA`, or `ENABLE ALWAYS`. A `CREATE TRIGGER` statement accepts no mode, so the
 output prints a separate `ALTER TABLE ... TRIGGER` statement after it. PostgreSQL builds
@@ -387,6 +395,7 @@ the same treatment.
 | Table options     | ✅ (WITHOUT ROWID, STRICT)            | ➖         |
 | Virtual tables    | ✅                                    | ➖         |
 | Generated columns | ✅                                    | ✅         |
+| Column storage and statistics | ➖                        | ✅         |
 | Indexes         | ✅                                      | ✅         |
 | Constraints     | ✅ (foreign keys, primary keys, unique, checks) | ✅  |
 | Triggers        | ✅                                      | ✅ (with the mode) |
@@ -445,6 +454,8 @@ constraint of two or more columns as a table constraint.
 - The `--privileges` flag compares the owner and the privileges of a table, of a view, of a
   materialized view, and of a sequence. It compares no privilege of a schema, of a function,
   or of a type, and it reads no default privilege of `ALTER DEFAULT PRIVILEGES`.
+- A column that keeps the storage mode of its type takes `SET STORAGE DEFAULT`.
+  PostgreSQL 16 accepts that mode, and an older server refuses it.
 - The PostgreSQL driver compares one schema for each run. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
   object that moved from one schema to another schema.

@@ -1754,6 +1754,13 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	// default value of every other column. The two CASE expressions separate the two, so
 	// a generated column never becomes a column with a default value. PostgreSQL refuses
 	// a DEFAULT expression that reads another column.
+	//
+	// attstorage names the storage mode of the column, and typstorage names the mode that
+	// a CREATE TABLE statement gives. The query gives an empty text when the two are equal,
+	// because such a column needs no statement of the mode.
+	//
+	// attstattarget holds the statistics target. PostgreSQL 16 writes -1 for the default
+	// target, and PostgreSQL 17 writes NULL. The CASE expression gives NULL for both.
 	columnRows, err := db.QueryContext(ctx, `
 			SELECT
 				a.attname,
@@ -1768,6 +1775,15 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				CASE WHEN a.attgenerated = 's' THEN pg_get_expr(d.adbin, d.adrelid) ELSE '' END,
 				coalesce(column_collation.collname, ''),
 				coalesce(col_description(a.attrelid, a.attnum), ''),
+				CASE WHEN a.attstorage <> base_type.typstorage THEN
+					CASE a.attstorage
+						WHEN 'p' THEN 'PLAIN'
+						WHEN 'e' THEN 'EXTERNAL'
+						WHEN 'm' THEN 'MAIN'
+						WHEN 'x' THEN 'EXTENDED'
+					END
+				ELSE '' END,
+				CASE WHEN a.attstattarget >= 0 THEN a.attstattarget END,
 				coalesce((
 					SELECT nullif(concat_ws(' ',
 						CASE WHEN s.seqstart <> s.seqmin THEN 'START WITH ' || s.seqstart END,
@@ -1803,12 +1819,14 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 
 	for columnRows.Next() {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
-		var identityOptions string
+		var identityOptions, storage string
 		var notNull bool
 		var columnDefault sql.NullString
+		var statisticsTarget sql.NullInt64
 
 		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault,
-			&identity, &generatedExpression, &collation, &comment, &identityOptions)
+			&identity, &generatedExpression, &collation, &comment, &storage,
+			&statisticsTarget, &identityOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -1823,6 +1841,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 			Collation:           collation,
 			Comment:             comment,
 			IdentityOptions:     identityOptions,
+			Storage:             storage,
+			StatisticsTarget:    statisticsTarget,
 		}
 		table.Columns = append(table.Columns, column)
 	}
