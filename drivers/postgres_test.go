@@ -1105,6 +1105,61 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	// The sequence of an identity column holds its options. PostgreSQL omits an option that
+	// keeps the default of the type.
+	t.Run("CreateTableWithIdentityOptions", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INT GENERATED ALWAYS AS IDENTITY (START WITH 100 INCREMENT BY 5)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name:            "id",
+						Type:            "integer",
+						NotNull:         true,
+						Identity:        "ALWAYS",
+						IdentityOptions: "START WITH 100 INCREMENT BY 5",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AlterIdentityOptions", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY (INCREMENT BY 5));
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresSetIdentityOptionsAction{
+						ColumnName: "id",
+						Options:    "INCREMENT BY 5",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

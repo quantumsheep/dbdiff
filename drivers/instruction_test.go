@@ -822,6 +822,25 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresCreateTableWithIdentityOptions", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "users",
+			Columns: []*PostgresColumn{
+				{
+					Name:            "id",
+					Type:            "integer",
+					NotNull:         true,
+					Identity:        "ALWAYS",
+					IdentityOptions: "START WITH 100 INCREMENT BY 5",
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "users" (
+	"id" integer NOT NULL GENERATED ALWAYS AS IDENTITY (START WITH 100 INCREMENT BY 5)
+);`, instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

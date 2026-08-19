@@ -192,6 +192,17 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 			}
 		}
 
+		// The options of an identity column live in its sequence, so this action changes
+		// that sequence and never the identity itself.
+		if sourceColumn.Identity != "" && targetColumn.Identity != "" &&
+			sourceColumn.IdentityOptions != targetColumn.IdentityOptions &&
+			sourceColumn.IdentityOptions != "" {
+			instructions = append(instructions, alterTable(&PostgresSetIdentityOptionsAction{
+				ColumnName: sourceColumn.Name,
+				Options:    sourceColumn.IdentityOptions,
+			}))
+		}
+
 		// PostgreSQL refuses to add an identity to a column that accepts a null value, so
 		// these two actions come after the NOT NULL block above.
 		if sourceColumn.Identity != "" && sourceColumn.Identity != targetColumn.Identity {

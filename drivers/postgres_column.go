@@ -15,6 +15,10 @@ type PostgresColumn struct {
 	// other column.
 	Identity string
 
+	// IdentityOptions holds the options of the sequence of an identity column, for example
+	// "START WITH 100 INCREMENT BY 5". It is empty when every option keeps its default.
+	IdentityOptions string
+
 	// GeneratedExpression holds the expression of a stored generated column. It is empty
 	// for every other column.
 	GeneratedExpression string
@@ -53,6 +57,10 @@ func (c *PostgresColumn) Definition() string {
 
 	if c.Identity != "" {
 		value += fmt.Sprintf(" GENERATED %s AS IDENTITY", c.Identity)
+
+		if c.IdentityOptions != "" {
+			value += fmt.Sprintf(" (%s)", c.IdentityOptions)
+		}
 	}
 
 	if c.GeneratedExpression != "" {

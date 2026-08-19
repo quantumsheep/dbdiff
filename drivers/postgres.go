@@ -1385,6 +1385,10 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	// type name, for example integer[]. It also adds a prefix to a type of another schema,
 	// so the query removes the prefix of the current schema.
 	//
+	// The sequence of an identity column holds the options of that column. The query builds
+	// the text of the options that differ from the default of the type, so a column that
+	// keeps every default reads an empty text.
+	//
 	// pg_attrdef holds the expression of a stored generated column, and it holds the
 	// default value of every other column. The two CASE expressions separate the two, so
 	// a generated column never becomes a column with a default value. PostgreSQL refuses
@@ -1402,7 +1406,24 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				CASE a.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' ELSE '' END,
 				CASE WHEN a.attgenerated = 's' THEN pg_get_expr(d.adbin, d.adrelid) ELSE '' END,
 				coalesce(column_collation.collname, ''),
-				coalesce(col_description(a.attrelid, a.attnum), '')
+				coalesce(col_description(a.attrelid, a.attnum), ''),
+				coalesce((
+					SELECT nullif(concat_ws(' ',
+						CASE WHEN s.seqstart <> s.seqmin THEN 'START WITH ' || s.seqstart END,
+						CASE WHEN s.seqincrement <> 1 THEN 'INCREMENT BY ' || s.seqincrement END,
+						CASE WHEN s.seqmin <> 1 THEN 'MINVALUE ' || s.seqmin END,
+						CASE WHEN s.seqmax <> CASE
+							WHEN s.seqtypid = 'smallint'::regtype THEN 32767
+							WHEN s.seqtypid = 'integer'::regtype THEN 2147483647
+							ELSE 9223372036854775807 END
+							THEN 'MAXVALUE ' || s.seqmax END,
+						CASE WHEN s.seqcache <> 1 THEN 'CACHE ' || s.seqcache END,
+						CASE WHEN s.seqcycle THEN 'CYCLE' END
+					), '')
+					FROM pg_sequence s
+					JOIN pg_depend dep ON dep.objid = s.seqrelid AND dep.deptype = 'i'
+					WHERE dep.refobjid = a.attrelid AND dep.refobjsubid = a.attnum
+				), '')
 			FROM pg_attribute a
 			LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 			LEFT JOIN pg_type base_type ON base_type.oid = a.atttypid
@@ -1421,11 +1442,12 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 
 	for columnRows.Next() {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
+		var identityOptions string
 		var notNull bool
 		var columnDefault sql.NullString
 
 		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault,
-			&identity, &generatedExpression, &collation, &comment)
+			&identity, &generatedExpression, &collation, &comment, &identityOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -1439,6 +1461,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 			GeneratedExpression: generatedExpression,
 			Collation:           collation,
 			Comment:             comment,
+			IdentityOptions:     identityOptions,
 		}
 		table.Columns = append(table.Columns, column)
 	}

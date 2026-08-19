@@ -118,6 +118,19 @@ func (a *PostgresSetIdentityAction) TableActionClause() string {
 		quoteIdentifier(a.ColumnName), a.Identity)
 }
 
+// ALTER COLUMN column_name SET option [ ... ]
+// PostgreSQL accepts the options of an identity column after the keyword SET, with no
+// parentheses.
+type PostgresSetIdentityOptionsAction struct {
+	ColumnName string
+	Options    string
+}
+
+func (a *PostgresSetIdentityOptionsAction) TableActionClause() string {
+	return fmt.Sprintf("ALTER COLUMN %s SET %s",
+		quoteIdentifier(a.ColumnName), a.Options)
+}
+
 // ALTER COLUMN column_name DROP IDENTITY
 // This action keeps the NOT NULL flag of the column. PostgreSQL refuses to remove that
 // flag from an identity column, so the diff prints this action first.
