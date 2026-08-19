@@ -422,6 +422,22 @@ restart changes data.
 `PostgresType.Diff` prints `ALTER TYPE ... ADD VALUE` when the target values are the first
 values of the source. Every other change prints `DROP TYPE` and `CREATE TYPE`.
 
+`GetTable` reads `attidentity` and `attgenerated` for each column. `pg_attrdef` holds the
+expression of a stored generated column, and it holds the default value of every other
+column. The query separates the two with a `CASE` expression. Keep that step. Without it a
+generated column becomes a column with a `DEFAULT` clause, and PostgreSQL refuses a
+`DEFAULT` expression that reads another column.
+
+Two rules fix the order of the identity actions. PostgreSQL refuses an identity on a column
+that accepts a null value, so `PostgresAddIdentityAction` comes after the `NOT NULL` block.
+PostgreSQL refuses to remove the `NOT NULL` flag of an identity column, so
+`PostgresDropIdentityAction` comes before that block. `DiffTable` prints one action on each
+side of the block for that reason.
+
+PostgreSQL holds no action that changes the expression of a generated column. `DiffTable`
+prints one `DROP COLUMN` action and one `ADD COLUMN` action in one statement. The column
+holds no data of its own, so that pair loses no row.
+
 PostgreSQL supports `ALTER TABLE ALTER COLUMN`. The driver prints one statement per change
 of a type, of a `NOT NULL` flag, or of a default value. A type change gets a `USING`
 clause when PostgreSQL holds no automatic cast between the two types. `HasAutomaticCast`

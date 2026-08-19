@@ -41,6 +41,28 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 			continue
 		}
 
+		// PostgreSQL holds no action that changes the expression of a generated column.
+		// The column keeps no data of its own, so one DROP COLUMN action and one ADD
+		// COLUMN action rebuild it with no loss.
+		if sourceColumn.GeneratedExpression != targetColumn.GeneratedExpression {
+			instructions = append(instructions, &PostgresAlterTableInstruction{
+				Name: t.Name,
+				Actions: []AlterTableAction{
+					&SQLDropColumnAction{ColumnName: targetColumn.Name},
+					&PostgresAddColumnAction{Column: sourceColumn},
+				},
+			})
+
+			continue
+		}
+
+		// PostgreSQL refuses to remove the NOT NULL flag of an identity column, so this
+		// action comes before the NOT NULL block below.
+		if targetColumn.Identity != "" && sourceColumn.Identity == "" {
+			instructions = append(instructions,
+				alterTable(&PostgresDropIdentityAction{ColumnName: sourceColumn.Name}))
+		}
+
 		if sourceColumn.Type != targetColumn.Type {
 			usingCast, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
 			if err != nil {
@@ -73,6 +95,22 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 			} else {
 				instructions = append(instructions,
 					alterTable(&PostgresDropDefaultAction{ColumnName: sourceColumn.Name}))
+			}
+		}
+
+		// PostgreSQL refuses to add an identity to a column that accepts a null value, so
+		// these two actions come after the NOT NULL block above.
+		if sourceColumn.Identity != "" && sourceColumn.Identity != targetColumn.Identity {
+			if targetColumn.Identity == "" {
+				instructions = append(instructions, alterTable(&PostgresAddIdentityAction{
+					ColumnName: sourceColumn.Name,
+					Identity:   sourceColumn.Identity,
+				}))
+			} else {
+				instructions = append(instructions, alterTable(&PostgresSetIdentityAction{
+					ColumnName: sourceColumn.Name,
+					Identity:   sourceColumn.Identity,
+				}))
 			}
 		}
 	}

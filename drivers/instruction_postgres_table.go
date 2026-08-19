@@ -89,6 +89,41 @@ func (a *PostgresDropDefaultAction) TableActionClause() string {
 	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP DEFAULT"
 }
 
+// ALTER COLUMN column_name ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY
+// PostgreSQL refuses this action while the column accepts a null value, so the diff sets
+// the NOT NULL flag of the column first.
+type PostgresAddIdentityAction struct {
+	ColumnName string
+	Identity   string
+}
+
+func (a *PostgresAddIdentityAction) TableActionClause() string {
+	return fmt.Sprintf("ALTER COLUMN %s ADD GENERATED %s AS IDENTITY",
+		quoteIdentifier(a.ColumnName), a.Identity)
+}
+
+// ALTER COLUMN column_name SET GENERATED { ALWAYS | BY DEFAULT }
+type PostgresSetIdentityAction struct {
+	ColumnName string
+	Identity   string
+}
+
+func (a *PostgresSetIdentityAction) TableActionClause() string {
+	return fmt.Sprintf("ALTER COLUMN %s SET GENERATED %s",
+		quoteIdentifier(a.ColumnName), a.Identity)
+}
+
+// ALTER COLUMN column_name DROP IDENTITY
+// This action keeps the NOT NULL flag of the column. PostgreSQL refuses to remove that
+// flag from an identity column, so the diff prints this action first.
+type PostgresDropIdentityAction struct {
+	ColumnName string
+}
+
+func (a *PostgresDropIdentityAction) TableActionClause() string {
+	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP IDENTITY"
+}
+
 // ADD table_constraint
 type PostgresAddConstraintAction struct {
 	Constraint *PostgresConstraint

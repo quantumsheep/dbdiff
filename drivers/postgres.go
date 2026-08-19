@@ -1080,6 +1080,11 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	// USER-DEFINED for an enum column or a composite column. format_type gives the exact
 	// type name, for example integer[]. It also adds a prefix to a type of another schema,
 	// so the query removes the prefix of the current schema.
+	//
+	// pg_attrdef holds the expression of a stored generated column, and it holds the
+	// default value of every other column. The two CASE expressions separate the two, so
+	// a generated column never becomes a column with a default value. PostgreSQL refuses
+	// a DEFAULT expression that reads another column.
 	columnRows, err := db.QueryContext(ctx, `
 			SELECT
 				a.attname,
@@ -1089,7 +1094,9 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 					''
 				),
 				a.attnotnull,
-				pg_get_expr(d.adbin, d.adrelid)
+				CASE WHEN a.attgenerated = '' THEN pg_get_expr(d.adbin, d.adrelid) END,
+				CASE a.attidentity WHEN 'a' THEN 'ALWAYS' WHEN 'd' THEN 'BY DEFAULT' ELSE '' END,
+				CASE WHEN a.attgenerated = 's' THEN pg_get_expr(d.adbin, d.adrelid) ELSE '' END
 			FROM pg_attribute a
 			LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 			WHERE a.attrelid = $1::regclass
@@ -1104,20 +1111,23 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	defer columnRows.Close()
 
 	for columnRows.Next() {
-		var columnName, columnType string
+		var columnName, columnType, identity, generatedExpression string
 		var notNull bool
 		var columnDefault sql.NullString
 
-		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault)
+		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault,
+			&identity, &generatedExpression)
 		if err != nil {
 			return nil, err
 		}
 
 		column := &PostgresColumn{
-			Name:    columnName,
-			Type:    columnType,
-			NotNull: notNull,
-			Default: columnDefault,
+			Name:                columnName,
+			Type:                columnType,
+			NotNull:             notNull,
+			Default:             columnDefault,
+			Identity:            identity,
+			GeneratedExpression: generatedExpression,
 		}
 		table.Columns = append(table.Columns, column)
 	}
