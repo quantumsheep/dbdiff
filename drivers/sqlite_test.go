@@ -1429,6 +1429,155 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	// PRAGMA foreign_key_list reports no DEFERRABLE clause, so the parser reads it from the
+	// CREATE TABLE statement.
+	t.Run("CreateTableWithADeferredForeignKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents(id) ON DELETE CASCADE
+					DEFERRABLE INITIALLY DEFERRED
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "parents",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+				},
+			},
+			&SQLiteCreateTableInstruction{
+				Name: "children",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "parent",
+						Type: "INTEGER",
+					},
+				},
+				ForeignKeys: []*SQLiteForeignKey{
+					{
+						Table:      "parents",
+						From:       []string{"parent"},
+						To:         []string{"id"},
+						OnUpdate:   "NO ACTION",
+						OnDelete:   "CASCADE",
+						Deferrable: "DEFERRABLE INITIALLY DEFERRED",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A new DEFERRABLE clause changes the foreign key, so the table needs a recreation.
+	t.Run("ModifyForeignKeyDeferrable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents(id)
+			);
+			INSERT INTO parents (id) VALUES (1);
+			INSERT INTO children (id, parent) VALUES (1, 1);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				Name: "_children_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "parent",
+						Type: "INTEGER",
+					},
+				},
+				ForeignKeys: []*SQLiteForeignKey{
+					{
+						Table:      "parents",
+						From:       []string{"parent"},
+						To:         []string{"id"},
+						OnUpdate:   "NO ACTION",
+						OnDelete:   "NO ACTION",
+						Deferrable: "DEFERRABLE INITIALLY DEFERRED",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_children_temp",
+				ColumnNames:       []string{"id", "parent"},
+				SelectExpressions: []string{`"id"`, `"parent"`},
+				SourceTableName:   "children",
+			},
+			&SQLDropTableInstruction{Name: "children"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_children_temp",
+				Action: &SQLRenameTableAction{NewName: "children"},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		rows := driver.FetchAllFromTarget("children", "")
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "parent": int64(1)},
+		}, rows)
+	})
+
+	// dbdiff writes a key of one column as a table constraint, so a second run reads that
+	// form while the source keeps the column form. The two forms name the same key, so the
+	// clause must come from either one. Without that rule the diff never settles.
+	t.Run("DeferrableOfATableForeignKeyOfOneColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER,
+				FOREIGN KEY ("parent") REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
+			);
+		`)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("DropTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

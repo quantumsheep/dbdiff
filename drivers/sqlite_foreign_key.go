@@ -11,6 +11,10 @@ type SQLiteForeignKey struct {
 	To       []string
 	OnUpdate string
 	OnDelete string
+
+	// Deferrable holds the text of the DEFERRABLE clause, for example
+	// "DEFERRABLE INITIALLY DEFERRED". It is empty for a key with no such clause.
+	Deferrable string
 }
 
 func (fk *SQLiteForeignKey) Clause() string {
@@ -27,11 +31,19 @@ func (fk *SQLiteForeignKey) Clause() string {
 		statement += fmt.Sprintf(" ON DELETE %s", fk.OnDelete)
 	}
 
+	if fk.Deferrable != "" {
+		statement += " " + fk.Deferrable
+	}
+
 	return statement
 }
 
 func (fk *SQLiteForeignKey) Equal(other *SQLiteForeignKey) bool {
 	if fk.Table != other.Table || fk.OnUpdate != other.OnUpdate || fk.OnDelete != other.OnDelete {
+		return false
+	}
+
+	if fk.Deferrable != other.Deferrable {
 		return false
 	}
 

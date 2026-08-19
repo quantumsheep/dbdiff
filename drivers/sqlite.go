@@ -275,6 +275,23 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
+	// PRAGMA foreign_key_list reports no DEFERRABLE clause. SQLite writes a key of one
+	// column as a column constraint or as a table constraint, and dbdiff writes the table
+	// form, so a key of one column reads either place. Without that rule a diff of the two
+	// forms never settles.
+	for _, foreignKey := range foreignKeys {
+		foreignKey.Deferrable = parsed.DeferrableOf(foreignKey.From)
+
+		if foreignKey.Deferrable != "" || len(foreignKey.From) != 1 {
+			continue
+		}
+
+		attributes, found := parsed.ColumnByName(foreignKey.From[0])
+		if found {
+			foreignKey.Deferrable = attributes.ForeignKeyDeferrable
+		}
+	}
+
 	return &SQLiteTable{
 		Name:               tableName,
 		Columns:            columns,

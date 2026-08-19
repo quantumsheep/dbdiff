@@ -364,6 +364,10 @@ columns.
 
 dbdiff does not support MySQL.
 
+The SQLite driver keeps the `DEFERRABLE` clause of a foreign key. SQLite writes a key of
+one column as a column constraint or as a table constraint, and the driver reads the clause
+from either form.
+
 The SQLite driver keeps the `ON CONFLICT` clause of a `PRIMARY KEY`, of a `UNIQUE`
 constraint, and of a `NOT NULL` constraint. A new clause recreates the table.
 

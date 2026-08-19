@@ -42,6 +42,10 @@ type SQLiteColumn struct {
 	PrimaryKeyConflict string
 	UniqueConflict     string
 	NotNullConflict    string
+
+	// ForeignKeyDeferrable holds the DEFERRABLE clause of a REFERENCES constraint of this
+	// column. The foreign key of the table keeps that clause, and Definition writes none.
+	ForeignKeyDeferrable string
 }
 
 func (c *SQLiteColumn) IsGenerated() bool {

@@ -4,6 +4,31 @@ import (
 	"strings"
 )
 
+// deferrableClause returns the DEFERRABLE clause in these tokens, with no leading space.
+// SQLite accepts the keyword NOT before it, and it accepts the keywords INITIALLY DEFERRED
+// or INITIALLY IMMEDIATE after it.
+func deferrableClause(tokens []string) string {
+	for position, token := range tokens {
+		if !strings.EqualFold(token, "DEFERRABLE") {
+			continue
+		}
+
+		clause := []string{"DEFERRABLE"}
+
+		if position > 0 && strings.EqualFold(tokens[position-1], "NOT") {
+			clause = []string{"NOT", "DEFERRABLE"}
+		}
+
+		if position+2 < len(tokens) && strings.EqualFold(tokens[position+1], "INITIALLY") {
+			clause = append(clause, "INITIALLY", strings.ToUpper(tokens[position+2]))
+		}
+
+		return strings.Join(clause, " ")
+	}
+
+	return ""
+}
+
 // conflictResolution returns the resolution of an ON CONFLICT clause in these tokens.
 func conflictResolution(tokens []string) string {
 	for position, token := range tokens {
@@ -136,6 +161,7 @@ type SQLiteTableDefinition struct {
 	Columns            map[string]*SQLiteColumn
 	CheckConstraints   []string
 	UniqueConflicts    map[string]string
+	ForeignKeyDefers   map[string]string
 	PrimaryKeyConflict string
 	WithoutRowID       bool
 	Strict             bool
@@ -147,6 +173,11 @@ func (d *SQLiteTableDefinition) UniqueConflictOf(columns []string) string {
 	return d.UniqueConflicts[strings.Join(columns, ",")]
 }
 
+// DeferrableOf returns the DEFERRABLE clause of the foreign key that holds these columns.
+func (d *SQLiteTableDefinition) DeferrableOf(columns []string) string {
+	return d.ForeignKeyDefers[strings.Join(columns, ",")]
+}
+
 // ColumnByName returns the parsed attributes of one column.
 func (d *SQLiteTableDefinition) ColumnByName(name string) (*SQLiteColumn, bool) {
 	column, found := d.Columns[name]
@@ -156,8 +187,9 @@ func (d *SQLiteTableDefinition) ColumnByName(name string) (*SQLiteColumn, bool) 
 // parseTableDefinition reads the CREATE TABLE statement of sqlite_master.
 func parseTableDefinition(definition string) *SQLiteTableDefinition {
 	parsed := &SQLiteTableDefinition{
-		Columns:         make(map[string]*SQLiteColumn),
-		UniqueConflicts: make(map[string]string),
+		Columns:          make(map[string]*SQLiteColumn),
+		UniqueConflicts:  make(map[string]string),
+		ForeignKeyDefers: make(map[string]string),
 	}
 
 	parsed.WithoutRowID, parsed.Strict = parseTableOptions(definition)
@@ -188,6 +220,11 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 
 			if strings.EqualFold(constraint[0], "PRIMARY") && len(constraint) > 2 {
 				parsed.PrimaryKeyConflict = conflictResolution(constraint[2:])
+			}
+
+			if strings.EqualFold(constraint[0], "FOREIGN") && len(constraint) > 2 {
+				key := strings.Join(constraintColumnNames(constraint[2]), ",")
+				parsed.ForeignKeyDefers[key] = deferrableClause(constraint[2:])
 			}
 
 			continue
@@ -260,6 +297,9 @@ func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
 
 		case strings.EqualFold(token, "CHECK") && strings.HasPrefix(next, "("):
 			column.Check = next
+
+		case strings.EqualFold(token, "REFERENCES"):
+			column.ForeignKeyDeferrable = deferrableClause(tokens[position:])
 
 		case strings.EqualFold(token, "AS") && strings.HasPrefix(next, "("):
 			column.GeneratedExpression = next
