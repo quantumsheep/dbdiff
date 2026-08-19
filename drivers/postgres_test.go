@@ -1310,6 +1310,129 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	// pg_rules writes the name of the schema into the definition, so the query removes that
+	// prefix. Without that step the statement builds the rule in the source schema.
+	t.Run("CreateRule", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE base (a INT);
+			CREATE RULE no_delete AS ON DELETE TO base DO INSTEAD NOTHING;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE base (a INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateRuleInstruction{
+				Definition: "CREATE RULE no_delete AS\n    ON DELETE TO base DO INSTEAD NOTHING;",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropRule", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE base (a INT);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE base (a INT);
+			CREATE RULE no_delete AS ON DELETE TO base DO INSTEAD NOTHING;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropRuleInstruction{
+				Name:      "no_delete",
+				TableName: "base",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// PostgreSQL holds no action that changes a rule, so a new definition prints a DROP
+	// statement and a CREATE statement.
+	t.Run("ModifyRule", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE base (a INT);
+			CREATE RULE guard AS ON DELETE TO base DO INSTEAD NOTHING;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE base (a INT);
+			CREATE RULE guard AS ON UPDATE TO base DO INSTEAD NOTHING;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropRuleInstruction{
+				Name:      "guard",
+				TableName: "base",
+			},
+			&PostgresCreateRuleInstruction{
+				Definition: "CREATE RULE guard AS\n    ON DELETE TO base DO INSTEAD NOTHING;",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	// A view holds an implicit _RETURN rule. The diff names no such rule.
+	t.Run("ViewRuleIsIgnored", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE base (a INT);
+			CREATE VIEW v AS SELECT a FROM base;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE base (a INT);
+			CREATE VIEW v AS SELECT a FROM base;
+		`)
+
+		driver.RequireInstructions(nil)
+	})
+
+	// The action of a rule can name a second table, so every rule comes after every table.
+	// Without that order the statement names a table that is not there.
+	t.Run("CreateRuleThatNamesASecondTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE base (a INT);
+			CREATE TABLE zlog (a INT);
+			CREATE RULE log_insert AS ON INSERT TO base DO ALSO INSERT INTO zlog VALUES (NEW.a);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "base",
+				Columns: []*PostgresColumn{
+					{
+						Name: "a",
+						Type: "integer",
+					},
+				},
+			},
+			&PostgresCreateTableInstruction{
+				Name: "zlog",
+				Columns: []*PostgresColumn{
+					{
+						Name: "a",
+						Type: "integer",
+					},
+				},
+			},
+			&PostgresCreateRuleInstruction{
+				Definition: "CREATE RULE log_insert AS\n    ON INSERT TO base DO  INSERT INTO zlog (a)\n  VALUES (new.a);",
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

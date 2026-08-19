@@ -909,6 +909,24 @@ func TestInstructions(t *testing.T) {
   WHERE (a > 0) WITH CASCADED CHECK OPTION;`, instruction.String())
 	})
 
+	t.Run("PostgresCreateRule", func(t *testing.T) {
+		instruction := &PostgresCreateRuleInstruction{
+			Definition: "CREATE RULE no_delete AS\n    ON DELETE TO base DO INSTEAD NOTHING;",
+		}
+
+		require.Equal(t, `CREATE RULE no_delete AS
+    ON DELETE TO base DO INSTEAD NOTHING;`, instruction.String())
+	})
+
+	t.Run("PostgresDropRule", func(t *testing.T) {
+		instruction := &PostgresDropRuleInstruction{
+			Name:      "no_delete",
+			TableName: "base",
+		}
+
+		require.Equal(t, `DROP RULE "no_delete" ON "base";`, instruction.String())
+	})
+
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",

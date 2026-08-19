@@ -11,6 +11,7 @@ type PostgresTable struct {
 	Indexes     []*PostgresIndex
 	Constraints []*PostgresConstraint
 	Triggers    []*PostgresTrigger
+	Rules       []*PostgresRule
 
 	// PartitionKey holds the key of a partitioned table. PartitionParent and PartitionBound
 	// hold the parent and the bound of a partition. A table that is neither keeps the three
@@ -397,6 +398,45 @@ func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
 	return sorted
 }
 
+// DiffRules compares the rules of one table. The action of a rule can name a second table,
+// so DiffTables prints these instructions after every table.
+func (t *PostgresTable) DiffRules(other *PostgresTable) []Instruction {
+	var instructions []Instruction
+
+	for _, sourceRule := range t.Rules {
+		targetRule, found := other.RuleByName(sourceRule.Name)
+		if !found {
+			instructions = append(instructions, sourceRule.CreateInstruction())
+			continue
+		}
+
+		if sourceRule.Def != targetRule.Def {
+			instructions = append(instructions,
+				targetRule.DropInstruction(), sourceRule.CreateInstruction())
+		}
+	}
+
+	for _, targetRule := range other.Rules {
+		_, found := t.RuleByName(targetRule.Name)
+		if !found {
+			instructions = append(instructions, targetRule.DropInstruction())
+		}
+	}
+
+	return instructions
+}
+
+// RuleInstructions returns the statement of each rule of the table.
+func (t *PostgresTable) RuleInstructions() []Instruction {
+	var instructions []Instruction
+
+	for _, rule := range t.Rules {
+		instructions = append(instructions, rule.CreateInstruction())
+	}
+
+	return instructions
+}
+
 // diffStorageParameters compares the WITH options of a table. A parameter that the source
 // does not hold takes a RESET action, which gives it its default value again.
 func diffStorageParameters(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
@@ -519,6 +559,16 @@ func (t *PostgresTable) IndexByName(name string) (*PostgresIndex, bool) {
 	return nil, false
 }
 
+func (t *PostgresTable) RuleByName(name string) (*PostgresRule, bool) {
+	for _, rule := range t.Rules {
+		if rule.Name == name {
+			return rule, true
+		}
+	}
+
+	return nil, false
+}
+
 func (t *PostgresTable) TriggerByName(name string) (*PostgresTrigger, bool) {
 	for _, tr := range t.Triggers {
 		if tr.Name == name {
@@ -544,7 +594,8 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 }
 
 // Instructions returns the statement that creates the table, then the statements of its
-// indexes, then the statements of its triggers.
+// indexes, then the statements of its triggers. It returns no rule, because the action of
+// a rule can name a second table. DiffTables prints every rule after every table.
 func (t *PostgresTable) Instructions() []Instruction {
 	if t.IsPartition() {
 		return []Instruction{

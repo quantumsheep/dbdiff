@@ -370,6 +370,27 @@ func (i *PostgresDropPolicyInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
 }
 
+// The definition comes from pg_rules, and that text ends with a semicolon. String adds no
+// second one.
+type PostgresCreateRuleInstruction struct {
+	Definition string
+}
+
+func (i *PostgresCreateRuleInstruction) String() string {
+	return i.Definition
+}
+
+// DROP RULE name ON table_name
+type PostgresDropRuleInstruction struct {
+	Name      string
+	TableName string
+}
+
+func (i *PostgresDropRuleInstruction) String() string {
+	return fmt.Sprintf("DROP RULE %s ON %s;",
+		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+}
+
 // COMMENT ON TABLE name IS comment
 // An empty comment gives the keyword NULL, which removes the comment.
 type PostgresCommentOnTableInstruction struct {

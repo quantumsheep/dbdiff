@@ -249,6 +249,10 @@ keyword prints `ALTER TABLE ... SET LOGGED` or `ALTER TABLE ... SET UNLOGGED`.
 `CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
 PostgreSQL merges a column that the parent and the child both declare.
 
+**Rules.** The driver compares the rules of a table. PostgreSQL holds no action that
+changes a rule, so a new definition prints a `DROP RULE` statement and a `CREATE RULE`
+statement. A view holds an implicit `_RETURN` rule, and the output names no such rule.
+
 **View check options.** The driver keeps `WITH LOCAL CHECK OPTION` and
 `WITH CASCADED CHECK OPTION`. The query text of a view holds none of that clause, so a new
 option alone prints a `DROP VIEW` statement and a `CREATE VIEW` statement.
@@ -360,6 +364,7 @@ the same treatment.
 | Triggers        | ✅                                      | ✅         |
 | Views           | ✅                                      | ✅         |
 | Materialized views | ➖                                   | ✅         |
+| Rules             | ➖                                    | ✅         |
 | Partitioned tables | ➖                                   | ✅         |
 | Sequences       | ➖                                      | ✅         |
 | Enum types      | ➖                                      | ✅         |

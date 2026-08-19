@@ -436,12 +436,17 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		return d.HasAutomaticCast(ctx, d.TargetDatabaseConnection, oldType, newType)
 	}
 
+	// The action of a rule can name a second table, so every rule comes after every table.
+	var ruleInstructions []Instruction
+
 	for _, sourceTable := range sourceTables {
 		targetTable, found := lo.Find(targetTables, func(table *PostgresTable) bool {
 			return table.Name == sourceTable.Name
 		})
 		if !found {
 			additions = append(additions, sourceTable.Instructions()...)
+			ruleInstructions = append(ruleInstructions, sourceTable.RuleInstructions()...)
+
 			continue
 		}
 
@@ -451,7 +456,10 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		}
 
 		additions = append(additions, subInstructions...)
+		ruleInstructions = append(ruleInstructions, sourceTable.DiffRules(targetTable)...)
 	}
+
+	additions = append(additions, ruleInstructions...)
 
 	for _, targetTable := range targetTables {
 		_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
@@ -1161,6 +1169,52 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 	return functions, nil
 }
 
+// GetTableRules returns the rules of one table. pg_rules writes the name of the schema
+// into the definition, so the query removes the prefix of the current schema. Without that
+// step the statement builds the rule in the source schema.
+//
+// pg_rules reports no _RETURN rule, which is the implicit rule of a view.
+func (d *PostgresDriver) GetTableRules(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresRule, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			rulename,
+			regexp_replace(
+				definition,
+				'\m' || quote_ident(current_schema()) || '\.',
+				'',
+				'g'
+			)
+		FROM pg_rules
+		WHERE schemaname = current_schema() AND tablename = $1
+		ORDER BY rulename
+	`, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var rules []*PostgresRule
+
+	for rows.Next() {
+		rule := &PostgresRule{Table: tableName}
+
+		err := rows.Scan(&rule.Name, &rule.Def)
+		if err != nil {
+			return nil, err
+		}
+
+		rules = append(rules, rule)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return rules, nil
+}
+
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {
 	viewRows, err := db.QueryContext(ctx, `
 		SELECT table_name, view_definition,
@@ -1591,6 +1645,13 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	if err != nil {
 		return nil, err
 	}
+
+	rules, err := d.GetTableRules(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	table.Rules = rules
 
 	return table, nil
 }

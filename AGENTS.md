@@ -438,6 +438,11 @@ The alias of `pg_collation` in the column query is `column_collation`. The word
 `collation` is a reserved word of PostgreSQL, and a query that uses it as an alias fails
 with a syntax error.
 
+`DiffTables` prints every rule after every table. The action of a rule can name a second
+table, so a rule that comes with its own table names a table that is not there yet.
+`Instructions` returns no rule for that reason, and `DiffRules` and `RuleInstructions`
+return them apart.
+
 `GetMaterializedViews` reads `pg_matviews`. `information_schema` reports no materialized
 view, so a query of `information_schema.views` finds none of them. The view keeps its
 indexes, because `pg_indexes` holds them and `GetTable` reads no index of a view.
