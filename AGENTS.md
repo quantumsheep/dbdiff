@@ -441,9 +441,11 @@ a partitioned table.
 `INHERITS` takes the statement of a partition, and that statement holds no bound, so
 PostgreSQL rejects it.
 
-`GetTables` sorts the tables with `sortTablesByPartitionParent`. The name of a partition
-can sort before the name of its parent, and a `CREATE TABLE ... PARTITION OF` statement
-needs the parent. Keep that sort.
+`GetTables` sorts the tables with `sortTablesByDependency`. The name of a child can sort
+before the name of its parent, and a statement needs the parent: a
+`CREATE TABLE ... PARTITION OF` statement needs the parent of the partition, and a foreign
+key needs the table that it names. `DiffTables` walks the target tables backward, because a
+`DROP TABLE` statement takes the reverse order. Keep that sort and that direction.
 
 PostgreSQL accepts no comment and no row level security option in a `CREATE TABLE`
 statement, so `Instructions` prints a separate `COMMENT ON` statement and a separate
@@ -492,7 +494,9 @@ Three rules keep the output free of noise:
 - An object that an extension owns stays out of the diff. Each query excludes a row with
   a `pg_depend` entry of the type `e`. The `CREATE EXTENSION` statement recreates it.
 - A `SERIAL` column and an identity column own their sequence. `GetSequences` excludes a
-  sequence with a `pg_depend` entry of the type `a` or `i`.
+  sequence with a `pg_depend` entry of the type `a` or `i`. The `Serial` field of the
+  column holds the word that builds that sequence again, and `GetTable` clears the default
+  of such a column, because the word gives it.
 - `pg_get_functiondef` writes the name of the schema in the header. `GetFunctions`
   removes that prefix, because the source schema and the target schema differ.
 
