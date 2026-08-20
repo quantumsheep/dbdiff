@@ -161,10 +161,7 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]Instruction, error) {
 			return view.Name == sourceView.Name
 		})
 		if !found {
-			instructions = append(instructions, &SQLiteCreateViewInstruction{
-				Definition: sourceView.SQL,
-			})
-
+			instructions = append(instructions, sourceView.Instructions()...)
 			continue
 		}
 
@@ -291,7 +288,7 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
-	triggers, err := d.GetTableTriggers(ctx, db, tableName)
+	triggers, err := d.GetTriggers(ctx, db, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -806,8 +803,10 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 	return keys, nil
 }
 
-func (d *SQLiteDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteTrigger, error) {
-	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", tableName)
+// A trigger of a view holds the name of that view in tbl_name, so this method reads the
+// triggers of a table and the triggers of a view.
+func (d *SQLiteDriver) GetTriggers(ctx context.Context, db *sql.DB, objectName string) ([]*SQLiteTrigger, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", objectName)
 	if err != nil {
 		return nil, err
 	}
@@ -856,9 +855,15 @@ func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 			return nil, err
 		}
 
+		triggers, err := d.GetTriggers(ctx, db, name)
+		if err != nil {
+			return nil, err
+		}
+
 		views = append(views, &SQLiteView{
-			Name: name,
-			SQL:  sqlContent,
+			Name:     name,
+			SQL:      sqlContent,
+			Triggers: triggers,
 		})
 	}
 

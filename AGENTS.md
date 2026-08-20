@@ -354,6 +354,11 @@ column, because SQLite computes it and refuses a value for it. SQLite also refus
 `ADD COLUMN` action that holds a STORED generated column, so `NeedsRecreation` answers true
 for that addition.
 
+`GetTriggers` reads the triggers of a table and the triggers of a view, because
+`sqlite_master` holds the name of the view in `tbl_name` of an `INSTEAD OF` trigger.
+`SQLiteView.Diff` compares them. A `DROP VIEW` statement removes every trigger of the view,
+so the recreation of a view builds each trigger of the source again.
+
 `GetTableForeignKeys` sorts the foreign keys with `sort.SliceStable`, because SQLite gives
 no stable order. Keep that sort. Without it the output changes between two runs.
 

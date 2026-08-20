@@ -2759,7 +2759,7 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnTarget(diff)
 
-		triggers, err := driver.GetTableTriggers(t.Context(), driver.TargetDatabaseConnection, "users")
+		triggers, err := driver.GetTriggers(t.Context(), driver.TargetDatabaseConnection, "users")
 		require.NoError(t, err)
 		require.Len(t, triggers, 1)
 		require.Equal(t, "users_insert", triggers[0].Name)
@@ -2852,6 +2852,125 @@ func TestSQLiteDriver(t *testing.T) {
 				Definition: "CREATE VIEW users_view AS SELECT name FROM users",
 			},
 			&SQLDropViewInstruction{Name: "old_view"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateViewTrigger", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT id, name FROM users;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTriggerInstruction{
+				Definition: `CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END`,
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		driver.ExecOnTarget(`INSERT INTO users_view (id, name) VALUES (1, 'alice');`)
+
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "alice"},
+		}, rows)
+	})
+
+	t.Run("DropViewTrigger", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT id, name FROM users;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteDropTriggerInstruction{Name: "users_view_insert"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("RecreateViewWithTrigger", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT name, id FROM users;
+			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "users_view"},
+			&SQLiteCreateViewInstruction{
+				Definition: "CREATE VIEW users_view AS SELECT name, id FROM users",
+			},
+			&SQLiteCreateTriggerInstruction{
+				Definition: `CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END`,
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		driver.ExecOnTarget(`INSERT INTO users_view (id, name) VALUES (2, 'bob');`)
+
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(2), "name": "bob"},
+		}, rows)
+	})
+
+	t.Run("CreateViewWithTrigger", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
+		`)
+
+		driver.ExecOnTarget(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateViewInstruction{
+				Definition: "CREATE VIEW users_view AS SELECT id, name FROM users",
+			},
+			&SQLiteCreateTriggerInstruction{
+				Definition: `CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END`,
+			},
 		})
 
 		driver.ExecOnTarget(diff)

@@ -176,6 +176,10 @@ statement of `sqlite_master`. It reads the table options `WITHOUT ROWID` and `ST
 the same text. A change of one of these needs a new table, because SQLite holds no
 `ALTER COLUMN` action.
 
+**View triggers.** SQLite holds an `INSTEAD OF` trigger on a view. The driver compares the
+triggers of a view, and it builds each of them again after a `DROP VIEW` statement, because
+that statement removes every trigger of the view.
+
 **Rename detection.** The driver detects a renamed column. A source column that the target
 does not hold, and that holds the attributes of exactly one free target column, is a
 rename. Two candidates make the guess unsafe. In that case the column becomes an addition,
@@ -407,7 +411,7 @@ the same treatment.
 | Column storage and statistics | ➖                        | ✅         |
 | Indexes         | ✅                                      | ✅         |
 | Constraints     | ✅ (foreign keys, primary keys, unique, checks) | ✅  |
-| Triggers        | ✅                                      | ✅ (with the mode) |
+| Triggers        | ✅ (of a table and of a view)           | ✅ (with the mode) |
 | Views           | ✅                                      | ✅         |
 | Materialized views | ➖                                   | ✅         |
 | Rules             | ➖                                    | ✅         |
