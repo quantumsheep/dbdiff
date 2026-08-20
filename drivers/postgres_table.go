@@ -21,6 +21,9 @@ type PostgresTable struct {
 	// keeps its own columns and its own statement.
 	Inherits []string
 
+	// References names each table that a foreign key of this table names.
+	References []string
+
 	Comment string
 
 	Unlogged bool
@@ -426,11 +429,15 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	return instructions, nil
 }
 
-// sortTablesByPartitionParent orders the tables so that a partition comes after its
-// parent, and a table of INHERITS comes after every parent of it. The name of a child can
-// sort before the name of its parent, and each of the two statements needs the parent. A
-// partition of a partition keeps the same rule, because the walk visits the parent first.
-func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
+// sortTablesByDependency orders the tables so that a partition comes after its parent, a
+// table of INHERITS comes after every parent of it, and a table comes after every table
+// that a foreign key of it names. The name of a child can sort before the name of its
+// parent, and each of the statements needs the parent. A DROP TABLE statement takes the
+// reverse order.
+//
+// PostgreSQL accepts a cycle of two foreign keys. The walk marks a table before it visits
+// the tables of that table, so a cycle gives an order and no endless loop.
+func sortTablesByDependency(tables []*PostgresTable) []*PostgresTable {
 	tableByName := make(map[string]*PostgresTable, len(tables))
 
 	for _, table := range tables {
@@ -458,6 +465,13 @@ func sortTablesByPartitionParent(tables []*PostgresTable) []*PostgresTable {
 			parent, found := tableByName[parentName]
 			if found {
 				visit(parent)
+			}
+		}
+
+		for _, referenceName := range table.References {
+			reference, found := tableByName[referenceName]
+			if found {
+				visit(reference)
 			}
 		}
 

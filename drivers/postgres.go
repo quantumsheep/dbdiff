@@ -461,7 +461,9 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 
 	additions = append(additions, ruleInstructions...)
 
-	for _, targetTable := range targetTables {
+	// GetTables sorts a table after every table that it needs, so the reverse order gives
+	// each DROP TABLE statement before the statement of the table that it names.
+	for _, targetTable := range slices.Backward(targetTables) {
 		_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
 			return table.Name == targetTable.Name
 		})
@@ -1708,7 +1710,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		return nil, err
 	}
 
-	return sortTablesByPartitionParent(tables), nil
+	return sortTablesByDependency(tables), nil
 }
 
 func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*PostgresTable, error) {
@@ -1848,7 +1850,11 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	}
 
 	constraintRows, err := db.QueryContext(ctx, `
-			SELECT conname, contype, pg_get_constraintdef(oid)
+			SELECT
+				conname,
+				contype,
+				pg_get_constraintdef(oid),
+				coalesce((SELECT relname FROM pg_class WHERE oid = confrelid), '')
 			FROM pg_constraint
 			WHERE conrelid = $1::regclass
 		`, quoteIdentifier(tableName))
@@ -1861,9 +1867,16 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	for constraintRows.Next() {
 		constraint := &PostgresConstraint{}
 
-		err := constraintRows.Scan(&constraint.Name, &constraint.Type, &constraint.Def)
+		var referencedTable string
+
+		err := constraintRows.Scan(&constraint.Name, &constraint.Type, &constraint.Def,
+			&referencedTable)
 		if err != nil {
 			return nil, err
+		}
+
+		if referencedTable != "" && referencedTable != tableName {
+			table.References = append(table.References, referencedTable)
 		}
 
 		table.Constraints = append(table.Constraints, constraint)

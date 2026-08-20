@@ -493,6 +493,123 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreateTablesInForeignKeyOrder", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE zoo (id INT PRIMARY KEY);
+			CREATE TABLE animal (id INT PRIMARY KEY, zoo_id INT REFERENCES zoo(id));
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "zoo",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "zoo_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+			},
+			&PostgresCreateTableInstruction{
+				Name: "animal",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+					{
+						Name: "zoo_id",
+						Type: "integer",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "animal_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+					{
+						Name: "animal_zoo_id_fkey",
+						Type: "f",
+						Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("DropTablesInForeignKeyOrder", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE animal (id INT PRIMARY KEY);
+			CREATE TABLE zoo (id INT PRIMARY KEY, animal_id INT REFERENCES animal(id));
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "zoo"},
+			&SQLDropTableInstruction{Name: "animal"},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("AddForeignKeyToANewTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE zoo (id INT PRIMARY KEY);
+			CREATE TABLE animal (id INT PRIMARY KEY, zoo_id INT REFERENCES zoo(id));
+		`)
+		driver.ExecOnTarget(`CREATE TABLE animal (id INT PRIMARY KEY, zoo_id INT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "zoo",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "zoo_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "animal",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "animal_zoo_id_fkey",
+							Type: "f",
+							Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("CreateTableWithSerialColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
