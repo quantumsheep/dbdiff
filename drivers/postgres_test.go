@@ -493,6 +493,81 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreateTableWithSerialColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+						Serial:  "serial",
+					},
+					{
+						Name: "name",
+						Type: "text",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "users_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+
+		driver.ExecOnTarget(`INSERT INTO users (name) VALUES ('alice');`)
+
+		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "alice"},
+		}, rows)
+	})
+
+	t.Run("AddSerialColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (name TEXT, id BIGSERIAL);`)
+		driver.ExecOnTarget(`CREATE TABLE users (name TEXT);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:    "id",
+							Type:    "bigint",
+							NotNull: true,
+							Serial:  "bigserial",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("EqualSerialColumns", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id SERIAL PRIMARY KEY);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id SERIAL PRIMARY KEY);`)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CreateTableWithGeneratedColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -2554,7 +2629,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id SERIAL);`)
 
-		driver.RequireInstructions([]Instruction{
+		diff := driver.RequireInstructions([]Instruction{
 			&PostgresCreateTableInstruction{
 				Name: "users",
 				Columns: []*PostgresColumn{
@@ -2562,14 +2637,13 @@ func TestPostgresDriver(t *testing.T) {
 						Name:    "id",
 						Type:    "integer",
 						NotNull: true,
-						Default: sql.NullString{
-							String: "nextval('users_id_seq'::regclass)",
-							Valid:  true,
-						},
+						Serial:  "serial",
 					},
 				},
 			},
 		})
+
+		driver.ExecOnTarget(diff)
 	})
 
 	t.Run("CreateEnumType", func(t *testing.T) {

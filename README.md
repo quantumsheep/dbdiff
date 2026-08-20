@@ -221,6 +221,11 @@ Without the `--privileges` flag that section stays empty.
 `CREATE EXTENSION` statement builds that object again. A sequence that a `SERIAL` column or
 an identity column owns stays out of the output for the same reason.
 
+**Serial columns.** The driver writes the word `serial`, `bigserial`, or `smallserial` in
+the definition of a column that owns its sequence. That word builds the sequence, so the
+output holds no `CREATE SEQUENCE` statement for it. The definition holds no `DEFAULT`
+clause, because the word gives the column that default.
+
 **Comments.** The driver compares the comment of a table and the comment of a column.
 PostgreSQL accepts a comment in no `CREATE` statement, so the output prints a separate
 `COMMENT ON` statement. A comment that goes away gives the keyword `NULL`.

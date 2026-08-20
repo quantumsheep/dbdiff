@@ -17,6 +17,10 @@ type PostgresColumn struct {
 
 	GeneratedExpression string
 
+	// Serial holds the word serial, bigserial, or smallserial. That word builds the
+	// sequence of the column, and no other statement builds it.
+	Serial string
+
 	Collation string
 
 	// Definition writes no comment, because a column definition accepts none.
@@ -70,7 +74,12 @@ func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 }
 
 func (c *PostgresColumn) Definition() string {
-	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), c.Type)
+	dataType := c.Type
+	if c.Serial != "" {
+		dataType = c.Serial
+	}
+
+	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), dataType)
 
 	if c.Collation != "" {
 		value += " COLLATE " + quoteIdentifier(c.Collation)

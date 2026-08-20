@@ -1734,6 +1734,9 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	//
 	// attstattarget holds the statistics target. PostgreSQL 16 writes -1 for the default
 	// target, and PostgreSQL 17 writes NULL. The CASE expression gives NULL for both.
+	//
+	// A serial column owns its sequence through a dependency of the type 'a'. GetSequences
+	// excludes that sequence, so the query reads the word that builds it again.
 	columnRows, err := db.QueryContext(ctx, `
 			SELECT
 				a.attname,
@@ -1773,6 +1776,19 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 					FROM pg_sequence s
 					JOIN pg_depend dep ON dep.objid = s.seqrelid AND dep.deptype = 'i'
 					WHERE dep.refobjid = a.attrelid AND dep.refobjsubid = a.attnum
+				), ''),
+				coalesce((
+					SELECT CASE a.atttypid
+						WHEN 'smallint'::regtype THEN 'smallserial'
+						WHEN 'integer'::regtype THEN 'serial'
+						WHEN 'bigint'::regtype THEN 'bigserial'
+					END
+					FROM pg_depend dep
+					JOIN pg_class sequence_class ON sequence_class.oid = dep.objid
+						AND sequence_class.relkind = 'S'
+					WHERE dep.refobjid = a.attrelid
+					AND dep.refobjsubid = a.attnum
+					AND dep.deptype = 'a'
 				), '')
 			FROM pg_attribute a
 			LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
@@ -1792,16 +1808,21 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 
 	for columnRows.Next() {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
-		var identityOptions, storage string
+		var identityOptions, storage, serial string
 		var notNull bool
 		var columnDefault sql.NullString
 		var statisticsTarget sql.NullInt64
 
 		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault,
 			&identity, &generatedExpression, &collation, &comment, &storage,
-			&statisticsTarget, &identityOptions)
+			&statisticsTarget, &identityOptions, &serial)
 		if err != nil {
 			return nil, err
+		}
+
+		// The word serial holds the default, so the definition writes no DEFAULT clause.
+		if serial != "" {
+			columnDefault = sql.NullString{}
 		}
 
 		column := &PostgresColumn{
@@ -1816,6 +1837,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 			IdentityOptions:     identityOptions,
 			Storage:             storage,
 			StatisticsTarget:    statisticsTarget,
+			Serial:              serial,
 		}
 		table.Columns = append(table.Columns, column)
 	}

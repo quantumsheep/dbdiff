@@ -690,6 +690,24 @@ func TestInstructions(t *testing.T) {
 );`, instruction.String())
 	})
 
+	t.Run("PostgresCreateTableWithASerialColumn", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "users",
+			Columns: []*PostgresColumn{
+				{
+					Name:    "id",
+					Type:    "integer",
+					NotNull: true,
+					Serial:  "serial",
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "users" (
+	"id" serial NOT NULL
+);`, instruction.String())
+	})
+
 	t.Run("PostgresAlterColumnTypeActionWithACollation", func(t *testing.T) {
 		action := &PostgresAlterColumnTypeAction{
 			ColumnName: "name",
