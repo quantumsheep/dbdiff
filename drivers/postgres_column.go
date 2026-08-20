@@ -17,8 +17,6 @@ type PostgresColumn struct {
 
 	GeneratedExpression string
 
-	// Serial holds the word serial, bigserial, or smallserial. That word builds the
-	// sequence of the column, and no other statement builds it.
 	Serial string
 
 	Collation string

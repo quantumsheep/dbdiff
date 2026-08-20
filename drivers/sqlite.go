@@ -803,8 +803,6 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 	return keys, nil
 }
 
-// A trigger of a view holds the name of that view in tbl_name, so this method reads the
-// triggers of a table and the triggers of a view.
 func (d *SQLiteDriver) GetTriggers(ctx context.Context, db *sql.DB, objectName string) ([]*SQLiteTrigger, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", objectName)
 	if err != nil {

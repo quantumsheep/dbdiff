@@ -34,8 +34,7 @@ func (v *SQLiteView) TriggerInstructions() []Instruction {
 	return instructions
 }
 
-// A DROP VIEW statement removes every trigger of the view, so the recreation builds each
-// trigger of the source again and compares no trigger.
+// A DROP VIEW statement removes every trigger of the view.
 func (v *SQLiteView) Diff(other *SQLiteView) ([]Instruction, error) {
 	if v.SQL != other.SQL {
 		instructions := []Instruction{

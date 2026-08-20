@@ -439,8 +439,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	// The action of a rule can name a second table, so every rule comes after every table.
 	var ruleInstructions []Instruction
 
-	// A foreign key names a second table, and two tables can name each other. No order of
-	// two such tables works, so every foreign key of a new table comes after every table.
+	// Two tables can name each other, so every foreign key comes after every table.
 	var foreignKeyInstructions []Instruction
 
 	for _, sourceTable := range sourceTables {
@@ -468,8 +467,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	additions = append(additions, foreignKeyInstructions...)
 	additions = append(additions, ruleInstructions...)
 
-	// GetTables sorts a table after every table that it needs, so the reverse order gives
-	// each DROP TABLE statement before the statement of the table that it names.
+	// The reverse order gives each DROP TABLE statement before the table that it names.
 	for _, targetTable := range slices.Backward(targetTables) {
 		_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
 			return table.Name == targetTable.Name
@@ -1744,8 +1742,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	// attstattarget holds the statistics target. PostgreSQL 16 writes -1 for the default
 	// target, and PostgreSQL 17 writes NULL. The CASE expression gives NULL for both.
 	//
-	// A serial column owns its sequence through a dependency of the type 'a'. GetSequences
-	// excludes that sequence, so the query reads the word that builds it again.
+	// GetSequences excludes the sequence that a serial column owns, so the word of that
+	// column builds it again.
 	columnRows, err := db.QueryContext(ctx, `
 			SELECT
 				a.attname,

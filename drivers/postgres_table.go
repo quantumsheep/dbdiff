@@ -21,7 +21,6 @@ type PostgresTable struct {
 	// keeps its own columns and its own statement.
 	Inherits []string
 
-	// References names each table that a foreign key of this table names.
 	References []string
 
 	Comment string
@@ -429,14 +428,9 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	return instructions, nil
 }
 
-// sortTablesByDependency orders the tables so that a partition comes after its parent, a
-// table of INHERITS comes after every parent of it, and a table comes after every table
-// that a foreign key of it names. The name of a child can sort before the name of its
-// parent, and each of the statements needs the parent. A DROP TABLE statement takes the
-// reverse order.
-//
-// PostgreSQL accepts a cycle of two foreign keys. The walk marks a table before it visits
-// the tables of that table, so a cycle gives an order and no endless loop.
+// The name of a child can sort before the name of its parent, and a statement needs the
+// parent: a partition needs its parent, a table of INHERITS needs each parent of it, and a
+// foreign key needs the table that it names.
 func sortTablesByDependency(tables []*PostgresTable) []*PostgresTable {
 	tableByName := make(map[string]*PostgresTable, len(tables))
 
@@ -661,8 +655,7 @@ func (t *PostgresTable) TriggerByName(name string) (*PostgresTrigger, bool) {
 	return nil, false
 }
 
-// The statement holds no foreign key, because a foreign key can name a table that comes
-// later. DiffTables prints every foreign key after every table.
+// DiffTables prints every foreign key after every table.
 func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction {
 	var constraints []*PostgresConstraint
 
@@ -684,8 +677,7 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 	}
 }
 
-// A partition takes the foreign keys of its parent, so this list stays empty for it. A
-// second statement of the same key fails.
+// A partition takes the foreign keys of its parent, so a second statement of one fails.
 func (t *PostgresTable) ForeignKeyInstructions() []Instruction {
 	if t.IsPartition() {
 		return nil
