@@ -8,6 +8,10 @@ type PostgresConstraint struct {
 	Def  string
 }
 
+func (c *PostgresConstraint) IsForeignKey() bool {
+	return c.Type == "f"
+}
+
 func (c *PostgresConstraint) Clause() string {
 	return fmt.Sprintf("CONSTRAINT %s %s", quoteIdentifier(c.Name), c.Def)
 }

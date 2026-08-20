@@ -661,17 +661,52 @@ func (t *PostgresTable) TriggerByName(name string) (*PostgresTrigger, bool) {
 	return nil, false
 }
 
+// The statement holds no foreign key, because a foreign key can name a table that comes
+// later. DiffTables prints every foreign key after every table.
 func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction {
+	var constraints []*PostgresConstraint
+
+	for _, constraint := range t.Constraints {
+		if !constraint.IsForeignKey() {
+			constraints = append(constraints, constraint)
+		}
+	}
+
 	return &PostgresCreateTableInstruction{
 		Name:         t.Name,
 		Columns:      t.Columns,
-		Constraints:  t.Constraints,
+		Constraints:  constraints,
 		PartitionKey: t.PartitionKey,
 		Inherits:     t.Inherits,
 		Unlogged:     t.Unlogged,
 
 		StorageParameters: t.StorageParameters,
 	}
+}
+
+// A partition takes the foreign keys of its parent, so this list stays empty for it. A
+// second statement of the same key fails.
+func (t *PostgresTable) ForeignKeyInstructions() []Instruction {
+	if t.IsPartition() {
+		return nil
+	}
+
+	var instructions []Instruction
+
+	for _, constraint := range t.Constraints {
+		if !constraint.IsForeignKey() {
+			continue
+		}
+
+		instructions = append(instructions, &PostgresAlterTableInstruction{
+			Name: t.Name,
+			Actions: []AlterTableAction{
+				&PostgresAddConstraintAction{Constraint: constraint},
+			},
+		})
+	}
+
+	return instructions
 }
 
 // The list holds no rule, because the action of a rule can name a second table. DiffTables

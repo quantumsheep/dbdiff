@@ -547,6 +547,150 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreatePartitionedTableWithAForeignKey", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE zoo (id INT PRIMARY KEY);
+			CREATE TABLE animal (id INT, zoo_id INT REFERENCES zoo(id)) PARTITION BY RANGE (id);
+			CREATE TABLE animal_low PARTITION OF animal FOR VALUES FROM (0) TO (100);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "zoo",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "zoo_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+			},
+			&PostgresCreateTableInstruction{
+				Name: "animal",
+				Columns: []*PostgresColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "zoo_id",
+						Type: "integer",
+					},
+				},
+				PartitionKey: "RANGE (id)",
+			},
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "animal_low",
+				ParentName: "animal",
+				Bound:      "FOR VALUES FROM (0) TO (100)",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "animal",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "animal_zoo_id_fkey",
+							Type: "f",
+							Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
+	t.Run("CreateTablesWithAForeignKeyCycle", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT PRIMARY KEY, org_id INT);
+			CREATE TABLE orgs (id INT PRIMARY KEY, owner_id INT REFERENCES users(id));
+			ALTER TABLE users ADD CONSTRAINT users_org_id_fkey FOREIGN KEY (org_id) REFERENCES orgs(id);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+					{
+						Name: "org_id",
+						Type: "integer",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "users_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+			},
+			&PostgresCreateTableInstruction{
+				Name: "orgs",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+					{
+						Name: "owner_id",
+						Type: "integer",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "orgs_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "users_org_id_fkey",
+							Type: "f",
+							Def:  "FOREIGN KEY (org_id) REFERENCES orgs(id)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "orgs",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "orgs_owner_id_fkey",
+							Type: "f",
+							Def:  "FOREIGN KEY (owner_id) REFERENCES users(id)",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("CreateTablesInForeignKeyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -592,10 +736,17 @@ func TestPostgresDriver(t *testing.T) {
 						Type: "p",
 						Def:  "PRIMARY KEY (id)",
 					},
-					{
-						Name: "animal_zoo_id_fkey",
-						Type: "f",
-						Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "animal",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "animal_zoo_id_fkey",
+							Type: "f",
+							Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+						},
 					},
 				},
 			},

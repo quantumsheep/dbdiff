@@ -252,6 +252,11 @@ prints no second statement for those partitions.
 it needs: the parent of a partition, the parent of an `INHERITS` table, and each table that
 a foreign key names. The `DROP TABLE` statements take the reverse order.
 
+**Foreign keys.** A `CREATE TABLE` statement holds no foreign key. The output prints one
+`ALTER TABLE ... ADD CONSTRAINT` statement for each foreign key of a new table, after every
+table. Two tables can name each other, and no order of two such statements works. A
+partition takes the foreign keys of its parent, so the output prints none for it.
+
 **Storage parameters.** The driver compares the `WITH` options of a table, for example
 `fillfactor`. A parameter that the source does not hold takes a `RESET` action, which gives
 that parameter its default value again.
@@ -469,9 +474,6 @@ constraint of two or more columns as a table constraint.
   or of a type, and it reads no default privilege of `ALTER DEFAULT PRIVILEGES`.
 - A column that keeps the storage mode of its type takes `SET STORAGE DEFAULT`.
   PostgreSQL 16 accepts that mode, and an older server refuses it.
-- A cycle of two foreign keys gives an order that fails. Each `CREATE TABLE` statement
-  holds its foreign keys, and no order of two such tables works. Break the cycle with a
-  separate `ALTER TABLE ... ADD CONSTRAINT` statement.
 - The PostgreSQL driver compares one schema for each run. To compare two schemas, run
   dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
   object that moved from one schema to another schema.

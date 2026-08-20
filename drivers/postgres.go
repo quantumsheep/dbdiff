@@ -439,12 +439,18 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	// The action of a rule can name a second table, so every rule comes after every table.
 	var ruleInstructions []Instruction
 
+	// A foreign key names a second table, and two tables can name each other. No order of
+	// two such tables works, so every foreign key of a new table comes after every table.
+	var foreignKeyInstructions []Instruction
+
 	for _, sourceTable := range sourceTables {
 		targetTable, found := lo.Find(targetTables, func(table *PostgresTable) bool {
 			return table.Name == sourceTable.Name
 		})
 		if !found {
 			additions = append(additions, sourceTable.Instructions()...)
+			foreignKeyInstructions = append(foreignKeyInstructions,
+				sourceTable.ForeignKeyInstructions()...)
 			ruleInstructions = append(ruleInstructions, sourceTable.RuleInstructions()...)
 
 			continue
@@ -459,6 +465,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		ruleInstructions = append(ruleInstructions, sourceTable.DiffRules(targetTable)...)
 	}
 
+	additions = append(additions, foreignKeyInstructions...)
 	additions = append(additions, ruleInstructions...)
 
 	// GetTables sorts a table after every table that it needs, so the reverse order gives

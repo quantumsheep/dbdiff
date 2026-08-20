@@ -455,6 +455,11 @@ The alias of `pg_collation` in the column query is `column_collation`. The word
 `collation` is a reserved word of PostgreSQL, and a query that uses it as an alias fails
 with a syntax error.
 
+`CreateTableInstruction` holds no foreign key. `DiffTables` prints every foreign key of a
+new table after every table, because two tables can name each other and no order of two
+`CREATE TABLE` statements works. `ForeignKeyInstructions` returns nothing for a partition,
+because a partition takes the foreign keys of its parent.
+
 `DiffTables` prints every rule after every table. The action of a rule can name a second
 table, so a rule that comes with its own table names a table that is not there yet.
 `Instructions` returns no rule for that reason, and `DiffRules` and `RuleInstructions`
