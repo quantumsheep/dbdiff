@@ -545,6 +545,9 @@ different name. The diff then prints a `DROP` statement and a `CREATE` statement
 object that did not change, and the `CREATE` statement builds the object in the SOURCE
 schema. Keep that step in every new query that reads a definition text.
 
+The constraint query of `GetTable` sorts the rows with `ORDER BY conname`. PostgreSQL
+gives no stable order, so without that clause the output changes between two runs.
+
 A query that casts a name to `regclass` takes the name from `quoteIdentifier`. A query
 that compares a name to a text column takes the raw name. `GetTable` passes both forms to
 the index query.

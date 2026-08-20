@@ -1857,6 +1857,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				coalesce((SELECT relname FROM pg_class WHERE oid = confrelid), '')
 			FROM pg_constraint
 			WHERE conrelid = $1::regclass
+			ORDER BY conname
 		`, quoteIdentifier(tableName))
 	if err != nil {
 		return nil, err

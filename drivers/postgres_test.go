@@ -493,6 +493,60 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(diff)
 	})
 
+	t.Run("CreateTableWithSeveralConstraints", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE items (
+				id INT PRIMARY KEY,
+				code TEXT,
+				price INT,
+				CONSTRAINT z_price_is_positive CHECK (price > 0),
+				CONSTRAINT a_code_is_unique UNIQUE (code)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "items",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+					{
+						Name: "code",
+						Type: "text",
+					},
+					{
+						Name: "price",
+						Type: "integer",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "a_code_is_unique",
+						Type: "u",
+						Def:  "UNIQUE (code)",
+					},
+					{
+						Name: "items_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+					{
+						Name: "z_price_is_positive",
+						Type: "c",
+						Def:  "CHECK ((price > 0))",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnTarget(diff)
+	})
+
 	t.Run("CreateTablesInForeignKeyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
