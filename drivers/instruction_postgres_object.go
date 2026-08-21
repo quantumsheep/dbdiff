@@ -14,6 +14,10 @@ func (i *PostgresCreateExtensionInstruction) String() string {
 	return "CREATE EXTENSION " + quoteIdentifier(i.Name) + ";"
 }
 
+func (i *PostgresCreateExtensionInstruction) Comment() string {
+	return objectComment("Create", "extension", i.Name)
+}
+
 type PostgresAlterExtensionInstruction struct {
 	Name       string
 	NewVersion string
@@ -24,12 +28,20 @@ func (i *PostgresAlterExtensionInstruction) String() string {
 		quoteIdentifier(i.Name), quoteLiteral(i.NewVersion))
 }
 
+func (i *PostgresAlterExtensionInstruction) Comment() string {
+	return objectComment("Modify", "extension", i.Name)
+}
+
 type PostgresDropExtensionInstruction struct {
 	Name string
 }
 
 func (i *PostgresDropExtensionInstruction) String() string {
 	return "DROP EXTENSION " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *PostgresDropExtensionInstruction) Comment() string {
+	return objectComment("Drop", "extension", i.Name)
 }
 
 func sequenceCycleClause(cycle bool) string {
@@ -61,6 +73,10 @@ func (i *PostgresCreateSequenceInstruction) String() string {
 		i.Start,
 		sequenceCycleClause(i.Cycle),
 	)
+}
+
+func (i *PostgresCreateSequenceInstruction) Comment() string {
+	return objectComment("Create", "sequence", i.Name)
 }
 
 // One statement holds every clause that changes. Separate statements can fail, because a
@@ -111,12 +127,20 @@ func (i *PostgresAlterSequenceInstruction) String() string {
 		quoteIdentifier(i.Name), strings.Join(clauses, " "))
 }
 
+func (i *PostgresAlterSequenceInstruction) Comment() string {
+	return objectComment("Modify", "sequence", i.Name)
+}
+
 type PostgresDropSequenceInstruction struct {
 	Name string
 }
 
 func (i *PostgresDropSequenceInstruction) String() string {
 	return "DROP SEQUENCE " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *PostgresDropSequenceInstruction) Comment() string {
+	return objectComment("Drop", "sequence", i.Name)
 }
 
 type PostgresCreateStatisticsInstruction struct {
@@ -127,12 +151,20 @@ func (i *PostgresCreateStatisticsInstruction) String() string {
 	return i.Definition + ";"
 }
 
+func (i *PostgresCreateStatisticsInstruction) Comment() string {
+	return tableDefinitionComment("Create", "statistics object", i.Definition, "STATISTICS", "FROM")
+}
+
 type PostgresDropStatisticsInstruction struct {
 	Name string
 }
 
 func (i *PostgresDropStatisticsInstruction) String() string {
 	return "DROP STATISTICS " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *PostgresDropStatisticsInstruction) Comment() string {
+	return objectComment("Drop", "statistics object", i.Name)
 }
 
 type PostgresGrantInstruction struct {
@@ -148,6 +180,10 @@ func (i *PostgresGrantInstruction) String() string {
 		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
 }
 
+func (i *PostgresGrantInstruction) Comment() string {
+	return ownedObjectComment("Change", "privileges", i.ObjectType, i.ObjectName)
+}
+
 type PostgresRevokeInstruction struct {
 	Privileges []string
 	ObjectType string
@@ -161,6 +197,10 @@ func (i *PostgresRevokeInstruction) String() string {
 		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
 }
 
+func (i *PostgresRevokeInstruction) Comment() string {
+	return ownedObjectComment("Change", "privileges", i.ObjectType, i.ObjectName)
+}
+
 type PostgresSetOwnerInstruction struct {
 	ObjectType string
 	ObjectName string
@@ -170,4 +210,8 @@ type PostgresSetOwnerInstruction struct {
 func (i *PostgresSetOwnerInstruction) String() string {
 	return fmt.Sprintf("ALTER %s %s OWNER TO %s;",
 		i.ObjectType, quoteIdentifier(i.ObjectName), quoteIdentifier(i.Owner))
+}
+
+func (i *PostgresSetOwnerInstruction) Comment() string {
+	return ownedObjectComment("Change", "owner", i.ObjectType, i.ObjectName)
 }

@@ -95,8 +95,8 @@ func (t *PostgresTable) CommentInstructions() []Instruction {
 
 	if t.Comment != "" {
 		instructions = append(instructions, &PostgresCommentOnTableInstruction{
-			Name:    t.Name,
-			Comment: t.Comment,
+			Name: t.Name,
+			Text: t.Comment,
 		})
 	}
 
@@ -108,7 +108,7 @@ func (t *PostgresTable) CommentInstructions() []Instruction {
 		instructions = append(instructions, &PostgresCommentOnColumnInstruction{
 			TableName:  t.Name,
 			ColumnName: column.Name,
-			Comment:    column.Comment,
+			Text:       column.Comment,
 		})
 	}
 
@@ -297,8 +297,8 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 
 	if t.Comment != other.Comment {
 		instructions = append(instructions, &PostgresCommentOnTableInstruction{
-			Name:    t.Name,
-			Comment: t.Comment,
+			Name: t.Name,
+			Text: t.Comment,
 		})
 	}
 
@@ -312,7 +312,7 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 			instructions = append(instructions, &PostgresCommentOnColumnInstruction{
 				TableName:  t.Name,
 				ColumnName: sourceColumn.Name,
-				Comment:    sourceColumn.Comment,
+				Text:       sourceColumn.Comment,
 			})
 		}
 	}

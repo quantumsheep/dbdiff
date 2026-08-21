@@ -75,6 +75,7 @@ drivers/
 ├── driver.go                  The Driver interface and SectionDiff
 ├── driver_detection.go        DetectDriver and the driver names
 ├── identifier.go              quoteIdentifier and quoteIdentifiers
+├── instruction_comment.go     AnnotateInstructions and the builders of a comment text
 ├── sql_source.go              The SQL file source: detection, file order, apply
 ├── driver_detection_test.go   The tests of DetectDriver
 ├── sqlite.go                  The SQLite driver: connections, queries, top-level diff
@@ -228,8 +229,12 @@ comment line.
 ```go
 type Instruction interface {
 	String() string
+	Comment() string
 }
 ```
+
+`String` gives the statement. `Comment` names the object that the statement changes. See
+[Comments between the instructions](#comments-between-the-instructions).
 
 In this package, `String() string` belongs to an instruction type only. A model type
 answers with an instruction, with a fragment, or with a list of instructions. That rule
@@ -278,6 +283,29 @@ The types live in six files:
 `drivers/instruction_test.go` holds one subtest for each type. It is the one place that
 holds the SQL text of a statement. A driver test compares instructions, and it trusts that
 file.
+
+## Comments between the instructions
+
+The `Instruction` interface holds a second method, `Comment() string`. It names the object
+that the statement changes, for example `Create the table "users"` or
+`Create the index "users_email" of the table "users"`. Every instruction type answers, so
+a new type takes one `Comment` method below its `String` method and one subtest in
+`drivers/instruction_comment_test.go`.
+
+`drivers/instruction_comment.go` holds the four builders of that text: `objectComment`,
+`tableObjectComment`, `ownedObjectComment`, and `definitionComment`. A `Comment` method
+calls one of them, so it stays one line. An instruction that holds the definition text
+alone, for example a trigger of PostgreSQL, reads its name with `parseDefinition`.
+
+The `--comments` flag prints those comments. `AnnotateInstructions` takes the list of a
+diff and returns the same list with a `SQLCommentInstruction` before each group. Two
+instructions with one comment text take one comment.
+
+`tableRecreationAt` reads the six statements of a table recreation of SQLite as one
+change. Without that step the temporary table takes a comment of its own.
+
+A field named `Comment` and a method named `Comment` cannot live on one type. The two
+`COMMENT ON` instructions hold the text of the comment in a field named `Text`.
 
 ## SQLite driver
 

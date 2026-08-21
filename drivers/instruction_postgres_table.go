@@ -21,6 +21,10 @@ func (i *PostgresAlterTableInstruction) String() string {
 		quoteIdentifier(i.Name), strings.Join(clauses, ", "))
 }
 
+func (i *PostgresAlterTableInstruction) Comment() string {
+	return objectComment("Modify", "table", i.Name)
+}
+
 type PostgresAddColumnAction struct {
 	Column *PostgresColumn
 }
@@ -203,6 +207,10 @@ func (i *PostgresCreateTableInstruction) String() string {
 	return statement + ";"
 }
 
+func (i *PostgresCreateTableInstruction) Comment() string {
+	return objectComment("Create", "table", i.Name)
+}
+
 type PostgresCreateTablePartitionInstruction struct {
 	Name       string
 	ParentName string
@@ -214,12 +222,20 @@ func (i *PostgresCreateTablePartitionInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.ParentName), i.Bound)
 }
 
+func (i *PostgresCreateTablePartitionInstruction) Comment() string {
+	return objectComment("Create", "table", i.Name)
+}
+
 type PostgresCreateIndexInstruction struct {
 	Definition string
 }
 
 func (i *PostgresCreateIndexInstruction) String() string {
 	return i.Definition + ";"
+}
+
+func (i *PostgresCreateIndexInstruction) Comment() string {
+	return tableDefinitionComment("Create", "index", i.Definition, "INDEX", "ON")
 }
 
 type PostgresCreateTriggerInstruction struct {
@@ -230,6 +246,10 @@ func (i *PostgresCreateTriggerInstruction) String() string {
 	return i.Definition + ";"
 }
 
+func (i *PostgresCreateTriggerInstruction) Comment() string {
+	return tableDefinitionComment("Create", "trigger", i.Definition, "TRIGGER", "ON")
+}
+
 type PostgresDropTriggerInstruction struct {
 	Name      string
 	TableName string
@@ -238,6 +258,10 @@ type PostgresDropTriggerInstruction struct {
 func (i *PostgresDropTriggerInstruction) String() string {
 	return fmt.Sprintf("DROP TRIGGER %s ON %s;",
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+}
+
+func (i *PostgresDropTriggerInstruction) Comment() string {
+	return tableObjectComment("Drop", "trigger", i.Name, i.TableName)
 }
 
 type PostgresTriggerEnableAction struct {
@@ -332,6 +356,10 @@ func (i *PostgresCreatePolicyInstruction) String() string {
 	return statement + ";"
 }
 
+func (i *PostgresCreatePolicyInstruction) Comment() string {
+	return tableObjectComment("Create", "policy", i.Name, i.TableName)
+}
+
 func policyRoleNames(roles []string) []string {
 	names := make([]string, 0, len(roles))
 
@@ -357,6 +385,10 @@ func (i *PostgresDropPolicyInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
 }
 
+func (i *PostgresDropPolicyInstruction) Comment() string {
+	return tableObjectComment("Drop", "policy", i.Name, i.TableName)
+}
+
 // The definition of pg_rules ends with a semicolon, so String adds no second one.
 type PostgresCreateRuleInstruction struct {
 	Definition string
@@ -364,6 +396,10 @@ type PostgresCreateRuleInstruction struct {
 
 func (i *PostgresCreateRuleInstruction) String() string {
 	return i.Definition
+}
+
+func (i *PostgresCreateRuleInstruction) Comment() string {
+	return tableDefinitionComment("Create", "rule", i.Definition, "RULE", "TO")
 }
 
 type PostgresDropRuleInstruction struct {
@@ -376,26 +412,38 @@ func (i *PostgresDropRuleInstruction) String() string {
 		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
 }
 
+func (i *PostgresDropRuleInstruction) Comment() string {
+	return tableObjectComment("Drop", "rule", i.Name, i.TableName)
+}
+
 type PostgresCommentOnTableInstruction struct {
-	Name    string
-	Comment string
+	Name string
+	Text string
 }
 
 func (i *PostgresCommentOnTableInstruction) String() string {
 	return fmt.Sprintf("COMMENT ON TABLE %s IS %s;",
-		quoteIdentifier(i.Name), commentLiteral(i.Comment))
+		quoteIdentifier(i.Name), commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnTableInstruction) Comment() string {
+	return objectComment("Modify", "table", i.Name)
 }
 
 type PostgresCommentOnColumnInstruction struct {
 	TableName  string
 	ColumnName string
-	Comment    string
+	Text       string
 }
 
 func (i *PostgresCommentOnColumnInstruction) String() string {
 	return fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;",
 		quoteIdentifier(i.TableName), quoteIdentifier(i.ColumnName),
-		commentLiteral(i.Comment))
+		commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnColumnInstruction) Comment() string {
+	return objectComment("Modify", "table", i.TableName)
 }
 
 func commentLiteral(comment string) string {
@@ -416,12 +464,20 @@ func (i *PostgresCreateMaterializedViewInstruction) String() string {
 		strings.TrimSuffix(i.Query, ";") + ";"
 }
 
+func (i *PostgresCreateMaterializedViewInstruction) Comment() string {
+	return objectComment("Create", "materialized view", i.Name)
+}
+
 type PostgresDropMaterializedViewInstruction struct {
 	Name string
 }
 
 func (i *PostgresDropMaterializedViewInstruction) String() string {
 	return "DROP MATERIALIZED VIEW " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *PostgresDropMaterializedViewInstruction) Comment() string {
+	return objectComment("Drop", "materialized view", i.Name)
 }
 
 type PostgresCreateViewInstruction struct {
@@ -439,4 +495,8 @@ func (i *PostgresCreateViewInstruction) String() string {
 	}
 
 	return statement + ";"
+}
+
+func (i *PostgresCreateViewInstruction) Comment() string {
+	return objectComment("Create", "view", i.Name)
 }

@@ -22,6 +22,10 @@ func (i *PostgresCreateEnumTypeInstruction) String() string {
 		quoteIdentifier(i.Name), strings.Join(labels, ", "))
 }
 
+func (i *PostgresCreateEnumTypeInstruction) Comment() string {
+	return objectComment("Create", "type", i.Name)
+}
+
 type PostgresAlterTypeAddValueInstruction struct {
 	Name  string
 	Value string
@@ -32,12 +36,20 @@ func (i *PostgresAlterTypeAddValueInstruction) String() string {
 		quoteIdentifier(i.Name), quoteLiteral(i.Value))
 }
 
+func (i *PostgresAlterTypeAddValueInstruction) Comment() string {
+	return objectComment("Modify", "type", i.Name)
+}
+
 type PostgresDropTypeInstruction struct {
 	Name string
 }
 
 func (i *PostgresDropTypeInstruction) String() string {
 	return "DROP TYPE " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *PostgresDropTypeInstruction) Comment() string {
+	return objectComment("Drop", "type", i.Name)
 }
 
 type PostgresCreateCompositeTypeInstruction struct {
@@ -52,6 +64,10 @@ func (i *PostgresCreateCompositeTypeInstruction) String() string {
 
 	return fmt.Sprintf("CREATE TYPE %s AS (\n%s\n);",
 		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+}
+
+func (i *PostgresCreateCompositeTypeInstruction) Comment() string {
+	return objectComment("Create", "type", i.Name)
 }
 
 type PostgresCreateDomainInstruction struct {
@@ -85,12 +101,20 @@ func (i *PostgresCreateDomainInstruction) String() string {
 	return statement + ";"
 }
 
+func (i *PostgresCreateDomainInstruction) Comment() string {
+	return objectComment("Create", "domain", i.Name)
+}
+
 type PostgresDropDomainInstruction struct {
 	Name string
 }
 
 func (i *PostgresDropDomainInstruction) String() string {
 	return "DROP DOMAIN " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *PostgresDropDomainInstruction) Comment() string {
+	return objectComment("Drop", "domain", i.Name)
 }
 
 type PostgresAlterDomainInstruction struct {
@@ -101,6 +125,10 @@ type PostgresAlterDomainInstruction struct {
 func (i *PostgresAlterDomainInstruction) String() string {
 	return fmt.Sprintf("ALTER DOMAIN %s %s;",
 		quoteIdentifier(i.Name), i.Action.DomainActionClause())
+}
+
+func (i *PostgresAlterDomainInstruction) Comment() string {
+	return objectComment("Modify", "domain", i.Name)
 }
 
 type PostgresSetDomainDefaultAction struct {

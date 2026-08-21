@@ -59,6 +59,10 @@ func main() {
 				Usage: "Compare the owner and the privileges of each object. A role belongs to the server, so this comparison is off by default",
 			},
 			&cli.BoolFlag{
+				Name:  "comments",
+				Usage: "Print a comment before each object that the output changes",
+			},
+			&cli.BoolFlag{
 				Name:  "data",
 				Usage: "Compare the rows of each table that the source and the target both hold. The comparison needs a primary key",
 			},
@@ -149,6 +153,10 @@ func action(ctx context.Context, command *cli.Command) error {
 	instructions, err := driver.Diff(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to diff databases: %w", err)
+	}
+
+	if command.Bool("comments") {
+		instructions = drivers.AnnotateInstructions(instructions)
 	}
 
 	fmt.Println(drivers.RenderInstructions(instructions))

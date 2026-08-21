@@ -722,8 +722,8 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("PostgresCommentOnTable", func(t *testing.T) {
 		instruction := &PostgresCommentOnTableInstruction{
-			Name:    "users",
-			Comment: "the people of the site",
+			Name: "users",
+			Text: "the people of the site",
 		}
 
 		require.Equal(t,
@@ -741,7 +741,7 @@ func TestInstructions(t *testing.T) {
 		instruction := &PostgresCommentOnColumnInstruction{
 			TableName:  "users",
 			ColumnName: "id",
-			Comment:    "the key",
+			Text:       "the key",
 		}
 
 		require.Equal(t,
@@ -751,8 +751,8 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("PostgresCommentWithAQuote", func(t *testing.T) {
 		instruction := &PostgresCommentOnTableInstruction{
-			Name:    "users",
-			Comment: "the site's people",
+			Name: "users",
+			Text: "the site's people",
 		}
 
 		require.Equal(t,
@@ -1670,4 +1670,8 @@ type testInstruction struct {
 
 func (i *testInstruction) String() string {
 	return i.statement
+}
+
+func (i *testInstruction) Comment() string {
+	return ""
 }

@@ -11,6 +11,8 @@ import (
 // interface.
 type Instruction interface {
 	String() string
+	// The name of the object that the statement changes, and not a comment of the schema.
+	Comment() string
 }
 
 type AlterTableAction interface {
@@ -94,6 +96,10 @@ func (i *SQLInsertInstruction) String() string {
 		strings.Join(i.Expressions, ", "))
 }
 
+func (i *SQLInsertInstruction) Comment() string {
+	return ownedObjectComment("Change", "rows", "table", i.TableName)
+}
+
 type SQLInsertSelectInstruction struct {
 	TableName         string
 	ColumnNames       []string
@@ -107,6 +113,10 @@ func (i *SQLInsertSelectInstruction) String() string {
 		strings.Join(quoteIdentifiers(i.ColumnNames), ", "),
 		strings.Join(i.SelectExpressions, ", "),
 		quoteIdentifier(i.SourceTableName))
+}
+
+func (i *SQLInsertSelectInstruction) Comment() string {
+	return ownedObjectComment("Change", "rows", "table", i.TableName)
 }
 
 type SQLUpdateInstruction struct {
@@ -130,6 +140,10 @@ func (i *SQLUpdateInstruction) String() string {
 	return statement + ";"
 }
 
+func (i *SQLUpdateInstruction) Comment() string {
+	return ownedObjectComment("Change", "rows", "table", i.TableName)
+}
+
 type SQLDeleteInstruction struct {
 	TableName string
 	Condition Condition
@@ -145,12 +159,20 @@ func (i *SQLDeleteInstruction) String() string {
 	return statement + ";"
 }
 
+func (i *SQLDeleteInstruction) Comment() string {
+	return ownedObjectComment("Change", "rows", "table", i.TableName)
+}
+
 type SQLDropTableInstruction struct {
 	Name string
 }
 
 func (i *SQLDropTableInstruction) String() string {
 	return "DROP TABLE " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *SQLDropTableInstruction) Comment() string {
+	return objectComment("Drop", "table", i.Name)
 }
 
 type SQLDropViewInstruction struct {
@@ -161,12 +183,20 @@ func (i *SQLDropViewInstruction) String() string {
 	return "DROP VIEW " + quoteIdentifier(i.Name) + ";"
 }
 
+func (i *SQLDropViewInstruction) Comment() string {
+	return objectComment("Drop", "view", i.Name)
+}
+
 type SQLDropIndexInstruction struct {
 	Name string
 }
 
 func (i *SQLDropIndexInstruction) String() string {
 	return "DROP INDEX " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *SQLDropIndexInstruction) Comment() string {
+	return objectComment("Drop", "index", i.Name)
 }
 
 type SQLCommentInstruction struct {
@@ -177,6 +207,11 @@ func (i *SQLCommentInstruction) String() string {
 	// If the text holds a newline, the comment ends there and the rest of the line runs as
 	// SQL. One space replaces every newline.
 	return "-- " + strings.ReplaceAll(i.Text, "\n", " ")
+}
+
+// A comment of the output takes no comment of its own.
+func (i *SQLCommentInstruction) Comment() string {
+	return ""
 }
 
 type SQLDropColumnAction struct {

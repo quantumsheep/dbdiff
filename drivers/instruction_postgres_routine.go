@@ -14,6 +14,10 @@ func (i *PostgresCreateFunctionInstruction) String() string {
 	return i.Definition + ";"
 }
 
+func (i *PostgresCreateFunctionInstruction) Comment() string {
+	return definitionComment("Create", "function", i.Definition, "FUNCTION")
+}
+
 type PostgresDropFunctionInstruction struct {
 	Name      string
 	Arguments string
@@ -21,6 +25,10 @@ type PostgresDropFunctionInstruction struct {
 
 func (i *PostgresDropFunctionInstruction) String() string {
 	return fmt.Sprintf("DROP FUNCTION %s(%s);", quoteIdentifier(i.Name), i.Arguments)
+}
+
+func (i *PostgresDropFunctionInstruction) Comment() string {
+	return objectComment("Drop", "function", i.Name)
 }
 
 type PostgresCreateAggregateInstruction struct {
@@ -52,6 +60,10 @@ func (i *PostgresCreateAggregateInstruction) String() string {
 		quoteIdentifier(i.Name), i.Arguments, strings.Join(options, ", "))
 }
 
+func (i *PostgresCreateAggregateInstruction) Comment() string {
+	return objectComment("Create", "aggregate", i.Name)
+}
+
 type PostgresDropAggregateInstruction struct {
 	Name      string
 	Arguments string
@@ -59,6 +71,10 @@ type PostgresDropAggregateInstruction struct {
 
 func (i *PostgresDropAggregateInstruction) String() string {
 	return fmt.Sprintf("DROP AGGREGATE %s(%s);", quoteIdentifier(i.Name), i.Arguments)
+}
+
+func (i *PostgresDropAggregateInstruction) Comment() string {
+	return objectComment("Drop", "aggregate", i.Name)
 }
 
 // The name of an operator holds punctuation marks only, so it takes no quotes.
@@ -83,6 +99,10 @@ func (i *PostgresCreateOperatorInstruction) String() string {
 	return fmt.Sprintf("CREATE OPERATOR %s (%s);", i.Name, strings.Join(options, ", "))
 }
 
+func (i *PostgresCreateOperatorInstruction) Comment() string {
+	return "Create the operator " + i.Name
+}
+
 type PostgresDropOperatorInstruction struct {
 	Name          string
 	LeftArgument  sql.NullString
@@ -94,4 +114,8 @@ func (i *PostgresDropOperatorInstruction) String() string {
 		i.Name,
 		postgresOperatorArgument(i.LeftArgument),
 		postgresOperatorArgument(i.RightArgument))
+}
+
+func (i *PostgresDropOperatorInstruction) Comment() string {
+	return "Drop the operator " + i.Name
 }

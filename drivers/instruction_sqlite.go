@@ -15,6 +15,10 @@ func (i *SQLiteAlterTableInstruction) String() string {
 		quoteIdentifier(i.Name), i.Action.TableActionClause())
 }
 
+func (i *SQLiteAlterTableInstruction) Comment() string {
+	return objectComment("Modify", "table", i.Name)
+}
+
 type SQLiteAddColumnAction struct {
 	Column *SQLiteColumn
 }
@@ -84,12 +88,20 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	return statement + ";"
 }
 
+func (i *SQLiteCreateTableInstruction) Comment() string {
+	return objectComment("Create", "table", i.Name)
+}
+
 type SQLiteCreateVirtualTableInstruction struct {
 	Definition string
 }
 
 func (i *SQLiteCreateVirtualTableInstruction) String() string {
 	return i.Definition + ";"
+}
+
+func (i *SQLiteCreateVirtualTableInstruction) Comment() string {
+	return definitionComment("Create", "virtual table", i.Definition, "TABLE")
 }
 
 type SQLiteCreateIndexInstruction struct {
@@ -119,12 +131,20 @@ func (i *SQLiteCreateIndexInstruction) String() string {
 	return statement + ";"
 }
 
+func (i *SQLiteCreateIndexInstruction) Comment() string {
+	return tableObjectComment("Create", "index", i.Name, i.TableName)
+}
+
 type SQLiteCreateTriggerInstruction struct {
 	Definition string
 }
 
 func (i *SQLiteCreateTriggerInstruction) String() string {
 	return i.Definition + ";"
+}
+
+func (i *SQLiteCreateTriggerInstruction) Comment() string {
+	return tableDefinitionComment("Create", "trigger", i.Definition, "TRIGGER", "ON")
 }
 
 type SQLiteCreateViewInstruction struct {
@@ -135,10 +155,18 @@ func (i *SQLiteCreateViewInstruction) String() string {
 	return i.Definition + ";"
 }
 
+func (i *SQLiteCreateViewInstruction) Comment() string {
+	return definitionComment("Create", "view", i.Definition, "VIEW")
+}
+
 type SQLiteDropTriggerInstruction struct {
 	Name string
 }
 
 func (i *SQLiteDropTriggerInstruction) String() string {
 	return "DROP TRIGGER " + quoteIdentifier(i.Name) + ";"
+}
+
+func (i *SQLiteDropTriggerInstruction) Comment() string {
+	return objectComment("Drop", "trigger", i.Name)
 }

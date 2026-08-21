@@ -1295,13 +1295,13 @@ func TestPostgresDriver(t *testing.T) {
 				},
 			},
 			&PostgresCommentOnTableInstruction{
-				Name:    "users",
-				Comment: "the people",
+				Name: "users",
+				Text: "the people",
 			},
 			&PostgresCommentOnColumnInstruction{
 				TableName:  "users",
 				ColumnName: "id",
-				Comment:    "the key",
+				Text:       "the key",
 			},
 		})
 
@@ -1326,13 +1326,13 @@ func TestPostgresDriver(t *testing.T) {
 
 		diff := driver.RequireInstructions([]Instruction{
 			&PostgresCommentOnTableInstruction{
-				Name:    "users",
-				Comment: "the new comment",
+				Name: "users",
+				Text: "the new comment",
 			},
 			&PostgresCommentOnColumnInstruction{
 				TableName:  "users",
 				ColumnName: "id",
-				Comment:    "the new key",
+				Text:       "the new key",
 			},
 			&PostgresCommentOnColumnInstruction{
 				TableName:  "users",

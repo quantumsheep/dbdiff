@@ -170,6 +170,30 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Equal(t, "UPDATE \"users\" SET \"name\" = 'Alice' WHERE \"id\" = 1;\n", result.Stdout)
 	})
 
+	t.Run("CommentsFlag", func(t *testing.T) {
+		directory := t.TempDir()
+		sourcePath := filepath.Join(directory, "source.sqlite")
+		targetPath := filepath.Join(directory, "target.sqlite")
+
+		writeSQLiteDatabase(t, sourcePath, `
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TABLE posts (id INTEGER PRIMARY KEY);
+		`)
+		writeSQLiteDatabase(t, targetPath, `CREATE TABLE users (id INTEGER PRIMARY KEY);`)
+
+		result := runDbdiff(t, binaryPath, "--comments", sourcePath, targetPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, `-- Modify the table "users"
+ALTER TABLE "users" ADD COLUMN "name" TEXT;
+-- Create the table "posts"
+CREATE TABLE "posts" (
+	"id" INTEGER PRIMARY KEY
+);
+`, result.Stdout)
+	})
+
 	t.Run("SQLFileSource", func(t *testing.T) {
 		sourcePath := writeSQLFile(t, t.TempDir(), "schema.sql", `
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);

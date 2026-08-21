@@ -97,6 +97,20 @@ dbdiff source.sqlite target.sqlite | sqlite3 target.sqlite
 > Read the output before you apply it. A statement can delete a table, a column, or a row
 > of the target database. dbdiff holds no rollback.
 
+### Comments
+
+The `--comments` flag prints a comment before each object that the output changes. The
+statements of one object take one comment:
+
+```sql
+-- Modify the table "users"
+ALTER TABLE "users" ADD COLUMN "created_at" TEXT;
+-- Create the index "users_email" of the table "users"
+CREATE INDEX "users_email" ON "users" ("email");
+-- Drop the table "audit"
+DROP TABLE "audit";
+```
+
 ## Flags
 
 | Flag       | Value                   | Purpose                                                                                                                        |
@@ -104,6 +118,7 @@ dbdiff source.sqlite target.sqlite | sqlite3 target.sqlite
 | `--driver` | `sqlite3` or `postgres` | Select the database engine. The default value comes from the source and the target. See [Driver detection](#driver-detection). |
 | `--schema` | A schema name           | Name the schema that the postgres driver reads. The default value is the schema of the search path.                            |
 | `--data`   | none                    | Add the comparison of the rows. The default value is off.                                                                      |
+| `--comments` | none                  | Print a comment before each object that the output changes. The default value is off.                                          |
 | `--privileges` | none               | Add the comparison of the owner and the privileges. The postgres driver accepts this flag. The default value is off.            |
 | `--version` | none                   | Print the version of the build and exit.                                                                                       |
 
