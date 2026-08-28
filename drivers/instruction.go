@@ -244,7 +244,9 @@ func (a *SQLRenameTableAction) TableActionClause() string {
 func rowKeyCondition(primaryKeyColumnNames []string, row map[string]string) Condition {
 	conditions := lo.Map(primaryKeyColumnNames, func(name string, _ int) Condition {
 		if row[name] == sqlNullLiteral {
-			return &SQLIsNullCondition{ColumnName: name}
+			return &SQLIsNullCondition{
+				ColumnName: name,
+			}
 		}
 
 		return &SQLEqualityCondition{
@@ -253,5 +255,7 @@ func rowKeyCondition(primaryKeyColumnNames []string, row map[string]string) Cond
 		}
 	})
 
-	return &SQLConjunctionCondition{Conditions: conditions}
+	return &SQLConjunctionCondition{
+		Conditions: conditions,
+	}
 }
