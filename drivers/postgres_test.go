@@ -3473,6 +3473,18 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("DropExtensionThatOwnsAView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE EXTENSION pg_buffercache;`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropExtensionInstruction{Name: "pg_buffercache"},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("DropTableBeforeType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

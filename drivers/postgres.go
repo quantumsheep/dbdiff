@@ -1468,6 +1468,14 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 			CASE WHEN check_option = 'NONE' THEN '' ELSE check_option END
 		FROM information_schema.views
 		WHERE table_schema = current_schema()
+		AND NOT EXISTS (
+			SELECT 1
+			FROM pg_depend dep
+			JOIN pg_class c ON c.oid = dep.objid
+			WHERE dep.deptype = 'e'
+			AND c.relnamespace = current_schema()::regnamespace
+			AND c.relname = views.table_name
+		)
 		ORDER BY table_name
 	`)
 	if err != nil {
