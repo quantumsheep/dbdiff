@@ -69,7 +69,8 @@ dbdiff/
 │                        and checks the output and the exit code.
 │   ├── cmd/             One package per command. A command lives in <command>/command.go,
 │   │                    and a subcommand lives in <command>/cmd/<subcommand>/command.go.
-│   │                    A command_test.go file sits beside each command.go. The name of
+│   │                    A command_test.go file sits beside each command.go, except for
+│   │                    diff, which main_test.go covers. The name of
 │   │                    the package joins the path: cmdmigrategenerate. See
 │   │                    [Package names](#package-names).
 │   ├── internal/helpers/ Version and OnUsageError, which every command reads
