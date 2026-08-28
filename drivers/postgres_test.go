@@ -2033,6 +2033,21 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("NoRevokeForADroppedView", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnSource(`
+			CREATE VIEW numbers AS SELECT 1 AS value;
+			GRANT SELECT ON numbers TO dbdiff_reader;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "numbers"},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

@@ -1351,7 +1351,17 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		}
 	}
 
+	targetObjectNames := lo.Map(targetOwners, func(owner *PostgresOwner, _ int) string {
+		return owner.ObjectName
+	})
+
 	for _, sourcePrivilege := range sourcePrivileges {
+		// The diff drops an object that the target does not hold, and the drop removes
+		// every privilege of the object.
+		if !slices.Contains(targetObjectNames, sourcePrivilege.ObjectName) {
+			continue
+		}
+
 		_, found := lo.Find(targetPrivileges, func(privilege *PostgresPrivilege) bool {
 			return privilege.Key() == sourcePrivilege.Key()
 		})
