@@ -37,7 +37,7 @@ func RenderMigrationStatus(set *coremigrations.MigrationSet) string {
 	var builder strings.Builder
 
 	for _, entry := range set.Entries {
-		builder.WriteString(fmt.Sprintf("%-40s %s", entry.FileName(), entry.State))
+		fmt.Fprintf(&builder, "%-40s %s", entry.FileName(), entry.State)
 
 		if entry.State == coremigrations.MigrationApplied {
 			builder.WriteString("   ")
@@ -63,7 +63,7 @@ func RenderMigrationPreview(set *coremigrations.MigrationSet) (string, error) {
 			continue
 		}
 
-		builder.WriteString(fmt.Sprintf("%s is out of order. The command up will refuse it.\n", entry.FileName()))
+		fmt.Fprintf(&builder, "%s is out of order. The command up will refuse it.\n", entry.FileName())
 	}
 
 	pending := set.Pending()
@@ -113,7 +113,7 @@ func RunMigrationPreview(ctx context.Context, migrator coremigrations.Migrator, 
 		return err
 	}
 
-	defer transaction.Rollback()
+	defer func() { _ = transaction.Rollback() }()
 
 	for _, entry := range pending {
 		content, err := entry.Content()
@@ -122,7 +122,7 @@ func RunMigrationPreview(ctx context.Context, migrator coremigrations.Migrator, 
 		}
 
 		if !drivers.FileUsesTransaction(content) {
-			fmt.Fprintf(output, "%s runs outside a transaction, so preview does not run it.\n",
+			_, _ = fmt.Fprintf(output, "%s runs outside a transaction, so preview does not run it.\n",
 				entry.FileName())
 
 			continue
@@ -155,7 +155,7 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 	}
 
 	if len(set.Pending()) == 0 {
-		fmt.Fprintln(output, "The database is up to date.")
+		_, _ = fmt.Fprintln(output, "The database is up to date.")
 
 		return nil
 	}
@@ -165,7 +165,7 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 		return err
 	}
 
-	defer migrator.Unlock(ctx)
+	defer func() { _ = migrator.Unlock(ctx) }()
 
 	err = migrator.EnsureHistoryTable(ctx)
 	if err != nil {
@@ -184,7 +184,7 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 
 	pending := set.Pending()
 	if len(pending) == 0 {
-		fmt.Fprintln(output, "The database is up to date.")
+		_, _ = fmt.Fprintln(output, "The database is up to date.")
 
 		return nil
 	}
@@ -198,8 +198,8 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 				return err
 			}
 
-			fmt.Fprintf(output, "%s\n", entry.FileName())
-			fmt.Fprintf(output, "  %s\n", indentMigrationStatement(strings.TrimSpace(content)))
+			_, _ = fmt.Fprintf(output, "%s\n", entry.FileName())
+			_, _ = fmt.Fprintf(output, "  %s\n", indentMigrationStatement(strings.TrimSpace(content)))
 
 			answer, err := readStepAnswer(reader, output)
 			if err != nil {
@@ -207,7 +207,7 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 			}
 
 			if answer == "q" {
-				fmt.Fprintln(output, "The run stopped. Every file that dbdiff applied stays applied.")
+				_, _ = fmt.Fprintln(output, "The run stopped. Every file that dbdiff applied stays applied.")
 
 				return nil
 			}
@@ -264,7 +264,7 @@ func applyOneMigration(ctx context.Context, migrator coremigrations.Migrator, en
 	for _, statement := range statementsOf(content) {
 		err = transaction.Apply(ctx, statement)
 		if err != nil {
-			transaction.Rollback()
+			_ = transaction.Rollback()
 
 			return fmt.Errorf("%s failed: %w", entry.FileName(), err)
 		}
@@ -272,7 +272,7 @@ func applyOneMigration(ctx context.Context, migrator coremigrations.Migrator, en
 
 	err = transaction.Record(ctx, entry.Migration)
 	if err != nil {
-		transaction.Rollback()
+		_ = transaction.Rollback()
 
 		return err
 	}
@@ -282,7 +282,7 @@ func applyOneMigration(ctx context.Context, migrator coremigrations.Migrator, en
 		return err
 	}
 
-	fmt.Fprintf(output, "Applied %s.\n", entry.FileName())
+	_, _ = fmt.Fprintf(output, "Applied %s.\n", entry.FileName())
 
 	return nil
 }
@@ -294,7 +294,7 @@ func MigrationVerifyDirectory(set *coremigrations.MigrationSet) (string, func(),
 	}
 
 	cleanup := func() {
-		os.RemoveAll(directory)
+		_ = os.RemoveAll(directory)
 	}
 
 	err = copyAppliedMigrations(set, directory)
@@ -331,7 +331,7 @@ func copyAppliedMigrations(set *coremigrations.MigrationSet, directory string) e
 
 func readStepAnswer(reader *bufio.Reader, output io.Writer) (string, error) {
 	for {
-		fmt.Fprint(output, "  [a]pply  apply the [r]est  [q]uit ? ")
+		_, _ = fmt.Fprint(output, "  [a]pply  apply the [r]est  [q]uit ? ")
 
 		line, err := reader.ReadString('\n')
 
@@ -348,7 +348,7 @@ func readStepAnswer(reader *bufio.Reader, output io.Writer) (string, error) {
 			return "", err
 		}
 
-		fmt.Fprintln(output, "  Answer a, r, or q.")
+		_, _ = fmt.Fprintln(output, "  Answer a, r, or q.")
 	}
 }
 

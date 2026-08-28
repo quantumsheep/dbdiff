@@ -185,7 +185,7 @@ func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName s
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	data := &SQLiteTableData{
 		Rows: make(map[string]map[string]string),

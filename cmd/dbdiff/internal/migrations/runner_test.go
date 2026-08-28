@@ -263,7 +263,7 @@ func TestApplyMigrations(t *testing.T) {
 		other, err := coremigrations.NewSQLiteMigrator(migrator.Path)
 		require.NoError(t, err)
 
-		defer other.Close()
+		defer func() { require.NoError(t, other.Close()) }()
 
 		otherSet, err := LoadMigrationSet(t.Context(), other, directory)
 		require.NoError(t, err)
@@ -296,7 +296,7 @@ func TestApplyMigrations(t *testing.T) {
 		migrator, err := coremigrations.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
-		defer migrator.Close()
+		defer func() { require.NoError(t, migrator.Close()) }()
 
 		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
 		require.NoError(t, err)
@@ -308,7 +308,7 @@ func TestApplyMigrations(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		defer driver.Close()
+		defer func() { require.NoError(t, driver.Close()) }()
 
 		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
@@ -498,7 +498,7 @@ func TestVerifyMigrations(t *testing.T) {
 		migrator, err := coremigrations.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
-		defer migrator.Close()
+		defer func() { require.NoError(t, migrator.Close()) }()
 
 		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
 		require.NoError(t, err)
@@ -514,7 +514,7 @@ func TestVerifyMigrations(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		defer driver.Close()
+		defer func() { require.NoError(t, driver.Close()) }()
 
 		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
@@ -527,7 +527,7 @@ func TestVerifyMigrations(t *testing.T) {
 		migrator, err := coremigrations.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
-		defer migrator.Close()
+		defer func() { require.NoError(t, migrator.Close()) }()
 
 		_, err = migrator.Connection.ExecContext(t.Context(),
 			`CREATE TABLE audit (id INTEGER PRIMARY KEY);`)
@@ -547,7 +547,7 @@ func TestVerifyMigrations(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		defer driver.Close()
+		defer func() { require.NoError(t, driver.Close()) }()
 
 		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
@@ -561,7 +561,7 @@ func TestVerifyMigrations(t *testing.T) {
 		migrator, err := coremigrations.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
-		defer migrator.Close()
+		defer func() { require.NoError(t, migrator.Close()) }()
 
 		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
 		require.NoError(t, err)
@@ -577,7 +577,7 @@ func TestVerifyMigrations(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		defer driver.Close()
+		defer func() { require.NoError(t, driver.Close()) }()
 
 		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
@@ -592,7 +592,7 @@ func TestVerifyMigrations(t *testing.T) {
 		migrator, err := coremigrations.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
-		defer migrator.Close()
+		defer func() { require.NoError(t, migrator.Close()) }()
 
 		set, err := LoadMigrationSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)
@@ -608,7 +608,7 @@ func TestVerifyMigrations(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		defer driver.Close()
+		defer func() { require.NoError(t, driver.Close()) }()
 
 		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
@@ -673,7 +673,7 @@ func TestPostgresMigrationRunner(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		defer generateDriver.Close()
+		defer func() { require.NoError(t, generateDriver.Close()) }()
 
 		generatedInstructions, err := generateDriver.Diff(t.Context())
 		require.NoError(t, err)

@@ -47,7 +47,7 @@ func (m *TestingSQLiteMigrator) TableNames() []string {
 		`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;`)
 	require.NoError(m.tb, err)
 
-	defer rows.Close()
+	defer func() { require.NoError(m.tb, rows.Close()) }()
 
 	var names []string
 
@@ -128,7 +128,7 @@ func (m *TestingPostgresMigrator) TableNames() []string {
 	`)
 	require.NoError(m.tb, err)
 
-	defer rows.Close()
+	defer func() { require.NoError(m.tb, rows.Close()) }()
 
 	var names []string
 
@@ -168,7 +168,7 @@ func GenerateSQLiteMigration(tb testing.TB, target string, migrations string) []
 	})
 	require.NoError(tb, err)
 
-	defer driver.Close()
+	defer func() { require.NoError(tb, driver.Close()) }()
 
 	instructions, err := driver.Diff(tb.Context())
 	require.NoError(tb, err)

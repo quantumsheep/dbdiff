@@ -87,7 +87,7 @@ func TestSQLiteMigrator(t *testing.T) {
 		transaction, err := migrator.Begin(t.Context(), true)
 		require.NoError(t, err)
 
-		defer transaction.Rollback()
+		defer func() { require.NoError(t, transaction.Rollback()) }()
 
 		require.Error(t, transaction.Apply(t.Context(), "NOT SQL AT ALL;"))
 	})

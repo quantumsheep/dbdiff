@@ -38,7 +38,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	defer migrator.Close()
+	defer func() { _ = migrator.Close() }()
 
 	return migrations.ApplyMigrations(ctx, migrator, set, os.Stdout)
 }

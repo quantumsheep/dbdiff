@@ -174,7 +174,7 @@ func (d *PostgresDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tab
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var columnNames []string
 
@@ -209,7 +209,7 @@ func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	data := &PostgresTableData{
 		Rows: make(map[string]map[string]string),

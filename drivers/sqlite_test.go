@@ -3231,7 +3231,7 @@ func TestSQLiteDriver(t *testing.T) {
 		db, err := sql.Open("sqlite3_failing_rows", "")
 		require.NoError(t, err)
 
-		defer db.Close()
+		defer func() { require.NoError(t, db.Close()) }()
 
 		driver := &SQLiteDriver{}
 

@@ -980,14 +980,22 @@ test of any directory compiles the same binary.
 
 # Go conventions
 
-- Run `gofmt -w .` and `go vet ./...` after every change. Correct every finding. The
-  `lint` job of the CI runs `gofmt -l .` and fails on a file that it reports.
+- Run `gofmt -w .` and `golangci-lint run ./...` after every change. Correct every
+  finding. The `lint` job of the CI runs the same command. `.golangci.yml` enables the
+  standard linters and the `gci`, `gofmt`, and `goimports` formatters. `golangci-lint fmt`
+  writes the format that they ask for. It holds no exclusion and no `nolint`
+  comment. If a linter reports the code, correct the code.
 - Use tabs for the indentation. `gofmt` writes them.
 - Name a variable with full words: `sourceDatabaseConnection`, not `srcConn`.
 - Return an error to the caller. Never call `os.Exit` or `panic` in the `drivers` package.
 - Wrap an error with context in a command package: `fmt.Errorf("failed to ...: %w", err)`.
-- Close every `*sql.Rows` with `defer rows.Close()`. After the `Next` loop, return the
-  error of `rows.Err()`. Without that check the driver reads a truncated schema.
+- Close every `*sql.Rows` with `defer func() { _ = rows.Close() }()`. After the `Next`
+  loop, return the error of `rows.Err()`. Without that check the driver reads a truncated
+  schema. The blank identifier tells `errcheck` that the code drops the error of `Close`,
+  because `rows.Err()` gives the same error.
+- Drop the error of a cleanup call with the blank identifier: `_ = connection.Close()`.
+  The code returns the error of the operation that failed, and the error of the cleanup
+  hides it. In a test, check that error with `require.NoError` instead.
 - The CLI prints the error and exits with the code 1. `main` owns that, because
   `cmd.Run` returns the error to the caller.
 - Pass the `context.Context` to every query with `QueryContext` or `ExecContext`.
@@ -1057,7 +1065,7 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []*SQLiteTable
 

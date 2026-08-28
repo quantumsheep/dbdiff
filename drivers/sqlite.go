@@ -34,7 +34,7 @@ func NewSQLiteDriver(ctx context.Context, config *SQLLiteDriverConfig) (*SQLiteD
 
 	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetDatabasePath, "target")
 	if err != nil {
-		driver.RemoveTemporaryDirectory()
+		_ = driver.RemoveTemporaryDirectory()
 		return nil, err
 	}
 
@@ -42,8 +42,8 @@ func NewSQLiteDriver(ctx context.Context, config *SQLLiteDriverConfig) (*SQLiteD
 
 	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceDatabasePath, "source")
 	if err != nil {
-		driver.TargetDatabaseConnection.Close()
-		driver.RemoveTemporaryDirectory()
+		_ = driver.TargetDatabaseConnection.Close()
+		_ = driver.RemoveTemporaryDirectory()
 
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []*SQLiteTable
 
@@ -343,7 +343,7 @@ func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQL
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []*SQLiteVirtualTable
 
@@ -445,7 +445,7 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var columns []*SQLiteColumn
 	var primaryKeyColumns []*SQLiteColumn
@@ -520,7 +520,7 @@ func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, table
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type primaryKeyColumn struct {
 		Name     string
@@ -579,7 +579,7 @@ func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, table
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var indexNames []string
 
@@ -631,7 +631,7 @@ func (d *SQLiteDriver) GetIndexColumnNames(ctx context.Context, db *sql.DB, inde
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var names []string
 
@@ -671,7 +671,7 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var indexes []*SQLiteIndex
 
@@ -724,7 +724,7 @@ func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tabl
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	definitions := make(map[string]string)
 
@@ -755,7 +755,7 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var keys []string
 
@@ -802,7 +802,7 @@ func (d *SQLiteDriver) GetTriggers(ctx context.Context, db *sql.DB, objectName s
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var triggers []*SQLiteTrigger
 
@@ -834,7 +834,7 @@ func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var views []*SQLiteView
 
@@ -872,7 +872,7 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	foreignKeysMap := make(map[int]*SQLiteForeignKey)
 

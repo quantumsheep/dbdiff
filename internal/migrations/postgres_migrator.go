@@ -28,7 +28,7 @@ func NewPostgresMigrator(ctx context.Context, connectionString string, schema st
 
 	connection, err := database.Conn(ctx)
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (m *PostgresMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigr
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var applied []AppliedMigration
 

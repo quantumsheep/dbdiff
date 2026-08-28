@@ -195,7 +195,7 @@ func (d *TestingPostgresDriver) FetchAllFromSource(table string, additionalRules
 	rows, err := d.SourceDatabaseConnection.Query(fmt.Sprintf("SELECT * FROM %s %s;", QuoteIdentifier(table), additionalRules))
 	require.NoError(d.tb, err)
 
-	defer rows.Close()
+	defer func() { require.NoError(d.tb, rows.Close()) }()
 
 	columns, err := rows.Columns()
 	require.NoError(d.tb, err)

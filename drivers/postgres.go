@@ -48,7 +48,7 @@ func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*Post
 
 	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetConnectionString, config.TargetSchema, "target")
 	if err != nil {
-		driver.StopScratchServer()
+		_ = driver.StopScratchServer()
 		return nil, err
 	}
 
@@ -56,8 +56,8 @@ func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*Post
 
 	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceConnectionString, config.SourceSchema, "source")
 	if err != nil {
-		driver.TargetDatabaseConnection.Close()
-		driver.StopScratchServer()
+		_ = driver.TargetDatabaseConnection.Close()
+		_ = driver.StopScratchServer()
 
 		return nil, err
 	}
@@ -639,7 +639,7 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var views []*PostgresMaterializedView
 
@@ -695,7 +695,7 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var indexes []*PostgresIndex
 
@@ -735,7 +735,7 @@ func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, table
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var policies []*PostgresPolicy
 
@@ -776,7 +776,7 @@ func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*Post
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var extensions []*PostgresExtension
 
@@ -814,7 +814,7 @@ func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresT
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var types []*PostgresType
 
@@ -867,7 +867,7 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var domains []*PostgresDomain
 
@@ -926,7 +926,7 @@ func (d *PostgresDriver) GetCompositeTypes(ctx context.Context, db *sql.DB) ([]*
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var compositeTypes []*PostgresCompositeType
 
@@ -980,7 +980,7 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var aggregates []*PostgresAggregate
 
@@ -1028,7 +1028,7 @@ func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*Postg
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var operators []*PostgresOperator
 
@@ -1075,7 +1075,7 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var sequences []*PostgresSequence
 
@@ -1132,7 +1132,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var functions []*PostgresFunction
 
@@ -1176,7 +1176,7 @@ func (d *PostgresDriver) GetTableRules(ctx context.Context, db *sql.DB, tableNam
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var rules []*PostgresRule
 
@@ -1266,7 +1266,7 @@ func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*Post
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var statistics []*PostgresStatistics
 
@@ -1380,7 +1380,7 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var owners []*PostgresOwner
 
@@ -1432,7 +1432,7 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var privileges []*PostgresPrivilege
 
@@ -1472,7 +1472,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 		return nil, err
 	}
 
-	defer viewRows.Close()
+	defer func() { _ = viewRows.Close() }()
 
 	var views []*PostgresView
 
@@ -1565,7 +1565,7 @@ func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewNam
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var columns []*PostgresViewColumn
 
@@ -1644,7 +1644,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		return nil, err
 	}
 
-	defer tableRows.Close()
+	defer func() { _ = tableRows.Close() }()
 
 	var tables []*PostgresTable
 
@@ -1783,7 +1783,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	defer columnRows.Close()
+	defer func() { _ = columnRows.Close() }()
 
 	for columnRows.Next() {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
@@ -1844,7 +1844,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	defer constraintRows.Close()
+	defer func() { _ = constraintRows.Close() }()
 
 	for constraintRows.Next() {
 		constraint := &PostgresConstraint{}
@@ -1896,7 +1896,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	defer indexRows.Close()
+	defer func() { _ = indexRows.Close() }()
 
 	for indexRows.Next() {
 		index := &PostgresIndex{}
@@ -1938,7 +1938,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	defer triggerRows.Close()
+	defer func() { _ = triggerRows.Close() }()
 
 	for triggerRows.Next() {
 		trigger := &PostgresTrigger{}

@@ -70,7 +70,7 @@ func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrat
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var applied []AppliedMigration
 

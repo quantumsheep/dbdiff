@@ -61,7 +61,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	defer driver.Close()
+	defer func() { _ = driver.Close() }()
 
 	instructions, err := driver.Diff(ctx)
 	if err != nil {

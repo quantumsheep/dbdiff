@@ -70,7 +70,7 @@ func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 
 	set, err := LoadMigrationSet(ctx, migrator, config.Source)
 	if err != nil {
-		migrator.Close()
+		_ = migrator.Close()
 
 		return nil, nil, nil, err
 	}

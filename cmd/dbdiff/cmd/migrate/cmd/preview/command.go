@@ -43,7 +43,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	defer migrator.Close()
+	defer func() { _ = migrator.Close() }()
 
 	preview, err := migrations.RenderMigrationPreview(set)
 	if err != nil {

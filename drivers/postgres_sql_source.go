@@ -72,7 +72,7 @@ func StartPostgresScratchServer(version embeddedpostgres.PostgresVersion) (*Post
 
 	err = server.Start()
 	if err != nil {
-		os.RemoveAll(temporaryDirectory)
+		_ = os.RemoveAll(temporaryDirectory)
 		return nil, fmt.Errorf("failed to start the temporary postgres server: %w", err)
 	}
 
@@ -101,7 +101,7 @@ func (s *PostgresScratchServer) CreateDatabase(ctx context.Context, name string)
 		return "", err
 	}
 
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 
 	_, err = connection.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", QuoteIdentifier(name)))
 	if err != nil {
@@ -159,7 +159,7 @@ func DetectPostgresScratchVersion(ctx context.Context, connectionString string) 
 		return ""
 	}
 
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 
 	row := connection.QueryRowContext(ctx, "SELECT current_setting('server_version_num')::int")
 
@@ -198,7 +198,7 @@ func findFreePort() (uint32, error) {
 		return 0, err
 	}
 
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	address, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {
@@ -235,7 +235,7 @@ func (d *PostgresDriver) OpenSide(ctx context.Context, connectionString string, 
 
 	err = sqlSource.ApplyTo(ctx, connection)
 	if err != nil {
-		connection.Close()
+		_ = connection.Close()
 		return nil, err
 	}
 

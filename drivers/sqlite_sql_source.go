@@ -29,7 +29,7 @@ func (d *SQLiteDriver) OpenSide(ctx context.Context, path string, role string) (
 
 	err = sqlSource.ApplyTo(ctx, connection)
 	if err != nil {
-		connection.Close()
+		_ = connection.Close()
 		return nil, err
 	}
 
