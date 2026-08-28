@@ -3928,6 +3928,59 @@ func TestPostgresDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsOfANewTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
+			INSERT INTO users (id, name) VALUES (2, 'Bob'), (1, 'Alice');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+					{
+						Name: "name",
+						Type: "text",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "users_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+			},
+			&SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Expressions: []string{"1", "'Alice'"},
+			},
+			&SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Expressions: []string{"2", "'Bob'"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Bob"},
+		}, rows)
+	})
+
 	t.Run("CompareRowsWithAGeneratedColumnAndAnIdentityColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true

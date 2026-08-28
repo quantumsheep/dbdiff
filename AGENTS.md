@@ -874,6 +874,9 @@ table and its column.
 - The output holds an `INSERT` statement for a key of the target only, an `UPDATE`
   statement for a key that both sides hold with a different row, and a `DELETE` statement
   for a key of the source only.
+- A table that the target only holds needs no key. `TableDataInstructions` prints one
+  `INSERT` statement for each target row, because the schema section creates that table
+  with no row.
 - `formatSQLiteValue` and `formatPostgresValue` make an SQL literal of each value first.
   The comparison then works on the literal, so `NULL` never equals the text `'NULL'`.
 

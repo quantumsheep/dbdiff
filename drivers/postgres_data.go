@@ -45,6 +45,13 @@ func (d *PostgresDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 			return table.Name == targetTable.Name
 		})
 		if !found {
+			additions, err := d.TableDataInstructions(ctx, targetTable)
+			if err != nil {
+				return nil, err
+			}
+
+			instructions = append(instructions, additions...)
+
 			continue
 		}
 
@@ -187,6 +194,57 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 	}
 
 	return slices.Concat(insertions, modifications), removals, nil
+}
+
+// The schema section creates this table with no row, so every target row becomes an
+// INSERT statement.
+func (d *PostgresDriver) TableDataInstructions(ctx context.Context, targetTable *PostgresTable) ([]Instruction, error) {
+	targetColumnNames := writablePostgresColumnNames(targetTable.Columns)
+	if len(targetColumnNames) == 0 {
+		return nil, nil
+	}
+
+	// An empty column list breaks the ORDER BY clause of the SELECT statement.
+	orderColumnNames, err := d.GetTablePrimaryKey(ctx, d.TargetDatabaseConnection, targetTable.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(orderColumnNames) == 0 {
+		orderColumnNames = targetColumnNames
+	}
+
+	targetData, err := d.GetTableData(ctx, d.TargetDatabaseConnection, targetTable.Name, targetColumnNames, orderColumnNames)
+	if err != nil {
+		return nil, err
+	}
+
+	var instructions []Instruction
+
+	for _, key := range targetData.Keys {
+		targetRow := targetData.Rows[key]
+
+		values := lo.Map(targetColumnNames, func(name string, _ int) string {
+			return targetRow[name]
+		})
+
+		// PostgreSQL refuses a plain value for a GENERATED ALWAYS identity column.
+		if holdsAlwaysIdentityColumn(targetTable, targetColumnNames) {
+			instructions = append(instructions, &PostgresInsertOverridingInstruction{
+				TableName:   targetTable.Name,
+				ColumnNames: targetColumnNames,
+				Expressions: values,
+			})
+		} else {
+			instructions = append(instructions, &SQLInsertInstruction{
+				TableName:   targetTable.Name,
+				ColumnNames: targetColumnNames,
+				Expressions: values,
+			})
+		}
+	}
+
+	return instructions, nil
 }
 
 // PostgreSQL computes a generated column, and it refuses a value for that column.

@@ -3361,6 +3361,54 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsOfANewTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+			INSERT INTO users (id, name) VALUES (2, 'Bob'), (1, 'Alice');
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "users",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+				},
+			},
+			&SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Expressions: []string{"1", "'Alice'"},
+			},
+			&SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Expressions: []string{"2", "'Bob'"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Bob"},
+		}, rows)
+	})
+
 	t.Run("CompareRowsWithAGeneratedColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true

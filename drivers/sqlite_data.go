@@ -54,6 +54,13 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 			return table.Name == targetTable.Name
 		})
 		if !found {
+			additions, err := d.TableDataInstructions(ctx, targetTable)
+			if err != nil {
+				return nil, err
+			}
+
+			instructions = append(instructions, additions...)
+
 			continue
 		}
 
@@ -173,6 +180,44 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 	}
 
 	return slices.Concat(insertions, modifications), removals, nil
+}
+
+// The schema section creates this table with no row, so every target row becomes an
+// INSERT statement.
+func (d *SQLiteDriver) TableDataInstructions(ctx context.Context, targetTable *SQLiteTable) ([]Instruction, error) {
+	targetColumnNames := writableSQLiteColumnNames(targetTable.Columns)
+	if len(targetColumnNames) == 0 {
+		return nil, nil
+	}
+
+	// An empty column list breaks the ORDER BY clause of the SELECT statement.
+	orderColumnNames := targetTable.PrimaryKeyColumnNames()
+	if len(orderColumnNames) == 0 {
+		orderColumnNames = targetColumnNames
+	}
+
+	targetData, err := d.GetTableData(ctx, d.TargetDatabaseConnection, targetTable.Name, targetColumnNames, orderColumnNames)
+	if err != nil {
+		return nil, err
+	}
+
+	var instructions []Instruction
+
+	for _, key := range targetData.Keys {
+		targetRow := targetData.Rows[key]
+
+		values := lo.Map(targetColumnNames, func(name string, _ int) string {
+			return targetRow[name]
+		})
+
+		instructions = append(instructions, &SQLInsertInstruction{
+			TableName:   targetTable.Name,
+			ColumnNames: targetColumnNames,
+			Expressions: values,
+		})
+	}
+
+	return instructions, nil
 }
 
 // SQLite gives no stable order, so the ORDER BY clause keeps the output equal

@@ -487,6 +487,9 @@ The comparison needs the primary key of the table. A table with no primary key g
 comment line, and no row statement. A table with a different primary key in the source gets
 the same treatment.
 
+A table that the target only holds needs no key. The schema section creates that table,
+and the data section prints one `INSERT` statement for each row of it.
+
 ## Migrations
 
 `dbdiff migrate` reads a configuration file, `dbdiff.yaml`, from the working directory. The
@@ -758,8 +761,6 @@ constraint of two or more columns as a table constraint.
 
 ## Limits
 
-- The data comparison covers a table that the source and the target both hold. A table
-  that the target only holds stays empty. The schema section creates that table.
 - The `--privileges` flag compares the owner and the privileges of a table, of a view, of a
   materialized view, and of a sequence. It compares no privilege of a schema, of a function,
   or of a type, and it reads no default privilege of `ALTER DEFAULT PRIVILEGES`.
