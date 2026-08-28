@@ -427,6 +427,14 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, `Drop the extension "hstore"`, instruction.Comment())
 	})
 
+	t.Run("PostgresCreateOwnedSequence", func(t *testing.T) {
+		instruction := &PostgresCreateOwnedSequenceInstruction{
+			Name: "users_id_seq",
+		}
+
+		require.Equal(t, `Create the sequence "users_id_seq"`, instruction.Comment())
+	})
+
 	t.Run("PostgresCreateSequence", func(t *testing.T) {
 		instruction := &PostgresCreateSequenceInstruction{
 			Name:     "users_id_seq",

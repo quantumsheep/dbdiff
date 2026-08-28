@@ -1788,6 +1788,15 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 					WHERE dep.refobjid = a.attrelid
 					AND dep.refobjsubid = a.attnum
 					AND dep.deptype = 'a'
+				), ''),
+				coalesce((
+					SELECT sequence_class.relname
+					FROM pg_depend dep
+					JOIN pg_class sequence_class ON sequence_class.oid = dep.objid
+						AND sequence_class.relkind = 'S'
+					WHERE dep.refobjid = a.attrelid
+					AND dep.refobjsubid = a.attnum
+					AND dep.deptype = 'a'
 				), '')
 			FROM pg_attribute a
 			LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
@@ -1807,14 +1816,14 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 
 	for columnRows.Next() {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
-		var identityOptions, storage, serial string
+		var identityOptions, storage, serial, serialSequenceName string
 		var notNull bool
 		var columnDefault sql.NullString
 		var statisticsTarget sql.NullInt64
 
 		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault,
 			&identity, &generatedExpression, &collation, &comment, &storage,
-			&statisticsTarget, &identityOptions, &serial)
+			&statisticsTarget, &identityOptions, &serial, &serialSequenceName)
 		if err != nil {
 			return nil, err
 		}
@@ -1836,6 +1845,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 			IdentityOptions:     identityOptions,
 			Storage:             storage,
 			StatisticsTarget:    statisticsTarget,
+			SerialSequenceName:  serialSequenceName,
 			Serial:              serial,
 		}
 		table.Columns = append(table.Columns, column)

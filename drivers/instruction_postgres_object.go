@@ -79,6 +79,21 @@ func (i *PostgresCreateSequenceInstruction) Comment() string {
 	return objectComment("Create", "sequence", i.Name)
 }
 
+type PostgresCreateOwnedSequenceInstruction struct {
+	Name       string
+	TableName  string
+	ColumnName string
+}
+
+func (i *PostgresCreateOwnedSequenceInstruction) String() string {
+	return fmt.Sprintf("CREATE SEQUENCE %s OWNED BY %s.%s;",
+		QuoteIdentifier(i.Name), QuoteIdentifier(i.TableName), QuoteIdentifier(i.ColumnName))
+}
+
+func (i *PostgresCreateOwnedSequenceInstruction) Comment() string {
+	return objectComment("Create", "sequence", i.Name)
+}
+
 type PostgresAlterSequenceInstruction struct {
 	Name      string
 	DataType  sql.NullString

@@ -1527,6 +1527,18 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `DROP EXTENSION "pgcrypto";`, instruction.String())
 	})
 
+	t.Run("PostgresCreateOwnedSequence", func(t *testing.T) {
+		instruction := &PostgresCreateOwnedSequenceInstruction{
+			Name:       "users_id_seq",
+			TableName:  "users",
+			ColumnName: "id",
+		}
+
+		require.Equal(t,
+			`CREATE SEQUENCE "users_id_seq" OWNED BY "users"."id";`,
+			instruction.String())
+	})
+
 	t.Run("PostgresCreateSequence", func(t *testing.T) {
 		instruction := &PostgresCreateSequenceInstruction{
 			Name:      "counter",

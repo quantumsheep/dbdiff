@@ -19,6 +19,8 @@ type PostgresColumn struct {
 
 	Serial string
 
+	SerialSequenceName string
+
 	Collation string
 
 	// Definition writes no comment, because a column definition accepts none.
@@ -67,6 +69,10 @@ func (c *PostgresColumn) Copy() *PostgresColumn {
 func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 	copy := c.Copy()
 	copy.Name = other.Name
+
+	// A rename of the table keeps the old sequence name, and the name alone changes
+	// no behavior.
+	copy.SerialSequenceName = other.SerialSequenceName
 
 	return *copy == *other
 }

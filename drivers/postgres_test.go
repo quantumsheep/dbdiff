@@ -810,10 +810,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "users",
 				Columns: []*PostgresColumn{
 					{
-						Name:    "id",
-						Type:    "integer",
-						NotNull: true,
-						Serial:  "serial",
+						Name:               "id",
+						Type:               "integer",
+						NotNull:            true,
+						Serial:             "serial",
+						SerialSequenceName: "users_id_seq",
 					},
 					{
 						Name: "name",
@@ -852,10 +853,11 @@ func TestPostgresDriver(t *testing.T) {
 				Actions: []AlterTableAction{
 					&PostgresAddColumnAction{
 						Column: &PostgresColumn{
-							Name:    "id",
-							Type:    "bigint",
-							NotNull: true,
-							Serial:  "bigserial",
+							Name:               "id",
+							Type:               "bigint",
+							NotNull:            true,
+							Serial:             "bigserial",
+							SerialSequenceName: "users_id_seq",
 						},
 					},
 				},
@@ -1543,6 +1545,63 @@ func TestPostgresDriver(t *testing.T) {
 		})
 
 		driver.ExecOnSource(diff)
+	})
+
+	t.Run("MakeAColumnSerial", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id integer);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id serial);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresSetNotNullAction{ColumnName: "id"},
+				},
+			},
+			&PostgresCreateOwnedSequenceInstruction{
+				Name:       "users_id_seq",
+				TableName:  "users",
+				ColumnName: "id",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "id",
+						Expression: `nextval('"users_id_seq"'::regclass)`,
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("MakeASerialColumnPlain", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id serial);`)
+		driver.ExecOnTarget(`CREATE TABLE users (id integer);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresDropNotNullAction{ColumnName: "id"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresDropDefaultAction{ColumnName: "id"},
+				},
+			},
+			&PostgresDropSequenceInstruction{Name: "users_id_seq"},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("AlterIdentityOptions", func(t *testing.T) {
@@ -2941,10 +3000,11 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "users",
 				Columns: []*PostgresColumn{
 					{
-						Name:    "id",
-						Type:    "integer",
-						NotNull: true,
-						Serial:  "serial",
+						Name:               "id",
+						Type:               "integer",
+						NotNull:            true,
+						Serial:             "serial",
+						SerialSequenceName: "users_id_seq",
 					},
 				},
 			},

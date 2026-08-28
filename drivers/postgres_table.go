@@ -1,6 +1,7 @@
 package drivers
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -217,6 +218,30 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				instructions = append(instructions,
 					alterTable(&PostgresDropDefaultAction{ColumnName: targetColumn.Name}))
 			}
+		}
+
+		// The serial word owns a sequence and gives the default, and PostgreSQL holds no
+		// single action for it.
+		if targetColumn.Serial != "" && sourceColumn.Serial == "" {
+			sequenceName := t.Name + "_" + targetColumn.Name + "_seq"
+
+			instructions = append(instructions, &PostgresCreateOwnedSequenceInstruction{
+				Name:       sequenceName,
+				TableName:  t.Name,
+				ColumnName: targetColumn.Name,
+			})
+			instructions = append(instructions, alterTable(&PostgresSetDefaultAction{
+				ColumnName: targetColumn.Name,
+				Expression: fmt.Sprintf("nextval('%s'::regclass)", QuoteIdentifier(sequenceName)),
+			}))
+		}
+
+		if targetColumn.Serial == "" && sourceColumn.Serial != "" {
+			instructions = append(instructions,
+				alterTable(&PostgresDropDefaultAction{ColumnName: targetColumn.Name}))
+			instructions = append(instructions, &PostgresDropSequenceInstruction{
+				Name: sourceColumn.SerialSequenceName,
+			})
 		}
 
 		// A TYPE action gives the column the storage mode of the new type, so this action always
