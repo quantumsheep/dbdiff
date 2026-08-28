@@ -289,8 +289,8 @@ func migrationStateError(entries []*MigrationEntry) error {
 	})
 
 	return fmt.Errorf("the migrations of the database need attention: %s. "+
-		"A changed file or a missing file needs the file of the record. "+
+		"The command migrate repair updates a changed row, and it deletes a missing row. "+
 		"An out of order file needs a delete and a new generate. "+
-		"A dirty file is half applied. Repair the database, and delete the history row of the file",
+		"A dirty file is half applied. Repair the database first, and migrate repair then deletes its row",
 		strings.Join(messages, ", "))
 }

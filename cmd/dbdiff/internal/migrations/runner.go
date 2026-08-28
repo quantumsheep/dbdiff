@@ -233,6 +233,62 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 	return nil
 }
 
+// RunMigrationRepair makes the record agree with the files. A changed row takes the
+// checksum of its file. A missing row and a dirty row go away. An out of order file
+// needs a new generate, so repair does not touch it.
+func RunMigrationRepair(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
+	output io.Writer) error {
+	err := migrator.Lock(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to take the migration lock: %w", err)
+	}
+
+	defer func() { _ = migrator.Unlock(ctx) }()
+
+	set, err = reloadMigrationSet(ctx, migrator, set)
+	if err != nil {
+		return err
+	}
+
+	repaired := 0
+
+	for _, entry := range set.Entries {
+		switch entry.State {
+		case coremigrations.MigrationChanged:
+			err = migrator.UpdateChecksum(ctx, entry.Migration)
+			if err != nil {
+				return fmt.Errorf("failed to update the checksum of %s: %w", entry.FileName(), err)
+			}
+
+			_, _ = fmt.Fprintf(output, "Updated the checksum of %s.\n", entry.FileName())
+			repaired++
+		case coremigrations.MigrationMissing:
+			err = migrator.DeleteRecord(ctx, entry.Migration.Version)
+			if err != nil {
+				return fmt.Errorf("failed to delete the row of %s: %w", entry.FileName(), err)
+			}
+
+			_, _ = fmt.Fprintf(output, "Deleted the row of %s.\n", entry.FileName())
+			repaired++
+		case coremigrations.MigrationDirty:
+			err = migrator.DeleteRecord(ctx, entry.Migration.Version)
+			if err != nil {
+				return fmt.Errorf("failed to delete the row of %s: %w", entry.FileName(), err)
+			}
+
+			_, _ = fmt.Fprintf(output, "Deleted the dirty row of %s. The next up runs the whole file again.\n",
+				entry.FileName())
+			repaired++
+		}
+	}
+
+	if repaired == 0 {
+		_, _ = fmt.Fprintln(output, "The record needs no repair.")
+	}
+
+	return nil
+}
+
 // Another process can apply a file between the first read of the state and the lock, so
 // this second read builds the set again under the lock.
 func reloadMigrationSet(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) (*coremigrations.MigrationSet, error) {
@@ -316,8 +372,8 @@ func applyOneMigrationWithoutTransaction(ctx context.Context, migrator coremigra
 		err = transaction.Apply(ctx, statement)
 		if err != nil {
 			return fmt.Errorf("%s failed, and the statements before the failure stay applied. "+
-				"Repair the database, and delete the history row of the version %s: %w",
-				entry.FileName(), entry.Migration.Version, err)
+				"Repair the database, and run migrate repair: %w",
+				entry.FileName(), err)
 		}
 	}
 

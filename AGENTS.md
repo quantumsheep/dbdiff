@@ -74,7 +74,7 @@ dbdiff/
 │   │                    [Package names](#package-names).
 │   ├── internal/helpers/ Version and OnUsageError, which every command reads
 │   ├── internal/drivers/ NewDriver, the one driver switch of the program
-│   ├── internal/migrations/ The functions of the six migrate commands
+│   ├── internal/migrations/ The functions of the seven migrate commands
 │   └── internal/clitest/ The helpers that build the binary and run it
 ├── drivers/             One package. It holds every driver and every schema model.
 ├── internal/migrations/ One package. It holds the migration files and the migrators.
@@ -159,7 +159,7 @@ this package reads a flag, writes to a stream, or asks a question:
 ```
 cmd/dbdiff/internal/migrations/
 ├── command.go                  GetMigrationConfigFromCommand and OpenSet
-├── runner.go                   LoadMigrationSet, and the functions of status, preview, up, step, and verify
+├── runner.go                   LoadMigrationSet, and the functions of status, preview, up, step, verify, and repair
 └── runner_test.go              The tests of status, preview, up, step, and verify
 ```
 
@@ -220,7 +220,7 @@ Each subcommand of `migrate` writes its flags in its own
 `Command` function, and the `migrate` command itself declares no flag. A flag holds the
 value that the parser writes into it, so each command needs its own instances. With the
 flags on each subcommand, the help of that subcommand names them. A change of the text of
-one of the three migration flags touches each of the six files.
+one of the three migration flags touches each of the seven files.
 
 The SQLite driver needs CGO, because `go-sqlite3` is a C binding. If a build fails with an
 undefined symbol, set `CGO_ENABLED=1` before the build.
@@ -793,7 +793,7 @@ package.
 
 The `migrate` command group gives the word `source` to the directory of the migration
 files. It gives the word `target` to the other side: the wanted schema of `generate`, and
-the database that the five other commands change. The `--target` flag takes the value of
+the database that the six other commands change. The `--target` flag takes the value of
 the `DBDIFF_TARGET` variable when the flag and the `target` key of `dbdiff.yaml` both hold
 no value.
 

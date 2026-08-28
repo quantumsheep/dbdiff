@@ -75,6 +75,7 @@ dbdiff takes seven commands:
 | `dbdiff migrate up`                | Apply every pending migration                                     |
 | `dbdiff migrate step`              | Apply every pending migration, and ask before each file           |
 | `dbdiff migrate verify`            | Compare the database against the replay of the applied migrations |
+| `dbdiff migrate repair`            | Make the history table agree with the migration files            |
 
 A command line with no command name runs the `diff` command:
 
@@ -90,7 +91,7 @@ Both lines give the same result. A database file named `migrate` needs the form
 dbdiff ./migrate final.sqlite
 ```
 
-Read [Migrations](#migrations) for the six commands of `migrate`. The rest of this section
+Read [Migrations](#migrations) for the seven commands of `migrate`. The rest of this section
 covers `diff`.
 
 `diff` takes two arguments:
@@ -163,14 +164,14 @@ DROP TABLE "audit";
 dbdiff --version
 ```
 
-### `migrate generate`, `migrate status`, `migrate preview`, `migrate up`, `migrate step`, and `migrate verify`
+### `migrate generate`, `migrate status`, `migrate preview`, `migrate up`, `migrate step`, `migrate verify`, and `migrate repair`
 
 | Flag           | Value                   | Purpose                                                                                                |
 | -------------- | ----------------------- | --------------------------------------------------------------------------------------------------------- |
 | `--config`     | A file path             | Name the configuration file. The default value is `dbdiff.yaml` of the working directory.                 |
 | `--driver`     | `sqlite3` or `postgres` | Select the database engine. This flag overrides the key `driver` of the configuration file.               |
 | `--source`     | A directory             | Name the directory of the migration files. This flag overrides the key `source` of the configuration file. |
-| `--target`     | A database, a `.sql` file, or a directory of `.sql` files | Name the target. For `generate`, the target is the wanted schema. For the five other commands, the target is the database that the migrations change. This flag overrides the key `target` of the configuration file. |
+| `--target`     | A database, a `.sql` file, or a directory of `.sql` files | Name the target. For `generate`, the target is the wanted schema. For the six other commands, the target is the database that the migrations change. This flag overrides the key `target` of the configuration file. |
 | `--schema`     | A schema name           | Name the schema that the postgres driver reads. This flag overrides the key `schema` of the configuration file. |
 
 `migrate preview` also accepts one flag of its own:
@@ -632,6 +633,11 @@ The database holds the schema of the migrations.
 
 When `verify` finds a difference, it prints the difference and exits with the code 1. A
 pipeline can use `migrate verify` as a gate.
+
+`migrate repair` makes the history table agree with the migration files. It updates the
+checksum of a `changed` row, and it deletes a `missing` row and a `dirty` row. A `dirty`
+row names a half-applied file. Repair the database before you run the command, because
+the next `up` runs the whole file again.
 
 ### The migration file
 

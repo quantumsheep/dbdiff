@@ -193,6 +193,24 @@ func (m *PostgresMigrator) ClearDirty(ctx context.Context, migration *Migration)
 	return err
 }
 
+func (m *PostgresMigrator) UpdateChecksum(ctx context.Context, migration *Migration) error {
+	statement := fmt.Sprintf(`UPDATE %s SET "checksum" = $1 WHERE "version" = $2;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement, migration.Checksum, migration.Version)
+
+	return err
+}
+
+func (m *PostgresMigrator) DeleteRecord(ctx context.Context, version string) error {
+	statement := fmt.Sprintf(`DELETE FROM %s WHERE "version" = $1;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement, version)
+
+	return err
+}
+
 func (m *PostgresMigrator) Lock(ctx context.Context) error {
 	_, err := m.Connection.ExecContext(ctx, "SELECT pg_advisory_lock($1);", postgresMigrationLockKey)
 

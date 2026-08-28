@@ -27,6 +27,8 @@ type Migrator interface {
 	Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error)
 	RecordDirty(ctx context.Context, migration *Migration) error
 	ClearDirty(ctx context.Context, migration *Migration) error
+	UpdateChecksum(ctx context.Context, migration *Migration) error
+	DeleteRecord(ctx context.Context, version string) error
 }
 
 type migrationExecutor interface {

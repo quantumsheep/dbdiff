@@ -242,6 +242,24 @@ func (m *SQLiteMigrator) ClearDirty(ctx context.Context, migration *Migration) e
 	return err
 }
 
+func (m *SQLiteMigrator) UpdateChecksum(ctx context.Context, migration *Migration) error {
+	statement := fmt.Sprintf(`UPDATE %s SET "checksum" = ? WHERE "version" = ?;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement, migration.Checksum, migration.Version)
+
+	return err
+}
+
+func (m *SQLiteMigrator) DeleteRecord(ctx context.Context, version string) error {
+	statement := fmt.Sprintf(`DELETE FROM %s WHERE "version" = ?;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement, version)
+
+	return err
+}
+
 func (t *SQLiteMigrationTransaction) Commit() error {
 	if t.Transaction == nil {
 		return nil

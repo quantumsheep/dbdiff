@@ -364,6 +364,109 @@ func TestApplyMigrations(t *testing.T) {
 	})
 }
 
+func TestRunMigrationRepair(t *testing.T) {
+	t.Run("AChangedFileTakesTheChecksumOfTheFile", func(t *testing.T) {
+		migrator := coremigrations.NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		coremigrations.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, io.Discard))
+
+		coremigrations.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\n")
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, coremigrations.MigrationChanged, set.Entries[0].State)
+
+		output := &bytes.Buffer{}
+		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.Contains(t, output.String(), "Updated the checksum")
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, coremigrations.MigrationApplied, set.Entries[0].State)
+	})
+
+	t.Run("AMissingFileLosesItsRow", func(t *testing.T) {
+		migrator := coremigrations.NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		coremigrations.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, io.Discard))
+
+		require.NoError(t, os.Remove(filepath.Join(directory, "20260814101500_init.sql")))
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, coremigrations.MigrationMissing, set.Entries[0].State)
+
+		output := &bytes.Buffer{}
+		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.Contains(t, output.String(), "Deleted the row")
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Empty(t, set.Entries)
+	})
+
+	t.Run("ADirtyFileLosesItsRow", func(t *testing.T) {
+		migrator := coremigrations.NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		coremigrations.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"-- dbdiff:no-transaction\n"+
+				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
+				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Error(t, ApplyMigrations(t.Context(), migrator, set, io.Discard))
+
+		_, err = migrator.Connection.ExecContext(t.Context(), "DROP TABLE users;")
+		require.NoError(t, err)
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, coremigrations.MigrationDirty, set.Entries[0].State)
+
+		output := &bytes.Buffer{}
+		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.Contains(t, output.String(), "Deleted the dirty row")
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, coremigrations.MigrationPending, set.Entries[0].State)
+	})
+
+	t.Run("ACleanRecordNeedsNoRepair", func(t *testing.T) {
+		migrator := coremigrations.NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		coremigrations.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, io.Discard))
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		output := &bytes.Buffer{}
+		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.Contains(t, output.String(), "The record needs no repair.")
+	})
+}
+
 func TestStepMigration(t *testing.T) {
 	writeTwoFiles := func(tb testing.TB, directory string) {
 		tb.Helper()
