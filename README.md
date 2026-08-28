@@ -2,7 +2,7 @@
 
 # dbdiff
 
-**dbdiff reads the schema of two databases. Then it prints the SQL statements that make the second schema equal to the first one.**
+**dbdiff reads the schema of two databases. Then it prints the SQL statements that make the first schema equal to the second one.**
 
 [![Tests](https://github.com/quantumsheep/dbdiff/actions/workflows/test.yaml/badge.svg)](https://github.com/quantumsheep/dbdiff/actions/workflows/test.yaml)
 [![Release](https://img.shields.io/github/v/release/quantumsheep/dbdiff?label=release)](https://github.com/quantumsheep/dbdiff/releases)
@@ -15,8 +15,8 @@
 $ dbdiff current.sqlite final.sqlite
 ALTER TABLE "users" ADD COLUMN "created_at" TEXT;
 CREATE INDEX "users_email" ON "users" ("email");
-CREATE VIEW active_users AS SELECT id, email FROM users;
 DROP TABLE "audit";
+CREATE VIEW active_users AS SELECT id, email FROM users;
 ```
 
 - **Two engines.** dbdiff supports SQLite and PostgreSQL.
@@ -190,6 +190,7 @@ If you give no `--driver` flag, dbdiff reads the engine from the source and the 
 | A path with the prefix `sqlite://`                          | `sqlite3`  |
 | A URL with the prefix `postgres://` or `postgresql://`      | `postgres` |
 | A connection string of the form `host=localhost dbname=app` | `postgres` |
+| A URL with another scheme, for example `mysql://`           | none       |
 | A `.sql` file or a directory                                | none       |
 | Another path                                                | `sqlite3`  |
 
@@ -680,9 +681,11 @@ file. A rollback cannot undo such a file, so `preview --run` never applies it.
 ### The history table
 
 `dbdiff migrate` records each applied file in the table `dbdiff_migrations`, with the
-columns `version`, `name`, `checksum`, and `applied_at`. The checksum detects a file that
-changed after its migration ran. `migrate status` and `migrate verify` report such a file
-as `changed`.
+columns `version`, `name`, `checksum`, `applied_at`, and `dirty`. The checksum detects a
+file that changed after its migration ran. `migrate status` and `migrate verify` report
+such a file as `changed`. The `dirty` column marks a file with the no-transaction
+directive that failed in the middle. `migrate status` reports such a file as `dirty`, and
+`migrate up` refuses to run until you repair the database and delete the row.
 
 ## Supported objects
 
@@ -690,7 +693,7 @@ as `changed`.
 | --------------- | --------------------------------------- | ---------- |
 | Tables          | ✅                                      | ✅         |
 | Identity columns  | ➖                                    | ✅         |
-| Table options     | ✅ (WITHOUT ROWID, STRICT)            | ➖         |
+| Table options     | ✅ (WITHOUT ROWID, STRICT)            | ✅ (storage parameters) |
 | Virtual tables    | ✅                                    | ➖         |
 | Generated columns | ✅                                    | ✅         |
 | Column storage and statistics | ➖                        | ✅         |
