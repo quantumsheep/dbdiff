@@ -357,6 +357,24 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, `Drop the function "subtract"`, instruction.Comment())
 	})
 
+	t.Run("PostgresDetachPartition", func(t *testing.T) {
+		instruction := &PostgresDetachPartitionInstruction{
+			ParentName:    "measurements",
+			PartitionName: "measurements_low",
+		}
+
+		require.Equal(t, `Detach the partition of the table "measurements"`, instruction.Comment())
+	})
+
+	t.Run("PostgresAttachPartition", func(t *testing.T) {
+		instruction := &PostgresAttachPartitionInstruction{
+			ParentName:    "measurements",
+			PartitionName: "measurements_low",
+		}
+
+		require.Equal(t, `Attach the partition of the table "measurements"`, instruction.Comment())
+	})
+
 	t.Run("PostgresCreateProcedure", func(t *testing.T) {
 		instruction := &PostgresCreateProcedureInstruction{
 			Definition: "CREATE OR REPLACE PROCEDURE audit(entry text)\n LANGUAGE sql\nAS $procedure$ SELECT 1 $procedure$",

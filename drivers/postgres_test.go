@@ -3878,6 +3878,34 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("ChangeAPartitionBound", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (200);
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDetachPartitionInstruction{
+				ParentName:    "measurements",
+				PartitionName: "measurements_low",
+			},
+			&PostgresAttachPartitionInstruction{
+				ParentName:    "measurements",
+				PartitionName: "measurements_low",
+				Bound:         "FOR VALUES FROM (0) TO (200)",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CompareRowsOfAPartitionedTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true

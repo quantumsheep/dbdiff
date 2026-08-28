@@ -880,6 +880,29 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresDetachPartition", func(t *testing.T) {
+		instruction := &PostgresDetachPartitionInstruction{
+			ParentName:    "measurements",
+			PartitionName: "measurements_low",
+		}
+
+		require.Equal(t,
+			`ALTER TABLE "measurements" DETACH PARTITION "measurements_low";`,
+			instruction.String())
+	})
+
+	t.Run("PostgresAttachPartition", func(t *testing.T) {
+		instruction := &PostgresAttachPartitionInstruction{
+			ParentName:    "measurements",
+			PartitionName: "measurements_low",
+			Bound:         "FOR VALUES FROM (0) TO (200)",
+		}
+
+		require.Equal(t,
+			`ALTER TABLE "measurements" ATTACH PARTITION "measurements_low" FOR VALUES FROM (0) TO (200);`,
+			instruction.String())
+	})
+
 	t.Run("PostgresAlterTableInherit", func(t *testing.T) {
 		instruction := &PostgresAlterTableInstruction{
 			Name: "children",

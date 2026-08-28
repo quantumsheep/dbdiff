@@ -129,6 +129,35 @@ func (a *PostgresSetIdentityAction) TableActionClause() string {
 		QuoteIdentifier(a.ColumnName), a.Identity)
 }
 
+type PostgresDetachPartitionInstruction struct {
+	ParentName    string
+	PartitionName string
+}
+
+func (i *PostgresDetachPartitionInstruction) String() string {
+	return fmt.Sprintf("ALTER TABLE %s DETACH PARTITION %s;",
+		QuoteIdentifier(i.ParentName), QuoteIdentifier(i.PartitionName))
+}
+
+func (i *PostgresDetachPartitionInstruction) Comment() string {
+	return ownedObjectComment("Detach", "partition", "table", i.ParentName)
+}
+
+type PostgresAttachPartitionInstruction struct {
+	ParentName    string
+	PartitionName string
+	Bound         string
+}
+
+func (i *PostgresAttachPartitionInstruction) String() string {
+	return fmt.Sprintf("ALTER TABLE %s ATTACH PARTITION %s %s;",
+		QuoteIdentifier(i.ParentName), QuoteIdentifier(i.PartitionName), i.Bound)
+}
+
+func (i *PostgresAttachPartitionInstruction) Comment() string {
+	return ownedObjectComment("Attach", "partition", "table", i.ParentName)
+}
+
 type PostgresInheritAction struct {
 	ParentName string
 }

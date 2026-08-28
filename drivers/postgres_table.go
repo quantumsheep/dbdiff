@@ -165,6 +165,26 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	var instructions []Instruction
 
 	// A partition holds the columns, the constraints, and the indexes of its parent.
+	// A partition takes the columns, the constraints, and the indexes of its parent.
+	// A new bound or a new parent needs a detach and an attach, because PostgreSQL
+	// holds no action that changes a bound in place.
+	if t.IsPartition() && other.IsPartition() {
+		if t.PartitionParent != other.PartitionParent || t.PartitionBound != other.PartitionBound {
+			instructions = append(instructions,
+				&PostgresDetachPartitionInstruction{
+					ParentName:    other.PartitionParent,
+					PartitionName: t.Name,
+				},
+				&PostgresAttachPartitionInstruction{
+					ParentName:    t.PartitionParent,
+					PartitionName: t.Name,
+					Bound:         t.PartitionBound,
+				})
+		}
+
+		return instructions, nil
+	}
+
 	if t.IsPartition() || other.IsPartition() {
 		return nil, nil
 	}
