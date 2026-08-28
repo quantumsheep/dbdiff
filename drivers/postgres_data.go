@@ -244,7 +244,8 @@ func (d *PostgresDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tab
 	return columnNames, nil
 }
 
-// PostgreSQL gives no stable order, so this sort keeps the output equal between two runs.
+// PostgreSQL gives no stable order, so the ORDER BY clause keeps the output equal
+// between two runs.
 func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName string, columnNames []string, primaryKeyColumnNames []string) (*PostgresTableData, error) {
 	statement := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s;",
 		strings.Join(QuoteIdentifiers(columnNames), ", "),

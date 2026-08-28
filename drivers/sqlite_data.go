@@ -175,7 +175,8 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 	return slices.Concat(insertions, modifications), removals, nil
 }
 
-// SQLite gives no stable order, so this sort keeps the output equal between two runs.
+// SQLite gives no stable order, so the ORDER BY clause keeps the output equal
+// between two runs.
 // SQLite computes a generated column, and it refuses a value for that column.
 func writableSQLiteColumnNames(columns []*SQLiteColumn) []string {
 	writable := lo.Filter(columns, func(column *SQLiteColumn, _ int) bool {
