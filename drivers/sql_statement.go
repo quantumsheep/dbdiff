@@ -17,11 +17,20 @@ func FileUsesTransaction(content string) bool {
 // PostgreSQL runs the statements of one call in an implicit transaction block, and it
 // refuses CREATE INDEX CONCURRENTLY there. A file that holds the directive takes one call
 // for each statement for that reason, and every other file runs in one call.
+//
+// A semicolon splits nothing inside parentheses, because the actions of CREATE RULE sit
+// there. It splits nothing inside BEGIN ... END, because the body of a trigger of SQLite
+// and the body of BEGIN ATOMIC hold whole statements. A CASE expression ends with END
+// too, so the block counter reads CASE as an opener.
 func SplitSQLStatements(content string) []string {
 	var statements []string
 
 	start := 0
 	index := 0
+
+	parenthesisDepth := 0
+	blockDepth := 0
+	triggerStatement := false
 
 	for index < len(content) {
 		rest := content[index:]
@@ -35,16 +44,82 @@ func SplitSQLStatements(content string) []string {
 			index = endOfQuotedText(content, index)
 		case content[index] == '$':
 			index = endOfDollarQuotedText(content, index)
-		case content[index] == ';':
+		case content[index] == '(':
+			parenthesisDepth++
+			index++
+		case content[index] == ')':
+			parenthesisDepth--
+			index++
+		case isSQLWordStart(content[index]):
+			word, end := readSQLWord(content, index)
+
+			switch {
+			case word == "trigger" && blockDepth == 0:
+				triggerStatement = true
+			case word == "begin" && blockDepth == 0 &&
+				(triggerStatement || nextSQLWord(content, end) == "atomic"):
+				blockDepth++
+			case word == "case" && blockDepth > 0:
+				blockDepth++
+			case word == "end" && blockDepth > 0:
+				blockDepth--
+			}
+
+			index = end
+		case content[index] == ';' && parenthesisDepth == 0 && blockDepth == 0:
 			statements = appendStatement(statements, content[start:index])
 			index++
 			start = index
+			triggerStatement = false
 		default:
 			index++
 		}
 	}
 
 	return appendStatement(statements, content[start:])
+}
+
+func isSQLWordStart(letter byte) bool {
+	return letter == '_' ||
+		(letter >= 'a' && letter <= 'z') ||
+		(letter >= 'A' && letter <= 'Z')
+}
+
+func readSQLWord(content string, index int) (string, int) {
+	end := index
+
+	for end < len(content) {
+		letter := content[end]
+
+		isWordLetter := isSQLWordStart(letter) || (letter >= '0' && letter <= '9')
+		if !isWordLetter {
+			break
+		}
+
+		end++
+	}
+
+	return strings.ToLower(content[index:end]), end
+}
+
+func nextSQLWord(content string, index int) string {
+	for index < len(content) {
+		letter := content[index]
+
+		if letter != ' ' && letter != '\t' && letter != '\n' && letter != '\r' {
+			break
+		}
+
+		index++
+	}
+
+	if index >= len(content) || !isSQLWordStart(content[index]) {
+		return ""
+	}
+
+	word, _ := readSQLWord(content, index)
+
+	return word
 }
 
 func appendStatement(statements []string, statement string) []string {

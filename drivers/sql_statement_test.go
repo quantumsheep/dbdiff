@@ -94,4 +94,47 @@ func TestSplitSQLStatements(t *testing.T) {
 	t.Run("NoStatement", func(t *testing.T) {
 		require.Empty(t, SplitSQLStatements("\n  \n;;\n"))
 	})
+
+	t.Run("ATriggerBodyHoldsSemicolons", func(t *testing.T) {
+		content := "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; SELECT 2; END;\nVACUUM;"
+
+		require.Equal(t, []string{
+			"CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; SELECT 2; END",
+			"VACUUM",
+		}, SplitSQLStatements(content))
+	})
+
+	t.Run("ATriggerBodyHoldsACaseExpression", func(t *testing.T) {
+		content := "CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT CASE WHEN NEW.id > 0 THEN 1 ELSE 2 END; END;\nVACUUM;"
+
+		statements := SplitSQLStatements(content)
+		require.Len(t, statements, 2)
+		require.Contains(t, statements[0], "ELSE 2 END; END")
+	})
+
+	t.Run("ARuleHoldsTwoActions", func(t *testing.T) {
+		content := "CREATE RULE r AS ON DELETE TO users DO INSTEAD (SELECT 1; SELECT 2);\nVACUUM;"
+
+		require.Equal(t, []string{
+			"CREATE RULE r AS ON DELETE TO users DO INSTEAD (SELECT 1; SELECT 2)",
+			"VACUUM",
+		}, SplitSQLStatements(content))
+	})
+
+	t.Run("AnAtomicBodyHoldsSemicolons", func(t *testing.T) {
+		content := "CREATE FUNCTION one() RETURNS integer BEGIN ATOMIC SELECT 1; END;\nVACUUM;"
+
+		require.Equal(t, []string{
+			"CREATE FUNCTION one() RETURNS integer BEGIN ATOMIC SELECT 1; END",
+			"VACUUM",
+		}, SplitSQLStatements(content))
+	})
+
+	t.Run("ATransactionOfTheUserSplits", func(t *testing.T) {
+		require.Equal(t, []string{
+			"BEGIN",
+			"SELECT 1",
+			"COMMIT",
+		}, SplitSQLStatements("BEGIN;\nSELECT 1;\nCOMMIT;"))
+	})
 }
