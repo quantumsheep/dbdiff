@@ -3523,6 +3523,38 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsWithAnInfiniteValue", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE readings (id INTEGER PRIMARY KEY, value REAL);`
+
+		driver.ExecOnSource(schema)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO readings (id, value) VALUES (1, 9e999), (2, -9e999), (3, 1.5);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "readings",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"1", "9e999"},
+			},
+			&SQLInsertInstruction{
+				TableName:   "readings",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"2", "-9e999"},
+			},
+			&SQLInsertInstruction{
+				TableName:   "readings",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"3", "1.5"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CompareRowsOfATableWithTheKeyOnAnotherColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true

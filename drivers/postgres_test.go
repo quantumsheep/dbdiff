@@ -4226,6 +4226,43 @@ func TestPostgresDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsWithSpecialFloatValues", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE readings (id integer PRIMARY KEY, value double precision);`
+
+		driver.ExecOnSource(schema)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO readings (id, value) VALUES (1, 'NaN'), (2, 'Infinity'), (3, '-Infinity'), (4, 1.5);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "readings",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"1", "'NaN'"},
+			},
+			&SQLInsertInstruction{
+				TableName:   "readings",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"2", "'Infinity'"},
+			},
+			&SQLInsertInstruction{
+				TableName:   "readings",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"3", "'-Infinity'"},
+			},
+			&SQLInsertInstruction{
+				TableName:   "readings",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"4", "1.5"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CompareRowsOfATableWithTheKeyOnAnotherColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true

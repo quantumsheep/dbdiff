@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -319,6 +320,17 @@ func formatPostgresValue(value any, databaseTypeName string) string {
 
 	doubleValue, isDouble := value.(float64)
 	if isDouble {
+		// The bare words NaN and Inf parse as identifiers, so these values take the
+		// string form that PostgreSQL reads.
+		switch {
+		case math.IsNaN(doubleValue):
+			return "'NaN'"
+		case math.IsInf(doubleValue, 1):
+			return "'Infinity'"
+		case math.IsInf(doubleValue, -1):
+			return "'-Infinity'"
+		}
+
 		return strconv.FormatFloat(doubleValue, 'g', -1, 64)
 	}
 

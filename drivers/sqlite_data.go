@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -261,6 +262,16 @@ func formatSQLiteValue(value any) string {
 
 	realValue, isReal := value.(float64)
 	if isReal {
+		// SQLite stores no NaN, and it reads the literal 9e999 as the infinite value.
+		switch {
+		case math.IsNaN(realValue):
+			return sqlNullLiteral
+		case math.IsInf(realValue, 1):
+			return "9e999"
+		case math.IsInf(realValue, -1):
+			return "-9e999"
+		}
+
 		return strconv.FormatFloat(realValue, 'g', -1, 64)
 	}
 
