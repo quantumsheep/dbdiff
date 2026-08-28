@@ -1110,6 +1110,30 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CreateTableWithAUniqueConstraintConflict", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`CREATE TABLE items (code INTEGER, UNIQUE (code) ON CONFLICT REPLACE);`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "items",
+				Columns: []*SQLiteColumn{
+					{
+						Name:           "code",
+						Type:           "INTEGER",
+						Unique:         true,
+						UniqueConflict: "REPLACE",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CreateTableWithoutSpacesBeforeTheParentheses", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

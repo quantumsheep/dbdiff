@@ -297,6 +297,12 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		})
 		if found {
 			matchingColumn.Unique = true
+
+			// The table form of the constraint holds the ON CONFLICT clause, and the
+			// column keeps it.
+			if matchingColumn.UniqueConflict == "" {
+				matchingColumn.UniqueConflict = parsed.UniqueConflictOf(key)
+			}
 		}
 	}
 
