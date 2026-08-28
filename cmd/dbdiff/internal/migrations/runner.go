@@ -256,30 +256,65 @@ func applyOneMigration(ctx context.Context, migrator coremigrations.Migrator, en
 		return err
 	}
 
-	transaction, err := migrator.Begin(ctx, drivers.FileUsesTransaction(content))
+	if !drivers.FileUsesTransaction(content) {
+		return applyOneMigrationWithoutTransaction(ctx, migrator, entry, content, output)
+	}
+
+	transaction, err := migrator.Begin(ctx, true)
 	if err != nil {
 		return err
 	}
 
-	for _, statement := range statementsOf(content) {
-		err = transaction.Apply(ctx, statement)
-		if err != nil {
-			_ = transaction.Rollback()
+	err = transaction.Apply(ctx, content)
+	if err != nil {
+		_ = transaction.Rollback()
 
-			return fmt.Errorf("%s failed: %w", entry.FileName(), err)
-		}
+		return fmt.Errorf("%s failed: %w", entry.FileName(), err)
 	}
 
 	err = transaction.Record(ctx, entry.Migration)
 	if err != nil {
 		_ = transaction.Rollback()
 
-		return err
+		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
 	}
 
 	err = transaction.Commit()
 	if err != nil {
+		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+	}
+
+	_, _ = fmt.Fprintf(output, "Applied %s.\n", entry.FileName())
+
+	return nil
+}
+
+// The dirty row keeps a half apply visible, and its primary key stops a second process
+// that runs the same file.
+func applyOneMigrationWithoutTransaction(ctx context.Context, migrator coremigrations.Migrator,
+	entry *coremigrations.MigrationEntry, content string, output io.Writer) error {
+	err := migrator.RecordDirty(ctx, entry.Migration)
+	if err != nil {
+		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+	}
+
+	transaction, err := migrator.Begin(ctx, false)
+	if err != nil {
 		return err
+	}
+
+	for _, statement := range drivers.SplitSQLStatements(content) {
+		err = transaction.Apply(ctx, statement)
+		if err != nil {
+			return fmt.Errorf("%s failed, and the statements before the failure stay applied. "+
+				"Repair the database, and delete the history row of the version %s: %w",
+				entry.FileName(), entry.Migration.Version, err)
+		}
+	}
+
+	err = migrator.ClearDirty(ctx, entry.Migration)
+	if err != nil {
+		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
 	}
 
 	_, _ = fmt.Fprintf(output, "Applied %s.\n", entry.FileName())
@@ -350,12 +385,4 @@ func readStepAnswer(reader *bufio.Reader, output io.Writer) (string, error) {
 
 		_, _ = fmt.Fprintln(output, "  Answer a, r, or q.")
 	}
-}
-
-func statementsOf(content string) []string {
-	if drivers.FileUsesTransaction(content) {
-		return []string{content}
-	}
-
-	return drivers.SplitSQLStatements(content)
 }

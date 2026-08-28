@@ -14,6 +14,7 @@ type AppliedMigration struct {
 	Name      string
 	Checksum  string
 	AppliedAt time.Time
+	Dirty     bool
 }
 
 type Migrator interface {
@@ -23,6 +24,8 @@ type Migrator interface {
 	Lock(ctx context.Context) error
 	Unlock(ctx context.Context) error
 	Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error)
+	RecordDirty(ctx context.Context, migration *Migration) error
+	ClearDirty(ctx context.Context, migration *Migration) error
 }
 
 type migrationExecutor interface {

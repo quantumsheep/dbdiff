@@ -40,13 +40,51 @@ func (m *SQLiteMigrator) EnsureHistoryTable(ctx context.Context) error {
 			"version"    TEXT NOT NULL PRIMARY KEY,
 			"name"       TEXT NOT NULL,
 			"checksum"   TEXT NOT NULL,
-			"applied_at" TEXT NOT NULL
+			"applied_at" TEXT NOT NULL,
+			"dirty"      INTEGER NOT NULL DEFAULT 0
 		);
 	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement)
+	if err != nil {
+		return err
+	}
+
+	return m.ensureDirtyColumn(ctx)
+}
+
+// An older dbdiff created the table without the dirty column.
+func (m *SQLiteMigrator) ensureDirtyColumn(ctx context.Context) error {
+	found, err := m.dirtyColumnExists(ctx)
+	if err != nil {
+		return err
+	}
+
+	if found {
+		return nil
+	}
+
+	statement := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN "dirty" INTEGER NOT NULL DEFAULT 0;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err = m.Connection.ExecContext(ctx, statement)
 
 	return err
+}
+
+func (m *SQLiteMigrator) dirtyColumnExists(ctx context.Context) (bool, error) {
+	row := m.Connection.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pragma_table_info(?) WHERE name = 'dirty');`,
+		drivers.MigrationHistoryTableName)
+
+	found := false
+
+	err := row.Scan(&found)
+	if err != nil {
+		return false, err
+	}
+
+	return found, nil
 }
 
 func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigration, error) {
@@ -59,11 +97,24 @@ func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrat
 		return nil, nil
 	}
 
+	// A read must stay a read, so an old table keeps its columns and the query selects
+	// a constant in the place of the absent one.
+	dirtyColumn := `"dirty"`
+
+	dirtyFound, err := m.dirtyColumnExists(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if !dirtyFound {
+		dirtyColumn = "0"
+	}
+
 	statement := fmt.Sprintf(`
-		SELECT "version", "name", "checksum", "applied_at"
+		SELECT "version", "name", "checksum", "applied_at", %s
 		FROM %s
 		ORDER BY "version";
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, dirtyColumn, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
 
 	rows, err := m.Connection.QueryContext(ctx, statement)
 	if err != nil {
@@ -78,7 +129,7 @@ func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrat
 		var row AppliedMigration
 		var appliedAt string
 
-		err := rows.Scan(&row.Version, &row.Name, &row.Checksum, &appliedAt)
+		err := rows.Scan(&row.Version, &row.Name, &row.Checksum, &appliedAt, &row.Dirty)
 		if err != nil {
 			return nil, err
 		}
@@ -162,6 +213,27 @@ func (t *SQLiteMigrationTransaction) Record(ctx context.Context, migration *Migr
 
 	_, err := t.Executor.ExecContext(ctx, statement,
 		migration.Version, migration.Name, migration.Checksum, time.Now().UTC().Format(time.RFC3339))
+
+	return err
+}
+
+func (m *SQLiteMigrator) RecordDirty(ctx context.Context, migration *Migration) error {
+	statement := fmt.Sprintf(`
+		INSERT INTO %s ("version", "name", "checksum", "applied_at", "dirty")
+		VALUES (?, ?, ?, ?, 1);
+	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement,
+		migration.Version, migration.Name, migration.Checksum, time.Now().UTC().Format(time.RFC3339))
+
+	return err
+}
+
+func (m *SQLiteMigrator) ClearDirty(ctx context.Context, migration *Migration) error {
+	statement := fmt.Sprintf(`UPDATE %s SET "dirty" = 0 WHERE "version" = ?;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement, migration.Version)
 
 	return err
 }

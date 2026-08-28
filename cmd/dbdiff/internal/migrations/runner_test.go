@@ -332,6 +332,36 @@ func TestApplyMigrations(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, applied, 1)
 	})
+
+	t.Run("AFileWithoutATransactionThatFailsInTheMiddle", func(t *testing.T) {
+		migrator := coremigrations.NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		coremigrations.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"-- dbdiff:no-transaction\n"+
+				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
+				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		err = ApplyMigrations(t.Context(), migrator, set, io.Discard)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "stay applied")
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 1)
+		require.True(t, applied[0].Dirty)
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, coremigrations.MigrationDirty, set.Entries[0].State)
+
+		err = ApplyMigrations(t.Context(), migrator, set, io.Discard)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "dirty")
+	})
 }
 
 func TestStepMigration(t *testing.T) {

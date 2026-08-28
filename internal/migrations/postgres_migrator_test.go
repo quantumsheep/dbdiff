@@ -25,6 +25,31 @@ func TestPostgresMigrator(t *testing.T) {
 		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
 	})
 
+	t.Run("RecordDirtyAndClearDirty", func(t *testing.T) {
+		migrator := NewTestPostgresMigrator(t)
+
+		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
+
+		migration := &Migration{
+			Version:  "20260814101500",
+			Name:     "init",
+			Checksum: "aaa",
+		}
+
+		require.NoError(t, migrator.RecordDirty(t.Context(), migration))
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 1)
+		require.True(t, applied[0].Dirty)
+
+		require.NoError(t, migrator.ClearDirty(t.Context(), migration))
+
+		applied, err = migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.False(t, applied[0].Dirty)
+	})
+
 	t.Run("LockAndUnlock", func(t *testing.T) {
 		migrator := NewTestPostgresMigrator(t)
 

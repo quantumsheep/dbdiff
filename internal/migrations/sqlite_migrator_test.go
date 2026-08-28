@@ -32,6 +32,57 @@ func TestSQLiteMigrator(t *testing.T) {
 		require.NoError(t, migrator.Unlock(t.Context()))
 	})
 
+	t.Run("RecordDirtyAndClearDirty", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+
+		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
+
+		migration := &Migration{
+			Version:  "20260814101500",
+			Name:     "init",
+			Checksum: "aaa",
+		}
+
+		require.NoError(t, migrator.RecordDirty(t.Context(), migration))
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 1)
+		require.True(t, applied[0].Dirty)
+
+		require.NoError(t, migrator.ClearDirty(t.Context(), migration))
+
+		applied, err = migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.False(t, applied[0].Dirty)
+	})
+
+	t.Run("EnsureHistoryTableAddsTheDirtyColumnToAnOldTable", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+
+		_, err := migrator.Connection.ExecContext(t.Context(), `
+			CREATE TABLE "dbdiff_migrations" (
+				"version"    TEXT NOT NULL PRIMARY KEY,
+				"name"       TEXT NOT NULL,
+				"checksum"   TEXT NOT NULL,
+				"applied_at" TEXT NOT NULL
+			);
+			INSERT INTO "dbdiff_migrations" VALUES ('20260814101500', 'init', 'aaa', '2026-08-14T10:15:00Z');
+		`)
+		require.NoError(t, err)
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 1)
+		require.False(t, applied[0].Dirty)
+
+		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
+
+		applied, err = migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.False(t, applied[0].Dirty)
+	})
+
 	t.Run("CommitWritesTheStatementAndTheRow", func(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))

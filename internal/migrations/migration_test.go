@@ -200,6 +200,35 @@ func TestMigrationSet(t *testing.T) {
 		require.ErrorContains(t, set.RecordError(), "20260814101500_init")
 	})
 
+	t.Run("Dirty", func(t *testing.T) {
+		set := NewMigrationSet([]*Migration{first}, []AppliedMigration{
+			{
+				Version:  "20260814101500",
+				Name:     "init",
+				Checksum: "aaa",
+				Dirty:    true,
+			},
+		})
+
+		require.Equal(t, MigrationDirty, set.Entries[0].State)
+		require.ErrorContains(t, set.ProblemError(), "dirty")
+		require.ErrorContains(t, set.RecordError(), "half applied")
+	})
+
+	t.Run("DirtyWithoutAFile", func(t *testing.T) {
+		set := NewMigrationSet(nil, []AppliedMigration{
+			{
+				Version:  "20260814101500",
+				Name:     "init",
+				Checksum: "aaa",
+				Dirty:    true,
+			},
+		})
+
+		require.Equal(t, MigrationDirty, set.Entries[0].State)
+		require.ErrorContains(t, set.RecordError(), "20260814101500_init")
+	})
+
 	t.Run("Missing", func(t *testing.T) {
 		set := NewMigrationSet(nil, []AppliedMigration{
 			{

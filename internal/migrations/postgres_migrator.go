@@ -54,11 +54,21 @@ func (m *PostgresMigrator) EnsureHistoryTable(ctx context.Context) error {
 			"version"    text        NOT NULL PRIMARY KEY,
 			"name"       text        NOT NULL,
 			"checksum"   text        NOT NULL,
-			"applied_at" timestamptz NOT NULL DEFAULT now()
+			"applied_at" timestamptz NOT NULL DEFAULT now(),
+			"dirty"      boolean     NOT NULL DEFAULT false
 		);
 	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement)
+	if err != nil {
+		return err
+	}
+
+	// An older dbdiff created the table without the dirty column.
+	statement = fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS "dirty" boolean NOT NULL DEFAULT false;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err = m.Connection.ExecContext(ctx, statement)
 
 	return err
 }
@@ -75,11 +85,24 @@ func (m *PostgresMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigr
 		return nil, nil
 	}
 
+	// A read must stay a read, so an old table keeps its columns and the query selects
+	// a constant in the place of the absent one.
+	dirtyColumn := `"dirty"`
+
+	dirtyFound, err := m.dirtyColumnExists(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if !dirtyFound {
+		dirtyColumn = "false"
+	}
+
 	statement := fmt.Sprintf(`
-		SELECT "version", "name", "checksum", "applied_at"
+		SELECT "version", "name", "checksum", "applied_at", %s
 		FROM %s
 		ORDER BY "version";
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, dirtyColumn, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
 
 	rows, err := m.Connection.QueryContext(ctx, statement)
 	if err != nil {
@@ -93,7 +116,7 @@ func (m *PostgresMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigr
 	for rows.Next() {
 		var row AppliedMigration
 
-		err := rows.Scan(&row.Version, &row.Name, &row.Checksum, &row.AppliedAt)
+		err := rows.Scan(&row.Version, &row.Name, &row.Checksum, &row.AppliedAt, &row.Dirty)
 		if err != nil {
 			return nil, err
 		}
@@ -126,6 +149,48 @@ func (m *PostgresMigrator) historyTableExists(ctx context.Context) (bool, error)
 	}
 
 	return found, nil
+}
+
+func (m *PostgresMigrator) dirtyColumnExists(ctx context.Context) (bool, error) {
+	row := m.Connection.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_attribute a
+			JOIN pg_class c ON c.oid = a.attrelid
+			WHERE c.relnamespace = current_schema()::regnamespace
+			AND c.relname = $1
+			AND a.attname = 'dirty' AND NOT a.attisdropped
+		);
+	`, drivers.MigrationHistoryTableName)
+
+	found := false
+
+	err := row.Scan(&found)
+	if err != nil {
+		return false, err
+	}
+
+	return found, nil
+}
+
+func (m *PostgresMigrator) RecordDirty(ctx context.Context, migration *Migration) error {
+	statement := fmt.Sprintf(`
+		INSERT INTO %s ("version", "name", "checksum", "applied_at", "dirty")
+		VALUES ($1, $2, $3, $4, true);
+	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement,
+		migration.Version, migration.Name, migration.Checksum, time.Now().UTC())
+
+	return err
+}
+
+func (m *PostgresMigrator) ClearDirty(ctx context.Context, migration *Migration) error {
+	statement := fmt.Sprintf(`UPDATE %s SET "dirty" = false WHERE "version" = $1;`,
+		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+
+	_, err := m.Connection.ExecContext(ctx, statement, migration.Version)
+
+	return err
 }
 
 func (m *PostgresMigrator) Lock(ctx context.Context) error {

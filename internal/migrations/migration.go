@@ -138,6 +138,7 @@ const (
 	MigrationChanged    MigrationState = "changed"
 	MigrationMissing    MigrationState = "missing"
 	MigrationOutOfOrder MigrationState = "out of order"
+	MigrationDirty      MigrationState = "dirty"
 )
 
 type MigrationEntry struct {
@@ -201,6 +202,10 @@ func NewMigrationSet(files []*Migration, applied []AppliedMigration) *MigrationS
 			if row.Checksum != file.Checksum {
 				entry.State = MigrationChanged
 			}
+
+			if row.Dirty {
+				entry.State = MigrationDirty
+			}
 		}
 
 		if entry.State == MigrationPending && file.Version < lastAppliedVersion {
@@ -211,13 +216,18 @@ func NewMigrationSet(files []*Migration, applied []AppliedMigration) *MigrationS
 	}
 
 	for _, row := range appliedByVersion {
+		state := MigrationMissing
+		if row.Dirty {
+			state = MigrationDirty
+		}
+
 		entries = append(entries, &MigrationEntry{
 			Migration: &Migration{
 				Version:  row.Version,
 				Name:     row.Name,
 				Checksum: row.Checksum,
 			},
-			State:     MigrationMissing,
+			State:     state,
 			AppliedAt: row.AppliedAt,
 		})
 	}
@@ -243,13 +253,16 @@ func (s *MigrationSet) Problems() []*MigrationEntry {
 	return lo.Filter(s.Entries, func(entry *MigrationEntry, _ int) bool {
 		return entry.State == MigrationChanged ||
 			entry.State == MigrationMissing ||
-			entry.State == MigrationOutOfOrder
+			entry.State == MigrationOutOfOrder ||
+			entry.State == MigrationDirty
 	})
 }
 
 func (s *MigrationSet) RecordError() error {
 	return migrationStateError(lo.Filter(s.Entries, func(entry *MigrationEntry, _ int) bool {
-		return entry.State == MigrationChanged || entry.State == MigrationMissing
+		return entry.State == MigrationChanged ||
+			entry.State == MigrationMissing ||
+			entry.State == MigrationDirty
 	}))
 }
 
@@ -268,6 +281,7 @@ func migrationStateError(entries []*MigrationEntry) error {
 
 	return fmt.Errorf("the migrations of the database need attention: %s. "+
 		"A changed file or a missing file needs the file of the record. "+
-		"An out of order file needs a delete and a new generate",
+		"An out of order file needs a delete and a new generate. "+
+		"A dirty file is half applied. Repair the database, and delete the history row of the file",
 		strings.Join(messages, ", "))
 }
