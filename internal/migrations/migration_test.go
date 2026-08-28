@@ -89,6 +89,16 @@ func TestMigrationIdentity(t *testing.T) {
 		require.Empty(t, migrations)
 	})
 
+	t.Run("ReadDirectoryWithTwoFilesOfOneVersion", func(t *testing.T) {
+		directory := t.TempDir()
+
+		WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;")
+		WriteSQLFile(t, directory, "20260814101500_users.sql", "SELECT 2;")
+
+		_, err := ReadMigrationDirectory(directory)
+		require.ErrorContains(t, err, "hold one version")
+	})
+
 	t.Run("ReadDirectoryWithABadName", func(t *testing.T) {
 		directory := t.TempDir()
 

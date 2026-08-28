@@ -127,6 +127,15 @@ func ReadMigrationDirectory(directory string) ([]*Migration, error) {
 		return strings.Compare(first.Version, second.Version)
 	})
 
+	// The history table holds one row for each version, so a second file of one version
+	// breaks the record.
+	for position := 1; position < len(migrations); position++ {
+		if migrations[position].Version == migrations[position-1].Version {
+			return nil, fmt.Errorf("the files %s and %s hold one version",
+				filepath.Base(migrations[position-1].Path), filepath.Base(migrations[position].Path))
+		}
+	}
+
 	return migrations, nil
 }
 
