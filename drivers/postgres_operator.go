@@ -6,10 +6,16 @@ import (
 )
 
 type PostgresOperator struct {
-	Name          string
-	LeftArgument  sql.NullString
-	RightArgument sql.NullString
-	Function      string
+	Name             string
+	LeftArgument     sql.NullString
+	RightArgument    sql.NullString
+	Function         string
+	Commutator       sql.NullString
+	Negator          sql.NullString
+	RestrictFunction sql.NullString
+	JoinFunction     sql.NullString
+	CanHash          bool
+	CanMerge         bool
 }
 
 func postgresOperatorArgument(argument sql.NullString) string {
@@ -30,10 +36,16 @@ func (o *PostgresOperator) Equal(other *PostgresOperator) bool {
 
 func (o *PostgresOperator) CreateInstruction() *PostgresCreateOperatorInstruction {
 	return &PostgresCreateOperatorInstruction{
-		Name:          o.Name,
-		Function:      o.Function,
-		LeftArgument:  o.LeftArgument,
-		RightArgument: o.RightArgument,
+		Name:             o.Name,
+		Function:         o.Function,
+		LeftArgument:     o.LeftArgument,
+		RightArgument:    o.RightArgument,
+		Commutator:       o.Commutator,
+		Negator:          o.Negator,
+		RestrictFunction: o.RestrictFunction,
+		JoinFunction:     o.JoinFunction,
+		CanHash:          o.CanHash,
+		CanMerge:         o.CanMerge,
 	}
 }
 

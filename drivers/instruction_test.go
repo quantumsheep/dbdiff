@@ -1518,22 +1518,70 @@ func TestInstructions(t *testing.T) {
 
 	t.Run("PostgresCreateAggregateWithEveryOption", func(t *testing.T) {
 		instruction := &PostgresCreateAggregateInstruction{
-			Name:               "total",
-			Arguments:          "integer",
-			TransitionFunction: "int4pl",
-			StateType:          "integer",
+			Name:                "total",
+			Arguments:           "integer",
+			TransitionFunction:  "int4pl",
+			TransitionSpace:     128,
+			StateType:           "integer",
+			FinalFunctionExtra:  true,
+			FinalFunctionModify: "s",
 			FinalFunction: sql.NullString{
 				String: "int4out",
+				Valid:  true,
+			},
+			CombineFunction: sql.NullString{
+				String: "int4pl",
+				Valid:  true,
+			},
+			SerializeFunction: sql.NullString{
+				String: "numeric_avg_serialize",
+				Valid:  true,
+			},
+			DeserializeFunction: sql.NullString{
+				String: "numeric_avg_deserialize",
 				Valid:  true,
 			},
 			InitialCondition: sql.NullString{
 				String: "0",
 				Valid:  true,
 			},
+			MovingTransitionFunction: sql.NullString{
+				String: "int4pl",
+				Valid:  true,
+			},
+			MovingInverseTransitionFunction: sql.NullString{
+				String: "int4mi",
+				Valid:  true,
+			},
+			MovingStateType: sql.NullString{
+				String: "integer",
+				Valid:  true,
+			},
+			MovingTransitionSpace: 256,
+			MovingFinalFunction: sql.NullString{
+				String: "int4out",
+				Valid:  true,
+			},
+			MovingFinalFunctionExtra:  true,
+			MovingFinalFunctionModify: "w",
+			MovingInitialCondition: sql.NullString{
+				String: "0",
+				Valid:  true,
+			},
+			SortOperator: sql.NullString{
+				String: ">",
+				Valid:  true,
+			},
+			Parallel: "s",
 		}
 
 		require.Equal(t,
-			`CREATE AGGREGATE "total"(integer) (SFUNC = int4pl, STYPE = integer, FINALFUNC = int4out, INITCOND = '0');`,
+			`CREATE AGGREGATE "total"(integer) (SFUNC = int4pl, STYPE = integer, SSPACE = 128, `+
+				`FINALFUNC = int4out, FINALFUNC_EXTRA, FINALFUNC_MODIFY = SHAREABLE, COMBINEFUNC = int4pl, `+
+				`SERIALFUNC = numeric_avg_serialize, DESERIALFUNC = numeric_avg_deserialize, INITCOND = '0', `+
+				`MSFUNC = int4pl, MINVFUNC = int4mi, MSTYPE = integer, MSSPACE = 256, MFINALFUNC = int4out, `+
+				`MFINALFUNC_EXTRA, MFINALFUNC_MODIFY = READ_WRITE, MINITCOND = '0', SORTOP = OPERATOR(>), `+
+				`PARALLEL = SAFE);`,
 			instruction.String())
 	})
 
@@ -1562,6 +1610,44 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t,
 			`CREATE OPERATOR === (FUNCTION = "int4eq", LEFTARG = integer, RIGHTARG = integer);`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateOperatorWithEveryOption", func(t *testing.T) {
+		instruction := &PostgresCreateOperatorInstruction{
+			Name:     "===",
+			Function: "int4eq",
+			LeftArgument: sql.NullString{
+				String: "integer",
+				Valid:  true,
+			},
+			RightArgument: sql.NullString{
+				String: "integer",
+				Valid:  true,
+			},
+			Commutator: sql.NullString{
+				String: "===",
+				Valid:  true,
+			},
+			Negator: sql.NullString{
+				String: "!==",
+				Valid:  true,
+			},
+			RestrictFunction: sql.NullString{
+				String: "eqsel",
+				Valid:  true,
+			},
+			JoinFunction: sql.NullString{
+				String: "eqjoinsel",
+				Valid:  true,
+			},
+			CanHash:  true,
+			CanMerge: true,
+		}
+
+		require.Equal(t,
+			`CREATE OPERATOR === (FUNCTION = "int4eq", LEFTARG = integer, RIGHTARG = integer, `+
+				`COMMUTATOR = ===, NEGATOR = !==, RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES);`,
 			instruction.String())
 	})
 

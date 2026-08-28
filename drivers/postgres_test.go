@@ -3443,6 +3443,37 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("ModifyAggregateCombineFunctionAndParallel", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
+		driver.ExecOnSource(setup)
+		driver.ExecOnSource(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer);`)
+
+		driver.ExecOnTarget(setup)
+		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, COMBINEFUNC = int_add, PARALLEL = SAFE);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropAggregateInstruction{
+				Name:      "total",
+				Arguments: "integer",
+			},
+			&PostgresCreateAggregateInstruction{
+				Name:               "total",
+				Arguments:          "integer",
+				TransitionFunction: "int_add",
+				StateType:          "integer",
+				CombineFunction: sql.NullString{
+					String: "int_add",
+					Valid:  true,
+				},
+				Parallel: "s",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("ModifyAggregate", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -3561,6 +3592,101 @@ func TestPostgresDriver(t *testing.T) {
 		})
 
 		driver.ExecOnSource(diff)
+	})
+
+	t.Run("ModifyOperatorCommutatorAndNegator", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `
+			CREATE FUNCTION int_eq(integer, integer) RETURNS boolean AS $$ SELECT $1 = $2; $$ LANGUAGE sql IMMUTABLE;
+			CREATE FUNCTION int_ne(integer, integer) RETURNS boolean AS $$ SELECT $1 <> $2; $$ LANGUAGE sql IMMUTABLE;
+			CREATE OPERATOR !== (FUNCTION = int_ne, LEFTARG = integer, RIGHTARG = integer);
+		`
+		driver.ExecOnSource(setup)
+		driver.ExecOnSource(`CREATE OPERATOR === (FUNCTION = int_eq, LEFTARG = integer, RIGHTARG = integer);`)
+
+		driver.ExecOnTarget(setup)
+		driver.ExecOnTarget(`
+			CREATE OPERATOR === (
+				FUNCTION = int_eq, LEFTARG = integer, RIGHTARG = integer,
+				COMMUTATOR = ===, NEGATOR = !==, RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
+			);
+		`)
+		// The NEGATOR clause of the target writes the reverse link into the other
+		// operator too, so the diff recreates both operators.
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresDropOperatorInstruction{
+				Name: "!==",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+			},
+			&PostgresCreateOperatorInstruction{
+				Name:     "!==",
+				Function: "int_ne",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				Negator: sql.NullString{
+					String: "===",
+					Valid:  true,
+				},
+			},
+			&PostgresDropOperatorInstruction{
+				Name: "===",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+			},
+			&PostgresCreateOperatorInstruction{
+				Name:     "===",
+				Function: "int_eq",
+				LeftArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				RightArgument: sql.NullString{
+					String: "integer",
+					Valid:  true,
+				},
+				Commutator: sql.NullString{
+					String: "===",
+					Valid:  true,
+				},
+				Negator: sql.NullString{
+					String: "!==",
+					Valid:  true,
+				},
+				RestrictFunction: sql.NullString{
+					String: "eqsel",
+					Valid:  true,
+				},
+				JoinFunction: sql.NullString{
+					String: "eqjoinsel",
+					Valid:  true,
+				},
+				CanHash:  true,
+				CanMerge: true,
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("ModifyOperator", func(t *testing.T) {

@@ -991,8 +991,24 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 			pg_get_function_identity_arguments(p.oid),
 			format_type(a.aggtranstype, NULL),
 			a.aggtransfn::regproc::text,
+			a.aggtransspace,
 			CASE WHEN a.aggfinalfn <> 0 THEN a.aggfinalfn::regproc::text END,
-			a.agginitval
+			a.aggfinalextra,
+			CASE WHEN a.aggfinalmodify <> 'r' THEN a.aggfinalmodify::text ELSE '' END,
+			CASE WHEN a.aggcombinefn <> 0 THEN a.aggcombinefn::regproc::text END,
+			CASE WHEN a.aggserialfn <> 0 THEN a.aggserialfn::regproc::text END,
+			CASE WHEN a.aggdeserialfn <> 0 THEN a.aggdeserialfn::regproc::text END,
+			a.agginitval,
+			CASE WHEN a.aggmtransfn <> 0 THEN a.aggmtransfn::regproc::text END,
+			CASE WHEN a.aggminvtransfn <> 0 THEN a.aggminvtransfn::regproc::text END,
+			CASE WHEN a.aggmtranstype <> 0 THEN format_type(a.aggmtranstype, NULL) END,
+			a.aggmtransspace,
+			CASE WHEN a.aggmfinalfn <> 0 THEN a.aggmfinalfn::regproc::text END,
+			a.aggmfinalextra,
+			CASE WHEN a.aggmfinalmodify <> 'r' THEN a.aggmfinalmodify::text ELSE '' END,
+			a.aggminitval,
+			CASE WHEN a.aggsortop <> 0 THEN (SELECT s.oprname FROM pg_operator s WHERE s.oid = a.aggsortop) END,
+			CASE WHEN p.proparallel <> 'u' THEN p.proparallel::text ELSE '' END
 		FROM pg_aggregate a
 		JOIN pg_proc p ON p.oid = a.aggfnoid
 		WHERE p.pronamespace = current_schema()::regnamespace
@@ -1017,8 +1033,24 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 			&aggregate.Arguments,
 			&aggregate.StateType,
 			&aggregate.TransitionFunction,
+			&aggregate.TransitionSpace,
 			&aggregate.FinalFunction,
+			&aggregate.FinalFunctionExtra,
+			&aggregate.FinalFunctionModify,
+			&aggregate.CombineFunction,
+			&aggregate.SerializeFunction,
+			&aggregate.DeserializeFunction,
 			&aggregate.InitialCondition,
+			&aggregate.MovingTransitionFunction,
+			&aggregate.MovingInverseTransitionFunction,
+			&aggregate.MovingStateType,
+			&aggregate.MovingTransitionSpace,
+			&aggregate.MovingFinalFunction,
+			&aggregate.MovingFinalFunctionExtra,
+			&aggregate.MovingFinalFunctionModify,
+			&aggregate.MovingInitialCondition,
+			&aggregate.SortOperator,
+			&aggregate.Parallel,
 		)
 		if err != nil {
 			return nil, err
@@ -1041,7 +1073,13 @@ func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*Postg
 			o.oprname,
 			CASE WHEN o.oprleft <> 0 THEN format_type(o.oprleft, NULL) END,
 			CASE WHEN o.oprright <> 0 THEN format_type(o.oprright, NULL) END,
-			o.oprcode::regproc::text
+			o.oprcode::regproc::text,
+			CASE WHEN o.oprcom <> 0 THEN (SELECT c.oprname FROM pg_operator c WHERE c.oid = o.oprcom) END,
+			CASE WHEN o.oprnegate <> 0 THEN (SELECT n.oprname FROM pg_operator n WHERE n.oid = o.oprnegate) END,
+			CASE WHEN o.oprrest <> 0 THEN o.oprrest::regproc::text END,
+			CASE WHEN o.oprjoin <> 0 THEN o.oprjoin::regproc::text END,
+			o.oprcanhash,
+			o.oprcanmerge
 		FROM pg_operator o
 		WHERE o.oprnamespace = current_schema()::regnamespace
 		AND NOT EXISTS (
@@ -1065,6 +1103,12 @@ func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*Postg
 			&operator.LeftArgument,
 			&operator.RightArgument,
 			&operator.Function,
+			&operator.Commutator,
+			&operator.Negator,
+			&operator.RestrictFunction,
+			&operator.JoinFunction,
+			&operator.CanHash,
+			&operator.CanMerge,
 		)
 		if err != nil {
 			return nil, err
