@@ -199,6 +199,19 @@ func (m *PostgresMigrator) Lock(ctx context.Context) error {
 	return err
 }
 
+func (m *PostgresMigrator) TryLock(ctx context.Context) (bool, error) {
+	row := m.Connection.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1);", postgresMigrationLockKey)
+
+	locked := false
+
+	err := row.Scan(&locked)
+	if err != nil {
+		return false, err
+	}
+
+	return locked, nil
+}
+
 func (m *PostgresMigrator) Unlock(ctx context.Context) error {
 	_, err := m.Connection.ExecContext(ctx, "SELECT pg_advisory_unlock($1);", postgresMigrationLockKey)
 

@@ -171,6 +171,10 @@ func (m *SQLiteMigrator) Lock(ctx context.Context) error {
 	return nil
 }
 
+func (m *SQLiteMigrator) TryLock(ctx context.Context) (bool, error) {
+	return true, nil
+}
+
 func (m *SQLiteMigrator) Unlock(ctx context.Context) error {
 	return nil
 }

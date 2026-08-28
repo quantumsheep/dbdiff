@@ -29,6 +29,11 @@ func TestSQLiteMigrator(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 
 		require.NoError(t, migrator.Lock(t.Context()))
+
+		locked, err := migrator.TryLock(t.Context())
+		require.NoError(t, err)
+		require.True(t, locked)
+
 		require.NoError(t, migrator.Unlock(t.Context()))
 	})
 

@@ -160,9 +160,18 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 		return nil
 	}
 
-	err = migrator.Lock(ctx)
+	locked, err := migrator.TryLock(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to take the migration lock: %w", err)
+	}
+
+	if !locked {
+		_, _ = fmt.Fprintln(output, "Another process holds the migration lock. dbdiff waits for it.")
+
+		err = migrator.Lock(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to take the migration lock: %w", err)
+		}
 	}
 
 	defer func() { _ = migrator.Unlock(ctx) }()

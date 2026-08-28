@@ -22,6 +22,7 @@ type Migrator interface {
 	EnsureHistoryTable(ctx context.Context) error
 	AppliedMigrations(ctx context.Context) ([]AppliedMigration, error)
 	Lock(ctx context.Context) error
+	TryLock(ctx context.Context) (bool, error)
 	Unlock(ctx context.Context) error
 	Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error)
 	RecordDirty(ctx context.Context, migration *Migration) error

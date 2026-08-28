@@ -25,6 +25,25 @@ func TestPostgresMigrator(t *testing.T) {
 		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
 	})
 
+	t.Run("TryLockReportsALockOfAnotherSession", func(t *testing.T) {
+		first := NewTestPostgresMigrator(t)
+		second := NewTestPostgresMigrator(t)
+
+		require.NoError(t, first.Lock(t.Context()))
+
+		locked, err := second.TryLock(t.Context())
+		require.NoError(t, err)
+		require.False(t, locked)
+
+		require.NoError(t, first.Unlock(t.Context()))
+
+		locked, err = second.TryLock(t.Context())
+		require.NoError(t, err)
+		require.True(t, locked)
+
+		require.NoError(t, second.Unlock(t.Context()))
+	})
+
 	t.Run("RecordDirtyAndClearDirty", func(t *testing.T) {
 		migrator := NewTestPostgresMigrator(t)
 
