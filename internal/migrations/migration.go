@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 	"github.com/samber/lo"
 )
 

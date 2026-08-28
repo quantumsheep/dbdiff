@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 )
 
 type SQLiteMigrator struct {

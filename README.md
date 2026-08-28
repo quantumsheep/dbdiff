@@ -111,6 +111,18 @@ CREATE INDEX "users_email" ON "users" ("email");
 DROP TABLE "audit";
 ```
 
+### Run a diff from Go
+
+The package `github.com/quantumsheep/dbdiff/drivers` runs a diff from a Go program. Each statement of the result holds the SQL text and the comment of its object. The types of this package stay stable across the versions of dbdiff.
+
+```go
+import "github.com/quantumsheep/dbdiff/drivers"
+
+statements, err := drivers.Diff(ctx, "app.sqlite", "schema.sql")
+```
+
+`WithDriver` names the engine, and `WithSchema`, `WithScratchServerVersion`, `WithData`, and `WithPrivileges` give the values of the flags and of the `version` key of `dbdiff.yaml`.
+
 ## Flags
 
 ### `diff`
@@ -466,6 +478,22 @@ With the postgres driver, put one statement in a file that holds the directive. 
 ### The history table
 
 `dbdiff migrate` records each applied file in the table `dbdiff_migrations`, with the columns `version`, `name`, `checksum`, `applied_at`, and `dirty`. The checksum detects a file that changed after its migration ran. `migrate status` and `migrate verify` report such a file as `changed`. The `dirty` column marks a file with the no-transaction directive that failed in the middle. `migrate status` reports such a file as `dirty`, and `migrate up` refuses to run until you repair the database and delete the row.
+
+### Run the migrations from Go
+
+The package `github.com/quantumsheep/dbdiff/migrations` applies the migrations from a Go program, for example at the start of a server. `Up` gives the behavior of `migrate up`, and `Status` gives the states of `migrate status`. The types of this package stay stable across the versions of dbdiff.
+
+```go
+import (
+	"github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/migrations"
+)
+
+err := migrations.Up(ctx,
+	migrations.WithDatabase(drivers.PostgresDriverName, os.Getenv("DATABASE_URL")),
+	migrations.WithDirectory("migrations"),
+)
+```
 
 ## Supported objects
 

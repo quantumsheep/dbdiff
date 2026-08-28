@@ -7,7 +7,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 	"github.com/stretchr/testify/require"
 )
 

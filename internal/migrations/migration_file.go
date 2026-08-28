@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 )
 
 func RenderMigrationFile(toolVersion string, generatedAt time.Time, instructions []drivers.Instruction) string {

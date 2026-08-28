@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 )
 
 // This value is a constant of dbdiff. Every dbdiff process takes the same lock, and no

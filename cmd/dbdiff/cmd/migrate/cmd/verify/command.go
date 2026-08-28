@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/drivers"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/migrations"
-	dbdiffdrivers "github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
+	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -55,7 +55,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	directory, cleanup, err := migrations.MigrationVerifyDirectory(set)
+	directory, cleanup, err := coremigrations.MigrationVerifyDirectory(set)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return nil
 	}
 
-	fmt.Println(dbdiffdrivers.RenderInstructions(instructions))
+	fmt.Println(drivers.RenderInstructions(instructions))
 
 	return fmt.Errorf("the database holds %s that no migration made", changeCountText(len(instructions)))
 }

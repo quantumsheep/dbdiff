@@ -11,12 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/drivers"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 )
 
-func LoadMigrationSet(ctx context.Context, migrator coremigrations.Migrator, directory string) (*coremigrations.MigrationSet, error) {
-	files, err := coremigrations.ReadMigrationDirectory(directory)
+func LoadMigrationSet(ctx context.Context, migrator Migrator, directory string) (*MigrationSet, error) {
+	files, err := ReadMigrationDirectory(directory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the migrations directory: %w", err)
 	}
@@ -26,10 +25,10 @@ func LoadMigrationSet(ctx context.Context, migrator coremigrations.Migrator, dir
 		return nil, fmt.Errorf("failed to read the history table: %w", err)
 	}
 
-	return coremigrations.NewMigrationSet(files, applied), nil
+	return NewMigrationSet(files, applied), nil
 }
 
-func RenderMigrationStatus(set *coremigrations.MigrationSet) string {
+func RenderMigrationStatus(set *MigrationSet) string {
 	if len(set.Entries) == 0 {
 		return "The directory holds no migration.\n"
 	}
@@ -39,7 +38,7 @@ func RenderMigrationStatus(set *coremigrations.MigrationSet) string {
 	for _, entry := range set.Entries {
 		fmt.Fprintf(&builder, "%-40s %s", entry.FileName(), entry.State)
 
-		if entry.State == coremigrations.MigrationApplied {
+		if entry.State == MigrationApplied {
 			builder.WriteString("   ")
 			builder.WriteString(entry.AppliedAt.UTC().Format(time.RFC3339))
 		}
@@ -50,7 +49,7 @@ func RenderMigrationStatus(set *coremigrations.MigrationSet) string {
 	return builder.String()
 }
 
-func RenderMigrationPreview(set *coremigrations.MigrationSet) (string, error) {
+func RenderMigrationPreview(set *MigrationSet) (string, error) {
 	err := set.RecordError()
 	if err != nil {
 		return "", err
@@ -59,7 +58,7 @@ func RenderMigrationPreview(set *coremigrations.MigrationSet) (string, error) {
 	var builder strings.Builder
 
 	for _, entry := range set.Entries {
-		if entry.State != coremigrations.MigrationOutOfOrder {
+		if entry.State != MigrationOutOfOrder {
 			continue
 		}
 
@@ -97,7 +96,7 @@ func indentMigrationStatement(statement string) string {
 
 // One transaction holds every pending file, because a file can read an object of an
 // earlier file.
-func RunMigrationPreview(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet, output io.Writer) error {
+func RunMigrationPreview(ctx context.Context, migrator Migrator, set *MigrationSet, output io.Writer) error {
 	err := set.RecordError()
 	if err != nil {
 		return err
@@ -137,19 +136,19 @@ func RunMigrationPreview(ctx context.Context, migrator coremigrations.Migrator, 
 	return nil
 }
 
-func ApplyMigrations(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
+func ApplyMigrations(ctx context.Context, migrator Migrator, set *MigrationSet,
 	lastVersion string, output io.Writer) error {
 	return applyPendingMigrations(ctx, migrator, set, nil, lastVersion, output)
 }
 
-func StepMigration(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
+func StepMigration(ctx context.Context, migrator Migrator, set *MigrationSet,
 	input io.Reader, output io.Writer) error {
 	return applyPendingMigrations(ctx, migrator, set, bufio.NewReader(input), "", output)
 }
 
 // An empty version keeps every pending file. A named version keeps the files up to that
 // version, and it must name a file of the directory.
-func pendingMigrationsUpTo(set *coremigrations.MigrationSet, lastVersion string) ([]*coremigrations.MigrationEntry, error) {
+func pendingMigrationsUpTo(set *MigrationSet, lastVersion string) ([]*MigrationEntry, error) {
 	pending := set.Pending()
 
 	if lastVersion == "" {
@@ -168,7 +167,7 @@ func pendingMigrationsUpTo(set *coremigrations.MigrationSet, lastVersion string)
 		return nil, fmt.Errorf("the directory holds no migration with the version %s", lastVersion)
 	}
 
-	var kept []*coremigrations.MigrationEntry
+	var kept []*MigrationEntry
 
 	for _, entry := range pending {
 		if entry.Migration.Version <= lastVersion {
@@ -179,7 +178,7 @@ func pendingMigrationsUpTo(set *coremigrations.MigrationSet, lastVersion string)
 	return kept, nil
 }
 
-func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
+func applyPendingMigrations(ctx context.Context, migrator Migrator, set *MigrationSet,
 	reader *bufio.Reader, lastVersion string, output io.Writer) error {
 	err := set.ProblemError()
 	if err != nil {
@@ -277,7 +276,7 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 // RunMigrationRepair makes the record agree with the files. A changed row takes the
 // checksum of its file. A missing row and a dirty row go away. An out of order file
 // needs a new generate, so repair does not touch it.
-func RunMigrationRepair(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
+func RunMigrationRepair(ctx context.Context, migrator Migrator, set *MigrationSet,
 	output io.Writer) error {
 	err := migrator.Lock(ctx)
 	if err != nil {
@@ -295,7 +294,7 @@ func RunMigrationRepair(ctx context.Context, migrator coremigrations.Migrator, s
 
 	for _, entry := range set.Entries {
 		switch entry.State {
-		case coremigrations.MigrationChanged:
+		case MigrationChanged:
 			err = migrator.UpdateChecksum(ctx, entry.Migration)
 			if err != nil {
 				return fmt.Errorf("failed to update the checksum of %s: %w", entry.FileName(), err)
@@ -303,7 +302,7 @@ func RunMigrationRepair(ctx context.Context, migrator coremigrations.Migrator, s
 
 			_, _ = fmt.Fprintf(output, "Updated the checksum of %s.\n", entry.FileName())
 			repaired++
-		case coremigrations.MigrationMissing:
+		case MigrationMissing:
 			err = migrator.DeleteRecord(ctx, entry.Migration.Version)
 			if err != nil {
 				return fmt.Errorf("failed to delete the row of %s: %w", entry.FileName(), err)
@@ -311,7 +310,7 @@ func RunMigrationRepair(ctx context.Context, migrator coremigrations.Migrator, s
 
 			_, _ = fmt.Fprintf(output, "Deleted the row of %s.\n", entry.FileName())
 			repaired++
-		case coremigrations.MigrationDirty:
+		case MigrationDirty:
 			err = migrator.DeleteRecord(ctx, entry.Migration.Version)
 			if err != nil {
 				return fmt.Errorf("failed to delete the row of %s: %w", entry.FileName(), err)
@@ -332,20 +331,20 @@ func RunMigrationRepair(ctx context.Context, migrator coremigrations.Migrator, s
 
 // Another process can apply a file between the first read of the state and the lock, so
 // this second read builds the set again under the lock.
-func reloadMigrationSet(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) (*coremigrations.MigrationSet, error) {
+func reloadMigrationSet(ctx context.Context, migrator Migrator, set *MigrationSet) (*MigrationSet, error) {
 	applied, err := migrator.AppliedMigrations(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return coremigrations.NewMigrationSet(migrationFilesOf(set), applied), nil
+	return NewMigrationSet(migrationFilesOf(set), applied), nil
 }
 
-func migrationFilesOf(set *coremigrations.MigrationSet) []*coremigrations.Migration {
-	var files []*coremigrations.Migration
+func migrationFilesOf(set *MigrationSet) []*Migration {
+	var files []*Migration
 
 	for _, entry := range set.Entries {
-		if entry.State == coremigrations.MigrationMissing {
+		if entry.State == MigrationMissing {
 			continue
 		}
 
@@ -355,7 +354,7 @@ func migrationFilesOf(set *coremigrations.MigrationSet) []*coremigrations.Migrat
 	return files
 }
 
-func applyOneMigration(ctx context.Context, migrator coremigrations.Migrator, entry *coremigrations.MigrationEntry,
+func applyOneMigration(ctx context.Context, migrator Migrator, entry *MigrationEntry,
 	output io.Writer) error {
 	content, err := entry.Content()
 	if err != nil {
@@ -397,8 +396,8 @@ func applyOneMigration(ctx context.Context, migrator coremigrations.Migrator, en
 
 // The dirty row keeps a half apply visible, and its primary key stops a second process
 // that runs the same file.
-func applyOneMigrationWithoutTransaction(ctx context.Context, migrator coremigrations.Migrator,
-	entry *coremigrations.MigrationEntry, content string, output io.Writer) error {
+func applyOneMigrationWithoutTransaction(ctx context.Context, migrator Migrator,
+	entry *MigrationEntry, content string, output io.Writer) error {
 	err := migrator.RecordDirty(ctx, entry.Migration)
 	if err != nil {
 		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
@@ -428,7 +427,7 @@ func applyOneMigrationWithoutTransaction(ctx context.Context, migrator coremigra
 	return nil
 }
 
-func MigrationVerifyDirectory(set *coremigrations.MigrationSet) (string, func(), error) {
+func MigrationVerifyDirectory(set *MigrationSet) (string, func(), error) {
 	directory, err := os.MkdirTemp("", "dbdiff-verify-")
 	if err != nil {
 		return "", nil, err
@@ -448,9 +447,9 @@ func MigrationVerifyDirectory(set *coremigrations.MigrationSet) (string, func(),
 	return directory, cleanup, nil
 }
 
-func copyAppliedMigrations(set *coremigrations.MigrationSet, directory string) error {
+func copyAppliedMigrations(set *MigrationSet, directory string) error {
 	for _, entry := range set.Entries {
-		if entry.State != coremigrations.MigrationApplied {
+		if entry.State != MigrationApplied {
 			continue
 		}
 

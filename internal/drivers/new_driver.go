@@ -3,15 +3,13 @@ package drivers
 import (
 	"context"
 	"fmt"
-
-	dbdiffdrivers "github.com/quantumsheep/dbdiff/drivers"
 )
 
-func NewDriver(ctx context.Context, driverName string, currentSchema string, finalSchema string,
+func NewDriver(ctx context.Context, driverName DriverName, currentSchema string, finalSchema string,
 	schema string, scratchVersion string, compareData bool,
-	comparePrivileges bool) (dbdiffdrivers.Driver, error) {
+	comparePrivileges bool) (Driver, error) {
 	if driverName == "" {
-		detected, err := dbdiffdrivers.DetectDriver(currentSchema, finalSchema)
+		detected, err := DetectDriver(currentSchema, finalSchema)
 		if err != nil {
 			return nil, err
 		}
@@ -20,7 +18,7 @@ func NewDriver(ctx context.Context, driverName string, currentSchema string, fin
 	}
 
 	switch driverName {
-	case dbdiffdrivers.SQLiteDriverName:
+	case SQLiteDriverName:
 		if schema != "" {
 			return nil, fmt.Errorf("the --schema flag applies to the postgres driver only")
 		}
@@ -33,13 +31,13 @@ func NewDriver(ctx context.Context, driverName string, currentSchema string, fin
 			return nil, fmt.Errorf("the version key of dbdiff.yaml applies to the postgres driver only")
 		}
 
-		return dbdiffdrivers.NewSQLiteDriver(ctx, &dbdiffdrivers.SQLiteDriverConfig{
+		return NewSQLiteDriver(ctx, &SQLiteDriverConfig{
 			SourceDatabasePath: currentSchema,
 			TargetDatabasePath: finalSchema,
 			CompareData:        compareData,
 		})
-	case dbdiffdrivers.PostgresDriverName:
-		return dbdiffdrivers.NewPostgresDriver(ctx, &dbdiffdrivers.PostgresDriverConfig{
+	case PostgresDriverName:
+		return NewPostgresDriver(ctx, &PostgresDriverConfig{
 			SourceConnectionString: currentSchema,
 			TargetConnectionString: finalSchema,
 			SourceSchema:           schema,

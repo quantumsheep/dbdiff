@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 	"github.com/stretchr/testify/require"
 )
 
@@ -119,7 +120,7 @@ func TestMigrationConfig(t *testing.T) {
 
 		config, err := ReadMigrationConfig(path, false)
 		require.NoError(t, err)
-		require.Equal(t, "postgres", config.Driver)
+		require.Equal(t, drivers.PostgresDriverName, config.Driver)
 		require.Equal(t, "schema.sql", config.Target)
 		require.Equal(t, "./migrations", config.Source)
 		require.Equal(t, "public", config.Schema)

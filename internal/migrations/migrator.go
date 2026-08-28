@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 )
 
 type AppliedMigration struct {
@@ -42,7 +42,7 @@ type MigrationTransaction interface {
 	Rollback() error
 }
 
-func NewMigrator(ctx context.Context, driverName string, target string,
+func NewMigrator(ctx context.Context, driverName drivers.DriverName, target string,
 	schema string) (Migrator, error) {
 	if driverName == "" {
 		detected, err := drivers.DetectDriver(target, target)

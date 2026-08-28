@@ -34,15 +34,16 @@ Before you write code against a library, read `go.mod` for its current version. 
 | `cmd/dbdiff/`                     | `main.go` builds the root command. `main_test.go` builds the binary and checks the output and the exit code.                                                               |
 | `cmd/dbdiff/cmd/`                 | One package per command. A command lives in `<command>/command.go`, and a subcommand lives in `<command>/cmd/<subcommand>/command.go`, with a `command_test.go` beside it. |
 | `cmd/dbdiff/internal/helpers/`    | Version and the usage error handler, which every command reads                                                                                                             |
-| `cmd/dbdiff/internal/drivers/`    | `NewDriver`, the one driver switch of the program                                                                                                                          |
-| `cmd/dbdiff/internal/migrations/` | The functions of the seven migrate commands. A function of this package reads a flag, writes to a stream, or asks a question.                                              |
+| `cmd/dbdiff/internal/migrations/` | The flag and configuration reading of the seven migrate commands                                                                                                           |
 | `cmd/dbdiff/internal/clitest/`    | The helpers that build the binary and run it                                                                                                                               |
-| `drivers/`                        | One package. It holds every driver, every schema model, and every instruction type.                                                                                        |
-| `internal/migrations/`            | The model of a migration and the migrator of each engine. It knows no command and no flag.                                                                                 |
+| `internal/drivers/`               | One package. It holds every driver, every schema model, every instruction type, and `NewDriver`, the one driver switch of the program.                                     |
+| `internal/migrations/`            | The model of a migration, the migrator of each engine, and the functions that run and report the migrations. It knows no command and no flag.                              |
+| `drivers/`                        | The public package that runs a diff from a Go program. Its input and output types stay stable.                                                                             |
+| `migrations/`                     | The public package that applies the migrations from a Go program. Its input and output types stay stable, so it copies no internal type and no internal constant.          |
 
-The `drivers` package uses one file per schema object per engine, with the name `<engine>_<object>.go`: for example `sqlite_index.go` and `postgres_view.go`. Shared code sits in files with no engine prefix, for example `driver.go`, `sql_source.go`, and `identifier.go`. The instruction types live in the `instruction*.go` files, split by engine and by object family. Each engine holds one test file, `<engine>_test.go`.
+The `internal/drivers` package uses one file per schema object per engine, with the name `<engine>_<object>.go`: for example `sqlite_index.go` and `postgres_view.go`. Shared code sits in files with no engine prefix, for example `driver.go`, `sql_source.go`, and `identifier.go`. The instruction types live in the `instruction*.go` files, split by engine and by object family. Each engine holds one test file, `<engine>_test.go`.
 
-Do not add a package. Add a file to `drivers/` with the same pattern.
+Do not add a package. Add a file to `internal/drivers/` with the same pattern.
 
 ## Package names
 
@@ -54,14 +55,14 @@ cmdmigrategenerate "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/migrate/cmd/ge
 
 A test file of a command package takes the same name with the suffix `_test`.
 
-Each package of `cmd/dbdiff/internal` keeps its plain name: `drivers`, `migrations`, `helpers`, and `clitest`. Two of them take the name of a package of the module root. A file that imports both writes a prefix on the one of the root:
+Each package of `cmd/dbdiff/internal` keeps its plain name: `migrations`, `helpers`, and `clitest`. Three pairs of packages share one name. A file that imports both members of a pair writes a prefix on one of them:
 
-| Import path                      | Name in a file that imports both |
-| -------------------------------- | -------------------------------- |
-| `cmd/dbdiff/internal/drivers`    | `drivers`                        |
-| `drivers`                        | `dbdiffdrivers`                  |
-| `cmd/dbdiff/internal/migrations` | `migrations`                     |
-| `internal/migrations`            | `coremigrations`                 |
+| Import path                      | Name in a file that imports both members of the pair |
+| -------------------------------- | ---------------------------------------------------- |
+| `internal/drivers`               | `drivers`                                            |
+| `drivers`                        | `dbdiffdrivers` (`internaldrivers` names the internal package inside the public `drivers` package itself) |
+| `cmd/dbdiff/internal/migrations` | `migrations`                                         |
+| `internal/migrations`            | `coremigrations`                                     |
 
 ## Build and run
 
@@ -105,7 +106,7 @@ A driver holds two `*sql.DB` fields: `SourceDatabaseConnection` and `TargetDatab
 
 A driver opens one side with `OpenSide(ctx, path, ...)`. That method reads a database, or it builds a temporary database from a SQL source. `Close` releases the temporary database.
 
-To register a new driver: add a case to the switch in `NewDriver` of `cmd/dbdiff/internal/drivers`, add a case to the switch in `NewMigrator` of `internal/migrations`, and add a value to `SupportedDriverNames` in `driver_detection.go`. The validator of the `--driver` flag reads that list.
+To register a new driver: add a case to the switch in `NewDriver` of `internal/drivers`, add a case to the switch in `NewMigrator` of `internal/migrations`, and add a value to `SupportedDriverNames` in `driver_detection.go`. The validator of the `--driver` flag reads that list.
 
 `DetectDriver` in `driver_detection.go` names the engine when the user gives no `--driver` flag. A `sqlite://` prefix or a plain path names sqlite3. A `postgres://` URL or a keyword string names postgres. A SQL source and an unknown scheme name nothing. Two empty or two different names give an error that names the `--driver` flag. One name and one empty name give that one name, because a SQL source takes the engine of the other side.
 
@@ -152,12 +153,12 @@ type Instruction interface {
 }
 ```
 
-`String` gives the statement. `Comment` names the object that the statement changes, for example `Create the table "users"`. The `--comments` flag prints those comments, and `AnnotateInstructions` groups the instructions that share one comment text. A new instruction type takes one `Comment` method below its `String` method, one subtest in `drivers/instruction_test.go`, and one subtest in `drivers/instruction_comment_test.go`. A `Comment` method calls one of the builders of `instruction_comment.go`, so it stays one line. A field named `Comment` cannot live beside the method, so an instruction that holds a comment text names the field `Text`.
+`String` gives the statement. `Comment` names the object that the statement changes, for example `Create the table "users"`. The `--comments` flag prints those comments, and `AnnotateInstructions` groups the instructions that share one comment text. A new instruction type takes one `Comment` method below its `String` method, one subtest in `internal/drivers/instruction_test.go`, and one subtest in `internal/drivers/instruction_comment_test.go`. A `Comment` method calls one of the builders of `instruction_comment.go`, so it stays one line. A field named `Comment` cannot live beside the method, so an instruction that holds a comment text names the field `Text`.
 
 In this package, `String() string` belongs to an instruction type only. A model type answers with an instruction, with a fragment, or with a list of instructions. That rule stops a fragment from reaching the output, because a bare column definition is not a statement. This command finds a violation, so it must return nothing:
 
 ```bash
-rg -n 'func \([a-z][A-Za-z0-9]* \*?[A-Za-z]+\) String\(\) string' drivers/ --glob '!drivers/instruction*.go'
+rg -n 'func \([a-z][A-Za-z0-9]* \*?[A-Za-z]+\) String\(\) string' internal/drivers/ --glob '!internal/drivers/instruction*.go'
 ```
 
 A nested part renders through a method that names what the method returns. Each part interface takes a different method name, so no part satisfies another part:
@@ -176,7 +177,7 @@ The prefix of a type name reports the portability of the syntax, and not the dri
 | `SQLite`   | The syntax of SQLite differs, or SQLite alone holds the form         |
 | `Postgres` | The syntax of PostgreSQL differs, or PostgreSQL alone holds the form |
 
-`drivers/instruction_test.go` is the one place that holds the SQL text of a statement. A driver test compares instructions, and it trusts that file.
+`internal/drivers/instruction_test.go` is the one place that holds the SQL text of a statement. A driver test compares instructions, and it trusts that file.
 
 ## The SQLite driver
 
@@ -229,7 +230,7 @@ Four settings of the scratch server matter. Keep them:
 
 A file that holds no directive runs in ONE call. A file that holds the line `-- dbdiff:no-transaction`, or the line `-- atlas:txmode none` of Atlas, runs one call for each statement. PostgreSQL runs the statements of one call in an implicit transaction block, and it refuses `CREATE INDEX CONCURRENTLY` and every other statement of that kind there. The directive is the one signal that starts the split. Never read the SQL text to make that decision.
 
-`drivers/sql_statement.go` holds the directive and the statement splitter, because the replay of a SQL source and the apply of a migration both read them, and `drivers` imports neither migrations package. The splitter understands comments, strings, quoted identifiers, and dollar quotes, so a function body that holds a semicolon stays one statement.
+`internal/drivers/sql_statement.go` holds the directive and the statement splitter, because the replay of a SQL source and the apply of a migration both read them, and `drivers` imports neither migrations package. The splitter understands comments, strings, quoted identifiers, and dollar quotes, so a function body that holds a semicolon stays one statement.
 
 ## Migrations
 
@@ -255,14 +256,14 @@ The data section prints after the whole schema section, because a new row needs 
 
 # Tests
 
-Every test lives beside the code, in `drivers/<engine>_test.go`, in a `<name>_test.go` of a migrations package, and in a `command_test.go` file of a command package. There is no `tests` folder. The tests use `github.com/stretchr/testify/require`.
+Every test lives beside the code, in `internal/drivers/<engine>_test.go`, in a `<name>_test.go` of a migrations package, and in a `command_test.go` file of a command package. There is no `tests` folder. The tests use `github.com/stretchr/testify/require`.
 
 ## Run the tests
 
 ```bash
 docker compose up -d    # PostgreSQL on port 5432, needed by the PostgreSQL tests
 go test ./...
-go test -run TestSQLiteDriver/RenameColumn ./drivers
+go test -run TestSQLiteDriver/RenameColumn ./internal/drivers
 ```
 
 The PostgreSQL tests need the database at `postgres://user:password@localhost:5432/dbdiff`. The SQLite tests need no service, because each one writes into `tb.TempDir()`.
@@ -468,8 +469,8 @@ Split a large task across subagents. A clean context gives a better result.
 
 Two agents that write to one file will corrupt the work of each other. These rules keep parallel work safe on one checkout:
 
-- Give each subagent a file list that no other subagent shares. The file split of `drivers/` makes this easy. One agent takes `sqlite_index.go`. Another agent takes `sqlite_view.go`.
-- Both engines write into one test file each. Two agents must never edit `drivers/sqlite_test.go` at the same time.
+- Give each subagent a file list that no other subagent shares. The file split of `internal/drivers/` makes this easy. One agent takes `sqlite_index.go`. Another agent takes `sqlite_view.go`.
+- Both engines write into one test file each. Two agents must never edit `internal/drivers/sqlite_test.go` at the same time.
 - A subagent must never run `git checkout`, `git reset`, `git stash`, `git add`, or `git commit`. If a subagent finds work outside its scope, it reports the work. It never reverts the work.
 - For a bulk edit, ask each subagent for its decisions. Then apply every decision yourself, in one place.
 

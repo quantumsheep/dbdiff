@@ -6,6 +6,7 @@ import (
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/migrations"
+	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -42,5 +43,5 @@ func action(ctx context.Context, command *cli.Command) error {
 
 	defer func() { _ = migrator.Close() }()
 
-	return migrations.RunMigrationRepair(ctx, migrator, set, os.Stdout)
+	return coremigrations.RunMigrationRepair(ctx, migrator, set, os.Stdout)
 }

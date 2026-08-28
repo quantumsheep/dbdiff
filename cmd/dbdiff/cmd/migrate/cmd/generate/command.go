@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/drivers"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/migrations"
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )

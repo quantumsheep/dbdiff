@@ -6,14 +6,16 @@ import (
 	"strings"
 )
 
+type DriverName string
+
 const (
-	SQLiteDriverName   = "sqlite3"
-	PostgresDriverName = "postgres"
+	SQLiteDriverName   DriverName = "sqlite3"
+	PostgresDriverName DriverName = "postgres"
 )
 
-var SupportedDriverNames = []string{SQLiteDriverName, PostgresDriverName}
+var SupportedDriverNames = []DriverName{SQLiteDriverName, PostgresDriverName}
 
-func DetectDriver(source string, target string) (string, error) {
+func DetectDriver(source string, target string) (DriverName, error) {
 	sourceDriverName := detectDriverOfArgument(source)
 	targetDriverName := detectDriverOfArgument(target)
 
@@ -32,7 +34,7 @@ func DetectDriver(source string, target string) (string, error) {
 	return targetDriverName, nil
 }
 
-func detectDriverOfArgument(argument string) string {
+func detectDriverOfArgument(argument string) DriverName {
 	if argument == "" {
 		return ""
 	}

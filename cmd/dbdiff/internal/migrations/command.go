@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/quantumsheep/dbdiff/internal/drivers"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
@@ -24,7 +25,7 @@ func GetMigrationConfigFromCommand(command *cli.Command) (*coremigrations.Migrat
 
 	driverName := command.String("driver")
 	if driverName != "" {
-		config.Driver = driverName
+		config.Driver = drivers.DriverName(driverName)
 	}
 
 	source := command.String("source")
@@ -68,7 +69,7 @@ func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 		return nil, nil, nil, fmt.Errorf("failed to open the target database: %w", err)
 	}
 
-	set, err := LoadMigrationSet(ctx, migrator, config.Source)
+	set, err := coremigrations.LoadMigrationSet(ctx, migrator, config.Source)
 	if err != nil {
 		_ = migrator.Close()
 
