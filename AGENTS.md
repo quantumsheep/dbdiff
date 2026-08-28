@@ -196,11 +196,8 @@ file that imports both writes a prefix on the one of the root:
 ```bash
 go build -o ./bin/dbdiff ./cmd/dbdiff
 go run ./cmd/dbdiff diff <source> <target>
-go run ./cmd/dbdiff --driver postgres <source> <target>
+go run ./cmd/dbdiff diff --driver postgres <source> <target>
 ```
-
-A form with no command name runs the `diff` command. `DefaultCommand` of the root command
-holds that rule.
 
 The `--driver` flag accepts `sqlite3` and `postgres`. An empty value starts the detection
 of `DetectDriver`. See [Driver detection](#driver-detection).

@@ -12,7 +12,7 @@
 </div>
 
 ```console
-$ dbdiff current.sqlite final.sqlite
+$ dbdiff diff current.sqlite final.sqlite
 ALTER TABLE "users" ADD COLUMN "created_at" TEXT;
 CREATE INDEX "users_email" ON "users" ("email");
 DROP TABLE "audit";
@@ -76,20 +76,6 @@ dbdiff takes seven commands:
 | `dbdiff migrate step`              | Apply every pending migration, and ask before each file           |
 | `dbdiff migrate verify`            | Compare the database against the replay of the applied migrations |
 | `dbdiff migrate repair`            | Make the history table agree with the migration files            |
-
-A command line with no command name runs the `diff` command:
-
-```bash
-dbdiff current.sqlite final.sqlite
-dbdiff diff current.sqlite final.sqlite
-```
-
-Both lines give the same result. A database file named `migrate` needs the form
-`./migrate`. Without that form, dbdiff reads the bare name `migrate` as a command name:
-
-```bash
-dbdiff ./migrate final.sqlite
-```
 
 Read [Migrations](#migrations) for the seven commands of `migrate`. The rest of this section
 covers `diff`.
@@ -206,7 +192,7 @@ One argument is sufficient. In this example the source names the engine, and dbd
 `schema.sql` to a temporary PostgreSQL server:
 
 ```bash
-dbdiff postgres://user:password@localhost:5432/production schema.sql
+dbdiff diff postgres://user:password@localhost:5432/production schema.sql
 ```
 
 <details>
@@ -215,14 +201,14 @@ dbdiff postgres://user:password@localhost:5432/production schema.sql
 In the first case the two arguments name SQL text, so no argument names an engine:
 
 ```bash
-dbdiff old_schema.sql new_schema.sql
+dbdiff diff old_schema.sql new_schema.sql
 # dbdiff: cannot detect the driver of "old_schema.sql" and "new_schema.sql". Use the --driver flag
 ```
 
 In the second case the two arguments name a different engine:
 
 ```bash
-dbdiff sqlite://current.db postgres://user:password@localhost:5432/final
+dbdiff diff sqlite://current.db postgres://user:password@localhost:5432/final
 # dbdiff: "sqlite://current.db" names the sqlite3 driver and "postgres://user:password@localhost:5432/final" names the postgres driver. Use the --driver flag
 ```
 
@@ -236,8 +222,8 @@ detection when you give it.
 The driver accepts a file path, or a path with the prefix `sqlite://`:
 
 ```bash
-dbdiff current.sqlite final.sqlite
-dbdiff sqlite://current.sqlite sqlite://final.sqlite
+dbdiff diff current.sqlite final.sqlite
+dbdiff diff sqlite://current.sqlite sqlite://final.sqlite
 ```
 
 SQLite holds no schema. If you give the `--schema` flag with this driver, dbdiff gives an
@@ -273,7 +259,7 @@ and the old column becomes a removal.
 Give a connection string for each side:
 
 ```bash
-dbdiff --driver postgres \
+dbdiff diff --driver postgres \
   postgres://user:password@localhost:5432/source \
   postgres://user:password@localhost:5432/target
 ```
@@ -282,7 +268,7 @@ The `--schema` flag names one schema. The driver reads that schema in the source
 and in the target database:
 
 ```bash
-dbdiff --driver postgres --schema app \
+dbdiff diff --driver postgres --schema app \
   postgres://user:password@localhost:5432/source \
   postgres://user:password@localhost:5432/target
 ```
@@ -378,7 +364,7 @@ by default. A target server holds other role names in most cases, and a `GRANT` 
 a role that is absent fails.
 
 ```bash
-dbdiff --driver postgres --privileges \
+dbdiff diff --driver postgres --privileges \
   postgres://user:password@localhost:5432/source \
   postgres://user:password@localhost:5432/target
 ```
@@ -423,9 +409,9 @@ ends in `.down.sql`, because a down migration removes the schema that its up mig
 built.
 
 ```bash
-dbdiff schema.sql production.sqlite
-dbdiff ./migrations production.sqlite
-dbdiff --driver sqlite3 old_schema.sql new_schema.sql
+dbdiff diff schema.sql production.sqlite
+dbdiff diff ./migrations production.sqlite
+dbdiff diff --driver sqlite3 old_schema.sql new_schema.sql
 ```
 
 A connection URL holds `://`, so a URL never names SQL text.
@@ -447,13 +433,13 @@ example reads the version of `production`, and it applies `schema.sql` to a serv
 version:
 
 ```bash
-dbdiff --driver postgres schema.sql postgres://user:password@localhost:5432/production
+dbdiff diff --driver postgres schema.sql postgres://user:password@localhost:5432/production
 ```
 
 Two SQL files give no version, so the temporary server takes the default version:
 
 ```bash
-dbdiff --driver postgres old_schema.sql new_schema.sql
+dbdiff diff --driver postgres old_schema.sql new_schema.sql
 ```
 
 dbdiff removes the temporary database at the end of the run. It changes no file of the
@@ -478,7 +464,7 @@ source.
 The `--data` flag adds the comparison of the rows:
 
 ```bash
-dbdiff --data current.sqlite final.sqlite
+dbdiff diff --data current.sqlite final.sqlite
 ```
 
 The data section comes after the schema section, because a new row needs its table and its

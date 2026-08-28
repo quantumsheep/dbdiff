@@ -16,13 +16,12 @@ import (
 
 func main() {
 	command := &cli.Command{
-		Name:           "dbdiff",
-		Version:        helpers.Version(),
-		Usage:          "Compare database schemas and generate migration scripts",
-		Description:    "Compare database schemas and generate migration scripts",
-		UsageText:      "dbdiff [command] [options] <source> <target>",
-		DefaultCommand: "diff",
-		OnUsageError:   helpers.OnUsageError,
+		Name:         "dbdiff",
+		Version:      helpers.Version(),
+		Usage:        "Compare database schemas and generate migration scripts",
+		Description:  "Compare database schemas and generate migration scripts",
+		UsageText:    "dbdiff <command> [options] <source> <target>",
+		OnUsageError: helpers.OnUsageError,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "driver",
