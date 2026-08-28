@@ -13,23 +13,23 @@ const (
 
 var SupportedDriverNames = []string{SQLiteDriverName, PostgresDriverName}
 
-func DetectDriver(target string, source string) (string, error) {
-	targetDriverName := detectDriverOfArgument(target)
+func DetectDriver(source string, target string) (string, error) {
 	sourceDriverName := detectDriverOfArgument(source)
+	targetDriverName := detectDriverOfArgument(target)
 
-	if targetDriverName == "" && sourceDriverName == "" {
-		return "", fmt.Errorf("cannot detect the driver of %q and %q. Use the --driver flag", target, source)
+	if sourceDriverName == "" && targetDriverName == "" {
+		return "", fmt.Errorf("cannot detect the driver of %q and %q. Use the --driver flag", source, target)
 	}
 
-	if targetDriverName != "" && sourceDriverName != "" && targetDriverName != sourceDriverName {
-		return "", fmt.Errorf("%q names the %s driver and %q names the %s driver. Use the --driver flag", target, targetDriverName, source, sourceDriverName)
+	if sourceDriverName != "" && targetDriverName != "" && sourceDriverName != targetDriverName {
+		return "", fmt.Errorf("%q names the %s driver and %q names the %s driver. Use the --driver flag", source, sourceDriverName, target, targetDriverName)
 	}
 
-	if targetDriverName != "" {
-		return targetDriverName, nil
+	if sourceDriverName != "" {
+		return sourceDriverName, nil
 	}
 
-	return sourceDriverName, nil
+	return targetDriverName, nil
 }
 
 func detectDriverOfArgument(argument string) string {
