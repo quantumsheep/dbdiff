@@ -1893,6 +1893,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				WHERE child.relname = pg_indexes.indexname
 				AND child.relnamespace = current_schema()::regnamespace
 			)
+			ORDER BY indexname
 		`, tableName, QuoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
@@ -1935,6 +1936,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				END
 			FROM pg_trigger
 			WHERE tgrelid = $1::regclass AND tgisinternal = false
+			ORDER BY tgname
 		`, QuoteIdentifier(tableName))
 	if err != nil {
 		return nil, err

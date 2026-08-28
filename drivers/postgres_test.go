@@ -2486,6 +2486,31 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("IndexesAndTriggersKeepTheNameOrder", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (name TEXT, email TEXT);`)
+		driver.ExecOnTarget(`
+			CREATE TABLE users (name TEXT, email TEXT);
+			CREATE INDEX idx_b_name ON users(name);
+			CREATE INDEX idx_a_email ON users(email);
+			CREATE FUNCTION touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+			CREATE TRIGGER trg_b_update BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION touch();
+			CREATE TRIGGER trg_a_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION touch();
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION touch()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN NEW; END; $function$",
+			},
+			&PostgresCreateIndexInstruction{Definition: "CREATE INDEX idx_a_email ON users USING btree (email)"},
+			&PostgresCreateIndexInstruction{Definition: "CREATE INDEX idx_b_name ON users USING btree (name)"},
+			&PostgresCreateTriggerInstruction{Definition: "CREATE TRIGGER trg_a_insert BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION touch()"},
+			&PostgresCreateTriggerInstruction{Definition: "CREATE TRIGGER trg_b_update BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION touch()"},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("EqualIndexes", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
