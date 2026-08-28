@@ -790,13 +790,27 @@ func (t *PostgresTable) ForeignKeyInstructions() []Instruction {
 // The action of a rule can name a second table, so DiffTables prints the rules apart.
 func (t *PostgresTable) Instructions() []Instruction {
 	if t.IsPartition() {
-		return []Instruction{
+		instructions := []Instruction{
 			&PostgresCreateTablePartitionInstruction{
 				Name:       t.Name,
 				ParentName: t.PartitionParent,
 				Bound:      t.PartitionBound,
 			},
 		}
+
+		instructions = append(instructions, t.CommentInstructions()...)
+		instructions = append(instructions, t.RowLevelSecurityInstructions()...)
+
+		for _, index := range t.Indexes {
+			instructions = append(instructions, index.CreateInstruction())
+		}
+
+		for _, trigger := range t.Triggers {
+			instructions = append(instructions, trigger.CreateInstruction())
+			instructions = append(instructions, trigger.EnableInstructions(t.Name)...)
+		}
+
+		return instructions
 	}
 
 	instructions := []Instruction{t.CreateTableInstruction()}

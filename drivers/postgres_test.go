@@ -533,6 +533,57 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CreateAPartitionWithItsOwnObjects", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE measurements (id INT PRIMARY KEY) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+			COMMENT ON TABLE measurements_low IS 'low range';
+			CREATE FUNCTION touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+			CREATE TRIGGER trg BEFORE INSERT ON measurements_low FOR EACH ROW EXECUTE FUNCTION touch();
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION touch()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN NEW; END; $function$",
+			},
+			&PostgresCreateTableInstruction{
+				Name: "measurements",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "measurements_pkey",
+						Type: "p",
+						Def:  "PRIMARY KEY (id)",
+					},
+				},
+				PartitionKey: "RANGE (id)",
+			},
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "measurements_low",
+				ParentName: "measurements",
+				Bound:      "FOR VALUES FROM (0) TO (100)",
+			},
+			&PostgresCommentOnTableInstruction{
+				Name: "measurements_low",
+				Text: "low range",
+			},
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER trg BEFORE INSERT ON measurements_low FOR EACH ROW EXECUTE FUNCTION touch()",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CreatePartitionedTableWithAForeignKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
