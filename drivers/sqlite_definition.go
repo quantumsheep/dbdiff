@@ -413,6 +413,11 @@ func splitTopLevelTokens(part string) []string {
 		}
 
 		if character == '(' {
+			// Without the flush, CHECK(x) is one token and the constraint disappears.
+			if depth == 0 {
+				flush()
+			}
+
 			depth++
 
 			token.WriteRune(character)

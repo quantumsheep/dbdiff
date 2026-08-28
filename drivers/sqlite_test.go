@@ -1096,6 +1096,77 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CreateTableWithoutSpacesBeforeTheParentheses", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE items (
+				id INTEGER PRIMARY KEY,
+				price INTEGER CHECK(price > 0),
+				total INTEGER GENERATED ALWAYS AS(price * 2) VIRTUAL,
+				parent INTEGER,
+				CONSTRAINT fk_parent FOREIGN KEY(parent) REFERENCES parents(id),
+				CHECK(id > 0)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "parents",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+				},
+			},
+			&SQLiteCreateTableInstruction{
+				Name: "items",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:  "price",
+						Type:  "INTEGER",
+						Check: "(price > 0)",
+					},
+					{
+						Name:                "total",
+						Type:                "INTEGER",
+						GeneratedExpression: "(price * 2)",
+					},
+					{
+						Name: "parent",
+						Type: "INTEGER",
+					},
+				},
+				ForeignKeys: []*SQLiteForeignKey{
+					{
+						Name:     "fk_parent",
+						Table:    "parents",
+						From:     []string{"parent"},
+						To:       []string{"id"},
+						OnUpdate: "NO ACTION",
+						OnDelete: "NO ACTION",
+					},
+				},
+				CheckConstraints: []*SQLiteCheckConstraint{
+					{
+						Expression: "(id > 0)",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("ModifyColumnCollationRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
