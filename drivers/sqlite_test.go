@@ -1248,6 +1248,14 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ReorderedChecksGiveNoDiff", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE people (age INTEGER, CHECK (age > 0), CHECK (age < 200));`)
+		driver.ExecOnTarget(`CREATE TABLE people (age INTEGER, CHECK (age < 200), CHECK (age > 0));`)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("ReorderColumnsRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

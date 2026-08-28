@@ -3,16 +3,33 @@ package drivers
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/samber/lo"
 )
 
 // The slice holds a pointer, so slices.Equal compares the address and never the check.
+// The parser fills the list in the order of the CREATE TABLE text, and a new order of
+// two equal checks changes nothing, so the comparison sorts the two lists first.
 func equalCheckConstraints(first []*SQLiteCheckConstraint, second []*SQLiteCheckConstraint) bool {
-	return slices.EqualFunc(first, second,
+	return slices.EqualFunc(sortedCheckConstraints(first), sortedCheckConstraints(second),
 		func(firstCheck *SQLiteCheckConstraint, secondCheck *SQLiteCheckConstraint) bool {
 			return firstCheck.Equal(secondCheck)
 		})
+}
+
+func sortedCheckConstraints(constraints []*SQLiteCheckConstraint) []*SQLiteCheckConstraint {
+	sorted := slices.Clone(constraints)
+
+	slices.SortFunc(sorted, func(first *SQLiteCheckConstraint, second *SQLiteCheckConstraint) int {
+		if first.Name != second.Name {
+			return strings.Compare(first.Name, second.Name)
+		}
+
+		return strings.Compare(first.Expression, second.Expression)
+	})
+
+	return sorted
 }
 
 func equalUniqueConstraints(first []*SQLiteUniqueConstraint, second []*SQLiteUniqueConstraint) bool {
