@@ -61,35 +61,129 @@ func detectDriverOfArgument(argument string) string {
 }
 
 var postgresConnectionKeywords = []string{
+	"application_name",
+	"channel_binding",
+	"client_encoding",
+	"connect_timeout",
+	"dbname",
+	"fallback_application_name",
+	"gssdelegation",
+	"gssencmode",
+	"gsslib",
 	"host",
 	"hostaddr",
-	"port",
-	"dbname",
-	"user",
+	"keepalives",
+	"keepalives_count",
+	"keepalives_idle",
+	"keepalives_interval",
+	"krbsrvname",
+	"load_balance_hosts",
+	"options",
+	"passfile",
 	"password",
-	"sslmode",
-	"application_name",
-	"connect_timeout",
+	"port",
+	"replication",
+	"requirepeer",
 	"search_path",
+	"service",
+	"ssl_max_protocol_version",
+	"ssl_min_protocol_version",
+	"sslcert",
+	"sslcertmode",
+	"sslcompression",
+	"sslcrl",
+	"sslcrldir",
+	"sslkey",
+	"sslmode",
+	"sslnegotiation",
+	"sslpassword",
+	"sslrootcert",
+	"sslsni",
+	"target_session_attrs",
+	"tcp_user_timeout",
+	"user",
 }
 
+// A value in single quotes can hold a space, and a backslash escapes the next character.
+// A pair with an unknown keyword passes, because libpq adds keywords, but at least one
+// keyword of the list must appear. Without that rule a file path such as stats=v2.db
+// names the PostgreSQL driver.
 func isPostgresKeywordString(argument string) bool {
-	fields := strings.Fields(argument)
+	rest := strings.TrimSpace(argument)
 
-	if len(fields) == 0 {
+	if rest == "" {
 		return false
 	}
 
-	for _, field := range fields {
-		keyword, _, found := strings.Cut(field, "=")
+	holdsKnownKeyword := false
+
+	for rest != "" {
+		keyword, remainder, found := strings.Cut(rest, "=")
 		if !found {
 			return false
 		}
 
-		if !slices.Contains(postgresConnectionKeywords, keyword) {
+		keyword = strings.TrimSpace(keyword)
+		if !isConnectionKeyword(keyword) {
+			return false
+		}
+
+		if slices.Contains(postgresConnectionKeywords, keyword) {
+			holdsKnownKeyword = true
+		}
+
+		rest = strings.TrimLeft(remainder, " \t")
+
+		if strings.HasPrefix(rest, "'") {
+			end := indexAfterQuotedValue(rest)
+			if end < 0 {
+				return false
+			}
+
+			rest = strings.TrimSpace(rest[end:])
+			continue
+		}
+
+		space := strings.IndexAny(rest, " \t")
+		if space < 0 {
+			rest = ""
+			continue
+		}
+
+		rest = strings.TrimSpace(rest[space:])
+	}
+
+	return holdsKnownKeyword
+}
+
+func isConnectionKeyword(keyword string) bool {
+	if keyword == "" {
+		return false
+	}
+
+	for _, character := range keyword {
+		lower := character >= 'a' && character <= 'z'
+		digit := character >= '0' && character <= '9'
+
+		if !lower && !digit && character != '_' {
 			return false
 		}
 	}
 
 	return true
+}
+
+func indexAfterQuotedValue(rest string) int {
+	for position := 1; position < len(rest); position++ {
+		if rest[position] == '\\' {
+			position++
+			continue
+		}
+
+		if rest[position] == '\'' {
+			return position + 1
+		}
+	}
+
+	return -1
 }

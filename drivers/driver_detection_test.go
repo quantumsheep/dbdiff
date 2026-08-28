@@ -30,6 +30,27 @@ func TestDetectDriver(t *testing.T) {
 		require.Equal(t, PostgresDriverName, name)
 	})
 
+	t.Run("PostgresKeywordStringWithAQuotedValue", func(t *testing.T) {
+		name, err := DetectDriver("host=localhost user=app password='a b'", "host=localhost user=app password='c d'")
+
+		require.NoError(t, err)
+		require.Equal(t, PostgresDriverName, name)
+	})
+
+	t.Run("PostgresKeywordStringWithAnUnknownKeyword", func(t *testing.T) {
+		name, err := DetectDriver("host=localhost future_option=1", "host=localhost future_option=2")
+
+		require.NoError(t, err)
+		require.Equal(t, PostgresDriverName, name)
+	})
+
+	t.Run("FilePathWithAnEqualSign", func(t *testing.T) {
+		name, err := DetectDriver("stats=v2.db", "stats=v1.db")
+
+		require.NoError(t, err)
+		require.Equal(t, SQLiteDriverName, name)
+	})
+
 	t.Run("DatabaseFilePath", func(t *testing.T) {
 		name, err := DetectDriver("target.db", "./source.sqlite")
 
