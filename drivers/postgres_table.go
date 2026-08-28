@@ -176,6 +176,20 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
+	for _, parentName := range t.Inherits {
+		if !slices.Contains(other.Inherits, parentName) {
+			instructions = append(instructions,
+				alterTable(&PostgresInheritAction{ParentName: parentName}))
+		}
+	}
+
+	for _, parentName := range other.Inherits {
+		if !slices.Contains(t.Inherits, parentName) {
+			instructions = append(instructions,
+				alterTable(&PostgresNoInheritAction{ParentName: parentName}))
+		}
+	}
+
 	for _, targetColumn := range t.Columns {
 		sourceColumn, found := other.ColumnByName(targetColumn.Name)
 		if !found {

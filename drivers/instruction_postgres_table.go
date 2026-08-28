@@ -129,6 +129,22 @@ func (a *PostgresSetIdentityAction) TableActionClause() string {
 		QuoteIdentifier(a.ColumnName), a.Identity)
 }
 
+type PostgresInheritAction struct {
+	ParentName string
+}
+
+func (a *PostgresInheritAction) TableActionClause() string {
+	return "INHERIT " + QuoteIdentifier(a.ParentName)
+}
+
+type PostgresNoInheritAction struct {
+	ParentName string
+}
+
+func (a *PostgresNoInheritAction) TableActionClause() string {
+	return "NO INHERIT " + QuoteIdentifier(a.ParentName)
+}
+
 type PostgresSetIdentityOptionsAction struct {
 	ColumnName string
 	Options    string

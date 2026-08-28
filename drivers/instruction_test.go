@@ -880,6 +880,28 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresAlterTableInherit", func(t *testing.T) {
+		instruction := &PostgresAlterTableInstruction{
+			Name: "children",
+			Actions: []AlterTableAction{
+				&PostgresInheritAction{ParentName: "parents"},
+			},
+		}
+
+		require.Equal(t, `ALTER TABLE "children" INHERIT "parents";`, instruction.String())
+	})
+
+	t.Run("PostgresAlterTableNoInherit", func(t *testing.T) {
+		instruction := &PostgresAlterTableInstruction{
+			Name: "children",
+			Actions: []AlterTableAction{
+				&PostgresNoInheritAction{ParentName: "parents"},
+			},
+		}
+
+		require.Equal(t, `ALTER TABLE "children" NO INHERIT "parents";`, instruction.String())
+	})
+
 	t.Run("PostgresAlterTableSetIdentityOptions", func(t *testing.T) {
 		instruction := &PostgresAlterTableInstruction{
 			Name: "users",

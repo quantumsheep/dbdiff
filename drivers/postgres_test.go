@@ -2133,6 +2133,39 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("AddAndRemoveAnInheritsParent", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE old_parents (note text);
+			CREATE TABLE new_parents (note text);
+			CREATE TABLE children (id integer) INHERITS (old_parents);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE old_parents (note text);
+			CREATE TABLE new_parents (note text);
+			CREATE TABLE children (id integer) INHERITS (new_parents);
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []AlterTableAction{
+					&PostgresInheritAction{ParentName: "new_parents"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []AlterTableAction{
+					&PostgresNoInheritAction{ParentName: "old_parents"},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
