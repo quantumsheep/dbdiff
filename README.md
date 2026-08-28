@@ -154,6 +154,7 @@ DROP TABLE "audit";
 | `--data`   | none                    | Add the comparison of the rows. The default value is off.                                                                      |
 | `--comments` | none                  | Print a comment before each object that the output changes. The default value is off.                                          |
 | `--privileges` | none               | Add the comparison of the owner and the privileges. The postgres driver accepts this flag. The default value is off.            |
+| `--exit-code` | none                | Exit with the code 1 when the schemas differ, like `diff(1)`. The default value is off.                                          |
 
 ### `dbdiff`
 

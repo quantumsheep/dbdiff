@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -47,6 +48,10 @@ func main() {
 	}
 
 	err := command.Run(context.Background(), os.Args)
+	if errors.Is(err, cmddiff.ErrDifferencesFound) {
+		os.Exit(1)
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dbdiff: %v\n", err)
 		os.Exit(1)

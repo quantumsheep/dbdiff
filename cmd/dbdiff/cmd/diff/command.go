@@ -2,6 +2,7 @@ package cmddiff
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/drivers"
@@ -9,6 +10,9 @@ import (
 	dbdiffdrivers "github.com/quantumsheep/dbdiff/drivers"
 	"github.com/urfave/cli/v3"
 )
+
+// ErrDifferencesFound reaches main, which exits with the code 1 and prints nothing.
+var ErrDifferencesFound = errors.New("the schemas differ")
 
 func Command() *cli.Command {
 	return &cli.Command{
@@ -29,6 +33,10 @@ func Command() *cli.Command {
 			&cli.BoolFlag{
 				Name:  "data",
 				Usage: "Compare the rows of each table that the source and the target both hold. The comparison needs a primary key",
+			},
+			&cli.BoolFlag{
+				Name:  "exit-code",
+				Usage: "Exit with the code 1 when the schemas differ, like diff(1)",
 			},
 		},
 		Arguments: []cli.Argument{
@@ -73,6 +81,10 @@ func action(ctx context.Context, command *cli.Command) error {
 	}
 
 	fmt.Println(dbdiffdrivers.RenderInstructions(instructions))
+
+	if command.Bool("exit-code") && len(instructions) > 0 {
+		return ErrDifferencesFound
+	}
 
 	return nil
 }
