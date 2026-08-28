@@ -33,7 +33,7 @@ func NewDriver(ctx context.Context, driverName string, currentSchema string, fin
 			return nil, fmt.Errorf("the version key of dbdiff.yaml applies to the postgres driver only")
 		}
 
-		return dbdiffdrivers.NewSQLiteDriver(ctx, &dbdiffdrivers.SQLLiteDriverConfig{
+		return dbdiffdrivers.NewSQLiteDriver(ctx, &dbdiffdrivers.SQLiteDriverConfig{
 			SourceDatabasePath: currentSchema,
 			TargetDatabasePath: finalSchema,
 			CompareData:        compareData,

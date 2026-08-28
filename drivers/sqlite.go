@@ -13,7 +13,7 @@ import (
 	"github.com/samber/lo"
 )
 
-type SQLLiteDriverConfig struct {
+type SQLiteDriverConfig struct {
 	TargetDatabasePath string
 	SourceDatabasePath string
 	CompareData        bool
@@ -27,7 +27,7 @@ type SQLiteDriver struct {
 	temporaryDirectory string
 }
 
-func NewSQLiteDriver(ctx context.Context, config *SQLLiteDriverConfig) (*SQLiteDriver, error) {
+func NewSQLiteDriver(ctx context.Context, config *SQLiteDriverConfig) (*SQLiteDriver, error) {
 	driver := &SQLiteDriver{
 		CompareData: config.CompareData,
 	}

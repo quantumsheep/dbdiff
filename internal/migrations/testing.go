@@ -162,7 +162,7 @@ func GenerateSQLiteMigration(tb testing.TB, target string, migrations string) []
 
 	require.NoError(tb, os.MkdirAll(migrations, 0o750))
 
-	driver, err := drivers.NewSQLiteDriver(tb.Context(), &drivers.SQLLiteDriverConfig{
+	driver, err := drivers.NewSQLiteDriver(tb.Context(), &drivers.SQLiteDriverConfig{
 		TargetDatabasePath: target,
 		SourceDatabasePath: migrations,
 	})

@@ -97,7 +97,7 @@ func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 func NewTestSQLiteDriverWithPaths(tb testing.TB, targetPath string, sourcePath string) *TestingSQLiteDriver {
 	tb.Helper()
 
-	driver, err := NewSQLiteDriver(tb.Context(), &SQLLiteDriverConfig{
+	driver, err := NewSQLiteDriver(tb.Context(), &SQLiteDriverConfig{
 		TargetDatabasePath: targetPath,
 		SourceDatabasePath: sourcePath,
 	})
@@ -3926,7 +3926,7 @@ func TestSQLiteDriver(t *testing.T) {
 		targetPath := WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (;`)
 		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
 
-		_, err := NewSQLiteDriver(t.Context(), &SQLLiteDriverConfig{
+		_, err := NewSQLiteDriver(t.Context(), &SQLiteDriverConfig{
 			TargetDatabasePath: targetPath,
 			SourceDatabasePath: sourcePath,
 		})

@@ -302,7 +302,7 @@ func TestApplyMigrations(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, io.Discard))
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLLiteDriverConfig{
+		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
 			TargetDatabasePath: schema,
 			SourceDatabasePath: sourcePath,
 		})
@@ -538,7 +538,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLLiteDriverConfig{
+		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
 			TargetDatabasePath: directory,
 			SourceDatabasePath: sourcePath,
 		})
@@ -571,7 +571,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLLiteDriverConfig{
+		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
 			TargetDatabasePath: directory,
 			SourceDatabasePath: sourcePath,
 		})
@@ -601,7 +601,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLLiteDriverConfig{
+		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
 			TargetDatabasePath: directory,
 			SourceDatabasePath: sourcePath,
 		})
@@ -632,7 +632,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLLiteDriverConfig{
+		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
 			TargetDatabasePath: verifyDirectory,
 			SourceDatabasePath: sourcePath,
 		})
