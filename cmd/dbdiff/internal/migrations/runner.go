@@ -138,23 +138,60 @@ func RunMigrationPreview(ctx context.Context, migrator coremigrations.Migrator, 
 }
 
 func ApplyMigrations(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
-	output io.Writer) error {
-	return applyPendingMigrations(ctx, migrator, set, nil, output)
+	lastVersion string, output io.Writer) error {
+	return applyPendingMigrations(ctx, migrator, set, nil, lastVersion, output)
 }
 
 func StepMigration(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
 	input io.Reader, output io.Writer) error {
-	return applyPendingMigrations(ctx, migrator, set, bufio.NewReader(input), output)
+	return applyPendingMigrations(ctx, migrator, set, bufio.NewReader(input), "", output)
+}
+
+// An empty version keeps every pending file. A named version keeps the files up to that
+// version, and it must name a file of the directory.
+func pendingMigrationsUpTo(set *coremigrations.MigrationSet, lastVersion string) ([]*coremigrations.MigrationEntry, error) {
+	pending := set.Pending()
+
+	if lastVersion == "" {
+		return pending, nil
+	}
+
+	holdsVersion := false
+
+	for _, entry := range set.Entries {
+		if entry.Migration.Version == lastVersion {
+			holdsVersion = true
+		}
+	}
+
+	if !holdsVersion {
+		return nil, fmt.Errorf("the directory holds no migration with the version %s", lastVersion)
+	}
+
+	var kept []*coremigrations.MigrationEntry
+
+	for _, entry := range pending {
+		if entry.Migration.Version <= lastVersion {
+			kept = append(kept, entry)
+		}
+	}
+
+	return kept, nil
 }
 
 func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrator, set *coremigrations.MigrationSet,
-	reader *bufio.Reader, output io.Writer) error {
+	reader *bufio.Reader, lastVersion string, output io.Writer) error {
 	err := set.ProblemError()
 	if err != nil {
 		return err
 	}
 
-	if len(set.Pending()) == 0 {
+	pendingBeforeLock, err := pendingMigrationsUpTo(set, lastVersion)
+	if err != nil {
+		return err
+	}
+
+	if len(pendingBeforeLock) == 0 {
 		_, _ = fmt.Fprintln(output, "The database is up to date.")
 
 		return nil
@@ -191,7 +228,11 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 		return err
 	}
 
-	pending := set.Pending()
+	pending, err := pendingMigrationsUpTo(set, lastVersion)
+	if err != nil {
+		return err
+	}
+
 	if len(pending) == 0 {
 		_, _ = fmt.Fprintln(output, "The database is up to date.")
 

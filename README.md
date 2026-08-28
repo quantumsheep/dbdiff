@@ -181,6 +181,12 @@ dbdiff --version
 | ------- | ----- | ----------------------------------------------------------------------------------------- |
 | `--run` | none  | Apply the statements of every pending file in one transaction, and roll that transaction back. The default value is off. |
 
+`migrate up` also accepts one flag of its own:
+
+| Flag   | Value     | Purpose                                                                                     |
+| ------ | --------- | ------------------------------------------------------------------------------------------- |
+| `--to` | A version | Stop after the migration with this version, for example `20260822143000`. The default applies every pending migration. |
+
 Read [Migrations](#migrations) for the five keys of the configuration file.
 
 ## Driver detection

@@ -213,9 +213,10 @@ Every other flag belongs to the command that reads it:
 
 | Command                | Flags                                                  |
 | ---------------------- | ------------------------------------------------------ |
-| `diff`                 | `--privileges`, `--comments`, `--data`                 |
+| `diff`                 | `--privileges`, `--comments`, `--data`, `--exit-code`  |
 | Each `migrate` command | `--config`, `--source`, `--target`                     |
 | `migrate preview`      | The three flags above, and `--run`                     |
+| `migrate up`           | The three flags above, and `--to`                      |
 
 Each subcommand of `migrate` writes its flags in its own
 `Command` function, and the `migrate` command itself declares no flag. A flag holds the
