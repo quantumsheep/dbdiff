@@ -140,8 +140,7 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 		d.DiffOperators,
 		d.DiffTables,
 		d.DiffStatistics,
-		d.DiffViews,
-		d.DiffMaterializedViews,
+		d.DiffViewsAndMaterializedViews,
 		d.DiffPrivileges,
 	}
 
@@ -507,7 +506,9 @@ func (d *PostgresDriver) markRecreated(name string) {
 	d.recreatedObjectNames[name] = true
 }
 
-func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
+// A view can read a materialized view, and a materialized view can read a view, so the
+// two kinds share one section and one dependency order.
+func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*SectionDiff, error) {
 	var earlyRemovals []Instruction
 	var additions []Instruction
 
@@ -521,62 +522,44 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		return nil, err
 	}
 
-	for _, targetView := range targetViews {
-		sourceView, found := lo.Find(sourceViews, func(view *PostgresView) bool {
-			return view.Name == targetView.Name
-		})
-		if !found {
-			additions = append(additions, targetView.CreateInstruction())
-			continue
-		}
-
-		// A type change of a column that the view reads keeps the definition text equal.
-		if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
-			!targetView.HasEqualColumns(sourceView) {
-			d.markRecreated(targetView.Name)
-			additions = append(additions, targetView.CreateInstruction())
-		}
-	}
-
-	// PostgreSQL refuses a DROP VIEW statement while another view still reads the view, so
-	// a backward walk drops each dependent view first.
-	for _, sourceView := range slices.Backward(sourceViews) {
-		targetView, found := lo.Find(targetViews, func(view *PostgresView) bool {
-			return view.Name == sourceView.Name
-		})
-		if !found {
-			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: sourceView.Name})
-			continue
-		}
-
-		if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
-			!targetView.HasEqualColumns(sourceView) {
-			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: sourceView.Name})
-		}
-	}
-
-	return &SectionDiff{
-		EarlyRemovals: earlyRemovals,
-		Additions:     additions,
-	}, nil
-}
-
-func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDiff, error) {
-	var earlyRemovals []Instruction
-	var additions []Instruction
-
-	targetViews, err := d.GetMaterializedViews(ctx, d.TargetDatabaseConnection)
+	targetMaterializedViews, err := d.GetMaterializedViews(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceViews, err := d.GetMaterializedViews(ctx, d.SourceDatabaseConnection)
+	sourceMaterializedViews, err := d.GetMaterializedViews(ctx, d.SourceDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, targetView := range targetViews {
-		sourceView, found := lo.Find(sourceViews, func(view *PostgresMaterializedView) bool {
+	targetRelations := sortRelationsByDependency(targetViews, targetMaterializedViews)
+	sourceRelations := sortRelationsByDependency(sourceViews, sourceMaterializedViews)
+
+	for _, relation := range targetRelations {
+		if relation.View != nil {
+			targetView := relation.View
+
+			sourceView, found := lo.Find(sourceViews, func(view *PostgresView) bool {
+				return view.Name == targetView.Name
+			})
+			if !found {
+				additions = append(additions, targetView.CreateInstruction())
+				continue
+			}
+
+			// A type change of a column that the view reads keeps the definition text equal.
+			if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
+				!targetView.HasEqualColumns(sourceView) {
+				d.markRecreated(targetView.Name)
+				additions = append(additions, targetView.CreateInstruction())
+			}
+
+			continue
+		}
+
+		targetView := relation.MaterializedView
+
+		sourceView, found := lo.Find(sourceMaterializedViews, func(view *PostgresMaterializedView) bool {
 			return view.Name == targetView.Name
 		})
 		if !found {
@@ -594,8 +577,31 @@ func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDif
 		additions = append(additions, diffMaterializedViewIndexes(targetView, sourceView)...)
 	}
 
-	for _, sourceView := range slices.Backward(sourceViews) {
-		targetView, found := lo.Find(targetViews, func(view *PostgresMaterializedView) bool {
+	// PostgreSQL refuses a DROP statement while another view still reads the object, so
+	// a backward walk drops each dependent view first.
+	for _, relation := range slices.Backward(sourceRelations) {
+		if relation.View != nil {
+			sourceView := relation.View
+
+			targetView, found := lo.Find(targetViews, func(view *PostgresView) bool {
+				return view.Name == sourceView.Name
+			})
+			if !found {
+				earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: sourceView.Name})
+				continue
+			}
+
+			if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
+				!targetView.HasEqualColumns(sourceView) {
+				earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: sourceView.Name})
+			}
+
+			continue
+		}
+
+		sourceView := relation.MaterializedView
+
+		targetView, found := lo.Find(targetMaterializedViews, func(view *PostgresMaterializedView) bool {
 			return view.Name == sourceView.Name
 		})
 		if !found {

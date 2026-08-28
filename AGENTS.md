@@ -114,7 +114,7 @@ drivers/
 ├── postgres_index.go          PostgresIndex
 ├── postgres_constraint.go     PostgresConstraint
 ├── postgres_trigger.go        PostgresTrigger
-├── postgres_view.go           PostgresView
+├── postgres_view.go           PostgresView, and PostgresRelation with its dependency sort
 ├── postgres_materialized_view.go PostgresMaterializedView
 ├── postgres_policy.go         PostgresPolicy, a row level security policy
 ├── postgres_rule.go           PostgresRule, a rule of a table
@@ -541,13 +541,16 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Column storage | `pg_attribute.attstorage`, when it differs from `pg_type.typstorage` |
 | Column statistics | `pg_attribute.attstattarget`                          |
 
-`Diff` prints thirteen sections in this order: extensions, enum types, domains, composite
-types, sequences, functions, aggregates, operators, tables, extended statistics, views,
+`Diff` prints twelve sections in this order: extensions, enum types, domains, composite
+types, sequences, functions, aggregates, operators, tables, extended statistics, views and
 materialized views, privileges. A table can use each of the first five, an aggregate and an
-operator use a function, an extended statistics object names a table, and a materialized
-view reads a table or a view. The privileges section comes last, because a GRANT statement
-names an object that the other sections build. Without the `--privileges` flag that section
-stays empty. Keep that order when you add a section.
+operator use a function, and an extended statistics object names a table. A view can read
+a materialized view, and a materialized view can read a view, so
+`DiffViewsAndMaterializedViews` diffs the two kinds in one section.
+`sortRelationsByDependency` joins them into one dependency order of `PostgresRelation`
+values. The privileges section comes last, because a GRANT statement names an object that
+the other sections build. Without the `--privileges` flag that section stays empty. Keep
+that order when you add a section.
 
 `GetTables` reads `pg_class` with `relkind IN ('r', 'p')`, and not
 `information_schema.tables`. The value `p` names a partitioned table, and `relispartition`
@@ -607,8 +610,9 @@ one object.
 PostgreSQL refuses a `DROP` statement while another object uses the object, so the
 dependency must go away first. A new section needs no other work to get that order.
 
-`EarlyRemovals` covers the object that blocks an addition of another section. `DiffViews`
-writes every `DROP VIEW` statement into that field, because a view reads a column of a
+`EarlyRemovals` covers the object that blocks an addition of another section.
+`DiffViewsAndMaterializedViews` writes every `DROP VIEW` statement and every
+`DROP MATERIALIZED VIEW` statement into that field, because a view reads a column of a
 table, and PostgreSQL refuses a change of that column while the view exists. A view that
 changes gets its `DROP VIEW` in `EarlyRemovals` and its `CREATE VIEW` in `Additions`, so
 the two statements wrap the table changes.
@@ -700,8 +704,8 @@ fails, because the column removal dropped the constraint already.
 
 `GetViews` sorts the views with `sortViewsByDependency`. A view can read a second view, so
 a `CREATE VIEW` statement needs the views that it reads first, and a `DROP VIEW` statement
-takes the reverse order. `DiffViews` walks the target views forward and the source views
-backward.
+takes the reverse order. `DiffViewsAndMaterializedViews` walks the target relations
+forward and the source relations backward.
 
 ## SQL sources
 

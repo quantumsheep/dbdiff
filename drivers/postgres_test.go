@@ -1230,6 +1230,47 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CreateViewOfAMaterializedView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
+			CREATE VIEW user_identifiers AS SELECT id FROM all_users;
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "all_users",
+				Query: " SELECT id\n   FROM users;",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "user_identifiers",
+				Query: " SELECT id\n   FROM all_users;",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
+	t.Run("DropViewOfAMaterializedView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
+			CREATE VIEW user_identifiers AS SELECT id FROM all_users;
+		`)
+		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "user_identifiers"},
+			&PostgresDropMaterializedViewInstruction{Name: "all_users"},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CreateMaterializedViewWithIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
