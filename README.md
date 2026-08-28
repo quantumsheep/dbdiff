@@ -670,7 +670,9 @@ ALTER TABLE "users" ADD COLUMN "created_at" TEXT;
 ### The no-transaction directive
 
 A file that holds the line `-- dbdiff:no-transaction`, alone on the line, runs outside a
-transaction. dbdiff reads no other value on that line. The directive covers a statement
+transaction. The line `-- atlas:txmode none` of Atlas gives the same result, so a
+migration directory of Atlas keeps its directive. dbdiff reads no other value on these
+lines. The directive covers a statement
 that refuses a transaction, for example `CREATE INDEX CONCURRENTLY`, `VACUUM`, and
 `ALTER SYSTEM` of PostgreSQL, and `VACUUM` of SQLite. `PRAGMA foreign_keys` of SQLite is
 also inert inside a transaction. dbdiff generates none of these statements.

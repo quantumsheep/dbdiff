@@ -19,6 +19,10 @@ func TestFileUsesTransaction(t *testing.T) {
 		require.False(t, FileUsesTransaction("VACUUM;\n   -- dbdiff:no-transaction   \n"))
 	})
 
+	t.Run("TheAtlasDirective", func(t *testing.T) {
+		require.False(t, FileUsesTransaction("-- atlas:txmode none\nVACUUM;\n"))
+	})
+
 	t.Run("TheTextInsideALongerLine", func(t *testing.T) {
 		require.True(t, FileUsesTransaction("-- dbdiff:no-transaction is the directive\n"))
 	})

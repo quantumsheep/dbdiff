@@ -2,11 +2,16 @@ package drivers
 
 import "strings"
 
-const NoTransactionDirective = "-- dbdiff:no-transaction"
+const (
+	NoTransactionDirective      = "-- dbdiff:no-transaction"
+	AtlasNoTransactionDirective = "-- atlas:txmode none"
+)
 
 func FileUsesTransaction(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == NoTransactionDirective {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == NoTransactionDirective || trimmed == AtlasNoTransactionDirective {
 			return false
 		}
 	}

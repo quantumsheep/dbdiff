@@ -770,6 +770,7 @@ A file that holds no directive runs in ONE call. Keep that path. A call of sever
 statements needs no split, and a split adds a risk for no gain.
 
 A file that holds the line `-- dbdiff:no-transaction` runs ONE call for each statement.
+The line `-- atlas:txmode none` of Atlas gives the same result.
 PostgreSQL runs the statements of one call in an implicit transaction block, and it refuses
 `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, and every other statement of that
 kind there. The directive is the one signal that starts the split. Never read the SQL text
