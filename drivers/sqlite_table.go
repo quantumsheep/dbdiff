@@ -119,6 +119,7 @@ type SQLiteTableColumnsDiff struct {
 	ForeignKeysChanged  bool
 	ConstraintsChanged  bool
 	TableOptionsChanged bool
+	ColumnOrderChanged  bool
 
 	AddsStoredGeneratedColumn bool
 }
@@ -128,7 +129,28 @@ type SQLiteTableColumnsDiff struct {
 // COLUMN action that holds a STORED generated column.
 func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
 	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged ||
-		d.TableOptionsChanged || d.AddsStoredGeneratedColumn
+		d.TableOptionsChanged || d.AddsStoredGeneratedColumn || d.ColumnOrderChanged
+}
+
+// A SELECT * statement and an INSERT statement without column names read the order of
+// the columns, so a new order needs a recreation.
+func columnOrderChanged(target *SQLiteTable, source *SQLiteTable) bool {
+	return !slices.Equal(
+		commonColumnNamesInOrder(target, source),
+		commonColumnNamesInOrder(source, target))
+}
+
+func commonColumnNamesInOrder(first *SQLiteTable, second *SQLiteTable) []string {
+	var names []string
+
+	for _, column := range first.Columns {
+		_, found := second.ColumnByName(column.Name)
+		if found {
+			names = append(names, column.Name)
+		}
+	}
+
+	return names
 }
 
 func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
@@ -143,6 +165,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 			!equalUniqueConstraints(t.UniqueConstraints, other.UniqueConstraints),
 		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||
 			!equalCheckConstraints(t.CheckConstraints, other.CheckConstraints),
+		ColumnOrderChanged: columnOrderChanged(t, other),
 	}
 
 	for _, targetColumn := range t.Columns {

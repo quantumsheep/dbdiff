@@ -1208,6 +1208,50 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ReorderColumnsRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE people (name TEXT, age INTEGER);
+			INSERT INTO people (name, age) VALUES ('Ada', 36);
+		`)
+		driver.ExecOnTarget(`CREATE TABLE people (age INTEGER, name TEXT);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_people_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "age",
+						Type: "INTEGER",
+					},
+					{
+						Name: "name",
+						Type: "TEXT",
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_people_temp",
+				ColumnNames:       []string{"age", "name"},
+				SelectExpressions: []string{`"age"`, `"name"`},
+				SourceTableName:   "people",
+			},
+			&SQLDropTableInstruction{Name: "people"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_people_temp",
+				Action: &SQLRenameTableAction{NewName: "people"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+
+		rows := driver.FetchAllFromSource("people", "")
+		require.Equal(t, []map[string]any{
+			{"age": int64(36), "name": "Ada"},
+		}, rows)
+	})
+
 	t.Run("AddTableCheckRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
