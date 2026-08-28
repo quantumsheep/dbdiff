@@ -233,7 +233,8 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 
 	for _, sourceColumn := range other.Columns {
 		_, found := t.ColumnByName(sourceColumn.Name)
-		if !found && !lo.Contains(lo.Keys(diff.Renamed), sourceColumn.Name) {
+		_, renamed := diff.Renamed[sourceColumn.Name]
+		if !found && !renamed {
 			diff.Removed = append(diff.Removed, sourceColumn.Name)
 		}
 	}
