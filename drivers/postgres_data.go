@@ -247,6 +247,11 @@ func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName
 
 	defer func() { _ = rows.Close() }()
 
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+
 	data := &PostgresTableData{
 		Rows: make(map[string]map[string]string),
 	}
@@ -267,7 +272,7 @@ func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName
 		row := make(map[string]string, len(columnNames))
 
 		for i, name := range columnNames {
-			row[name] = formatPostgresValue(values[i])
+			row[name] = formatPostgresValue(values[i], columnTypes[i].DatabaseTypeName())
 		}
 
 		key := postgresRowKey(primaryKeyColumnNames, row)
@@ -287,7 +292,7 @@ func (d *PostgresDriver) GetTableData(ctx context.Context, db *sql.DB, tableName
 const postgresTimeLayout = "2006-01-02 15:04:05.999999-07:00"
 
 // The diff compares two rows through these literals, so NULL never equals the text 'NULL'.
-func formatPostgresValue(value any) string {
+func formatPostgresValue(value any, databaseTypeName string) string {
 	if value == nil {
 		return sqlNullLiteral
 	}
@@ -316,9 +321,15 @@ func formatPostgresValue(value any) string {
 		return "FALSE"
 	}
 
+	// pgx gives a []byte for a json value, an xml value, and an array value too, and
+	// only a bytea value takes the hex form.
 	byteaValue, isBytea := value.([]byte)
 	if isBytea {
-		return quoteLiteral(`\x` + hex.EncodeToString(byteaValue))
+		if databaseTypeName == "BYTEA" {
+			return quoteLiteral(`\x` + hex.EncodeToString(byteaValue))
+		}
+
+		return quoteLiteral(string(byteaValue))
 	}
 
 	timeValue, isTime := value.(time.Time)

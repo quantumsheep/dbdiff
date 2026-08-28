@@ -3690,6 +3690,55 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CompareRowsWithAJSONValueAndAByteaValue", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		schema := `
+			CREATE TABLE documents (
+				id integer PRIMARY KEY,
+				body jsonb,
+				raw bytea
+			);
+		`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO documents (id, body, raw) VALUES (1, '{"a": 1}', '\x01');`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO documents (id, body, raw) VALUES (1, '{"a": 2}', '\x02'), (2, '{"b": 3}', NULL);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "documents",
+				ColumnNames: []string{"id", "body", "raw"},
+				Expressions: []string{"2", `'{"b": 3}'`, "NULL"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "documents",
+				SetClauses: []*SQLSetClause{
+					{
+						ColumnName: "body",
+						Expression: `'{"a": 2}'`,
+					},
+					{
+						ColumnName: "raw",
+						Expression: `'\x02'`,
+					},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CompareRowsOfATableWithoutAPrimaryKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true
