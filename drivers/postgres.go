@@ -186,7 +186,7 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 type sectionRules[T any] struct {
 	Get    func(ctx context.Context, db *sql.DB) ([]T, error)
 	Key    func(object T) string
-	Create func(target T) Instruction
+	Create func(target T) []Instruction
 	Change func(target T, source T) []Instruction
 	Drop   func(source T) Instruction
 }
@@ -210,7 +210,7 @@ func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules secti
 			return rules.Key(object) == rules.Key(targetObject)
 		})
 		if !found {
-			additions = append(additions, rules.Create(targetObject))
+			additions = append(additions, rules.Create(targetObject)...)
 			continue
 		}
 
@@ -238,8 +238,8 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 		Key: func(extension *PostgresExtension) string {
 			return extension.Name
 		},
-		Create: func(extension *PostgresExtension) Instruction {
-			return extension.CreateInstruction()
+		Create: func(extension *PostgresExtension) []Instruction {
+			return []Instruction{extension.CreateInstruction()}
 		},
 		Change: func(target *PostgresExtension, source *PostgresExtension) []Instruction {
 			if target.Version == source.Version {
@@ -260,8 +260,8 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
 		Key: func(enumType *PostgresType) string {
 			return enumType.Name
 		},
-		Create: func(enumType *PostgresType) Instruction {
-			return enumType.CreateInstruction()
+		Create: func(enumType *PostgresType) []Instruction {
+			return enumType.Instructions()
 		},
 		Change: func(target *PostgresType, source *PostgresType) []Instruction {
 			return target.Diff(source)
@@ -278,8 +278,8 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 		Key: func(domain *PostgresDomain) string {
 			return domain.Name
 		},
-		Create: func(domain *PostgresDomain) Instruction {
-			return domain.CreateInstruction()
+		Create: func(domain *PostgresDomain) []Instruction {
+			return []Instruction{domain.CreateInstruction()}
 		},
 		Change: func(target *PostgresDomain, source *PostgresDomain) []Instruction {
 			return target.Diff(source)
@@ -296,8 +296,8 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 		Key: func(compositeType *PostgresCompositeType) string {
 			return compositeType.Name
 		},
-		Create: func(compositeType *PostgresCompositeType) Instruction {
-			return compositeType.CreateInstruction()
+		Create: func(compositeType *PostgresCompositeType) []Instruction {
+			return []Instruction{compositeType.CreateInstruction()}
 		},
 		Change: func(target *PostgresCompositeType, source *PostgresCompositeType) []Instruction {
 			return target.Diff(source)
@@ -314,8 +314,8 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 		Key: func(aggregate *PostgresAggregate) string {
 			return aggregate.Signature()
 		},
-		Create: func(aggregate *PostgresAggregate) Instruction {
-			return aggregate.CreateInstruction()
+		Create: func(aggregate *PostgresAggregate) []Instruction {
+			return []Instruction{aggregate.CreateInstruction()}
 		},
 		Change: func(target *PostgresAggregate, source *PostgresAggregate) []Instruction {
 			return target.Diff(source)
@@ -332,8 +332,8 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 		Key: func(operator *PostgresOperator) string {
 			return operator.Signature()
 		},
-		Create: func(operator *PostgresOperator) Instruction {
-			return operator.CreateInstruction()
+		Create: func(operator *PostgresOperator) []Instruction {
+			return []Instruction{operator.CreateInstruction()}
 		},
 		Change: func(target *PostgresOperator, source *PostgresOperator) []Instruction {
 			return target.Diff(source)
@@ -350,8 +350,8 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 		Key: func(sequence *PostgresSequence) string {
 			return sequence.Name
 		},
-		Create: func(sequence *PostgresSequence) Instruction {
-			return sequence.CreateInstruction()
+		Create: func(sequence *PostgresSequence) []Instruction {
+			return []Instruction{sequence.CreateInstruction()}
 		},
 		Change: func(target *PostgresSequence, source *PostgresSequence) []Instruction {
 			return target.Diff(source)
@@ -386,16 +386,30 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 		})
 		if !found {
 			additions = append(additions, targetFunction.CreateInstruction())
+
+			if targetFunction.Comment != "" {
+				additions = append(additions, targetFunction.CommentInstruction())
+			}
+
 			continue
 		}
+
+		// CREATE OR REPLACE keeps the comment, and only a DROP statement removes it.
+		dropped := false
 
 		if targetFunction.Def != sourceFunction.Def {
 			if targetFunction.ReturnType != sourceFunction.ReturnType ||
 				targetFunction.Arguments != sourceFunction.Arguments {
 				additions = append(additions, sourceFunction.DropInstruction())
+				dropped = true
 			}
 
 			additions = append(additions, targetFunction.CreateInstruction())
+		}
+
+		if targetFunction.Comment != sourceFunction.Comment ||
+			(dropped && targetFunction.Comment != "") {
+			additions = append(additions, targetFunction.CommentInstruction())
 		}
 	}
 
@@ -543,7 +557,7 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*Se
 				return view.Name == targetView.Name
 			})
 			if !found {
-				additions = append(additions, targetView.CreateInstruction())
+				additions = append(additions, targetView.Instructions()...)
 				continue
 			}
 
@@ -551,7 +565,15 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*Se
 			if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
 				!targetView.HasEqualColumns(sourceView) {
 				d.markRecreated(targetView.Name)
-				additions = append(additions, targetView.CreateInstruction())
+				additions = append(additions, targetView.Instructions()...)
+				continue
+			}
+
+			if targetView.Comment != sourceView.Comment {
+				additions = append(additions, &PostgresCommentOnViewInstruction{
+					Name: targetView.Name,
+					Text: targetView.Comment,
+				})
 			}
 
 			continue
@@ -572,6 +594,13 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*Se
 			d.markRecreated(targetView.Name)
 			additions = append(additions, targetView.Instructions()...)
 			continue
+		}
+
+		if targetView.Comment != sourceView.Comment {
+			additions = append(additions, &PostgresCommentOnMaterializedViewInstruction{
+				Name: targetView.Name,
+				Text: targetView.Comment,
+			})
 		}
 
 		additions = append(additions, diffMaterializedViewIndexes(targetView, sourceView)...)
@@ -626,14 +655,21 @@ func diffMaterializedViewIndexes(targetView *PostgresMaterializedView, sourceVie
 	for _, targetIndex := range targetView.Indexes {
 		sourceIndex, found := sourceView.IndexByName(targetIndex.Name)
 		if !found {
-			instructions = append(instructions, targetIndex.CreateInstruction())
+			instructions = append(instructions, targetIndex.Instructions()...)
 			continue
 		}
 
 		if targetIndex.Def != sourceIndex.Def {
-			instructions = append(instructions,
-				&SQLDropIndexInstruction{Name: sourceIndex.Name},
-				targetIndex.CreateInstruction())
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: sourceIndex.Name})
+			instructions = append(instructions, targetIndex.Instructions()...)
+			continue
+		}
+
+		if targetIndex.Comment != sourceIndex.Comment {
+			instructions = append(instructions, &PostgresCommentOnIndexInstruction{
+				Name: targetIndex.Name,
+				Text: targetIndex.Comment,
+			})
 		}
 	}
 
@@ -649,7 +685,8 @@ func diffMaterializedViewIndexes(targetView *PostgresMaterializedView, sourceVie
 
 func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) ([]*PostgresMaterializedView, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT m.matviewname, m.definition
+		SELECT m.matviewname, m.definition,
+			coalesce(obj_description(c.oid, 'pg_class'), '')
 		FROM pg_matviews m
 		JOIN pg_class c ON c.relname = m.matviewname
 			AND c.relnamespace = current_schema()::regnamespace
@@ -671,7 +708,7 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 	for rows.Next() {
 		view := &PostgresMaterializedView{}
 
-		err := rows.Scan(&view.Name, &view.Def)
+		err := rows.Scan(&view.Name, &view.Def, &view.Comment)
 		if err != nil {
 			return nil, err
 		}
@@ -711,7 +748,13 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql
 				indexdef,
 				' ON (ONLY )?' || quote_ident(current_schema()) || '\.',
 				' ON '
-			)
+			),
+			coalesce((
+				SELECT obj_description(c.oid, 'pg_class')
+				FROM pg_class c
+				WHERE c.relnamespace = current_schema()::regnamespace
+				AND c.relname = pg_indexes.indexname
+			), '')
 		FROM pg_indexes
 		WHERE schemaname = current_schema() AND tablename = $1
 		ORDER BY indexname
@@ -727,7 +770,7 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql
 	for rows.Next() {
 		index := &PostgresIndex{}
 
-		err := rows.Scan(&index.Name, &index.Def)
+		err := rows.Scan(&index.Name, &index.Def, &index.Comment)
 		if err != nil {
 			return nil, err
 		}
@@ -826,7 +869,7 @@ func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*Post
 
 func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresType, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT t.typname, e.enumlabel
+		SELECT t.typname, e.enumlabel, coalesce(obj_description(t.oid, 'pg_type'), '')
 		FROM pg_type t
 		JOIN pg_enum e ON e.enumtypid = t.oid
 		WHERE t.typnamespace = current_schema()::regnamespace
@@ -844,16 +887,19 @@ func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresT
 	var types []*PostgresType
 
 	for rows.Next() {
-		var typeName, value string
+		var typeName, value, comment string
 
-		err := rows.Scan(&typeName, &value)
+		err := rows.Scan(&typeName, &value, &comment)
 		if err != nil {
 			return nil, err
 		}
 
 		lastType, _ := lo.Last(types)
 		if lastType == nil || lastType.Name != typeName {
-			lastType = &PostgresType{Name: typeName}
+			lastType = &PostgresType{
+				Name:    typeName,
+				Comment: comment,
+			}
 			types = append(types, lastType)
 		}
 
@@ -1192,7 +1238,8 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 				pg_get_functiondef(p.oid),
 				'^CREATE OR REPLACE (FUNCTION|PROCEDURE) ' || quote_ident(current_schema()) || '\.',
 				'CREATE OR REPLACE \1 '
-			)
+			),
+			coalesce(obj_description(p.oid, 'pg_proc'), '')
 		FROM pg_proc p
 		WHERE p.pronamespace = current_schema()::regnamespace
 		AND p.prokind IN ('f', 'p')
@@ -1213,7 +1260,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 		function := &PostgresFunction{}
 
 		err := rows.Scan(&function.Name, &function.Arguments, &function.ArgumentTypes,
-			&function.ReturnType, &function.Kind, &function.Def)
+			&function.ReturnType, &function.Kind, &function.Def, &function.Comment)
 		if err != nil {
 			return nil, err
 		}
@@ -1552,7 +1599,13 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {
 	viewRows, err := db.QueryContext(ctx, `
 		SELECT table_name, view_definition,
-			CASE WHEN check_option = 'NONE' THEN '' ELSE check_option END
+			CASE WHEN check_option = 'NONE' THEN '' ELSE check_option END,
+			coalesce((
+				SELECT obj_description(c.oid, 'pg_class')
+				FROM pg_class c
+				WHERE c.relnamespace = current_schema()::regnamespace
+				AND c.relname = views.table_name
+			), '')
 		FROM information_schema.views
 		WHERE table_schema = current_schema()
 		AND NOT EXISTS (
@@ -1576,7 +1629,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 	for viewRows.Next() {
 		view := &PostgresView{}
 
-		err := viewRows.Scan(&view.Name, &view.Def, &view.CheckOption)
+		err := viewRows.Scan(&view.Name, &view.Def, &view.CheckOption, &view.Comment)
 		if err != nil {
 			return nil, err
 		}
@@ -1985,7 +2038,13 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 					indexdef,
 					' ON (ONLY )?' || quote_ident(current_schema()) || '\.',
 					' ON '
-				)
+				),
+				coalesce((
+					SELECT obj_description(c.oid, 'pg_class')
+					FROM pg_class c
+					WHERE c.relnamespace = current_schema()::regnamespace
+					AND c.relname = pg_indexes.indexname
+				), '')
 			FROM pg_indexes
 			WHERE schemaname = current_schema() AND tablename = $1
 			AND indexname NOT IN (
@@ -2009,7 +2068,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 	for indexRows.Next() {
 		index := &PostgresIndex{}
 
-		err := indexRows.Scan(&index.Name, &index.Def)
+		err := indexRows.Scan(&index.Name, &index.Def, &index.Comment)
 		if err != nil {
 			return nil, err
 		}

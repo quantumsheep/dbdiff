@@ -308,9 +308,10 @@ the definition of a column that owns its sequence. That word builds the sequence
 output holds no `CREATE SEQUENCE` statement for it. The definition holds no `DEFAULT`
 clause, because the word gives the column that default.
 
-**Comments.** The driver compares the comment of a table and the comment of a column.
-PostgreSQL accepts a comment in no `CREATE` statement, so the output prints a separate
-`COMMENT ON` statement. A comment that goes away gives the keyword `NULL`.
+**Comments.** The driver compares the comment of a table, of a column, of a view, of a
+materialized view, of an index, of a function, and of an enum type. PostgreSQL accepts a comment in no `CREATE`
+statement, so the output prints a separate `COMMENT ON` statement. A comment that goes
+away gives the keyword `NULL`.
 
 **Row level security.** The driver compares the two switches of a table and each policy of
 it. PostgreSQL holds no action that changes a policy, so a changed policy prints a

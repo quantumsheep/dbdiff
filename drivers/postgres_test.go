@@ -1408,6 +1408,137 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("ModifyViewComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE users (id INT);
+			CREATE VIEW all_users AS SELECT id FROM users;
+		`
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`COMMENT ON VIEW all_users IS 'the old comment';`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`COMMENT ON VIEW all_users IS 'the new comment';`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCommentOnViewInstruction{
+				Name: "all_users",
+				Text: "the new comment",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("CreateViewWithComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW all_users AS SELECT id FROM users;
+			COMMENT ON VIEW all_users IS 'every person';
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateViewInstruction{
+				Name:  "all_users",
+				Query: " SELECT id\n   FROM users;",
+			},
+			&PostgresCommentOnViewInstruction{
+				Name: "all_users",
+				Text: "every person",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ModifyMaterializedViewComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE users (id INT);
+			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
+		`
+		driver.ExecOnSource(schema)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`COMMENT ON MATERIALIZED VIEW all_users IS 'every person';`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCommentOnMaterializedViewInstruction{
+				Name: "all_users",
+				Text: "every person",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ModifyIndexComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE users (id INT, email TEXT);
+			CREATE INDEX users_email ON users (email);
+		`
+		driver.ExecOnSource(schema)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`COMMENT ON INDEX users_email IS 'the lookup key';`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCommentOnIndexInstruction{
+				Name: "users_email",
+				Text: "the lookup key",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ModifyFunctionComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `CREATE FUNCTION add_one(integer) RETURNS integer AS $$ SELECT $1 + 1; $$ LANGUAGE sql;`
+		driver.ExecOnSource(schema)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`COMMENT ON FUNCTION add_one(integer) IS 'the next value';`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCommentOnRoutineInstruction{
+				Name:      "add_one",
+				Arguments: "integer",
+				Text:      "the next value",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ModifyTypeComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `CREATE TYPE mood AS ENUM ('sad', 'happy');`
+		driver.ExecOnSource(schema)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`COMMENT ON TYPE mood IS 'the state of a person';`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCommentOnTypeInstruction{
+				Name: "mood",
+				Text: "the state of a person",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CreateTableWithRowLevelSecurity", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

@@ -527,6 +527,48 @@ func (i *PostgresCommentOnColumnInstruction) Comment() string {
 	return objectComment("Modify", "table", i.TableName)
 }
 
+type PostgresCommentOnViewInstruction struct {
+	Name string
+	Text string
+}
+
+func (i *PostgresCommentOnViewInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON VIEW %s IS %s;",
+		QuoteIdentifier(i.Name), commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnViewInstruction) Comment() string {
+	return objectComment("Modify", "view", i.Name)
+}
+
+type PostgresCommentOnMaterializedViewInstruction struct {
+	Name string
+	Text string
+}
+
+func (i *PostgresCommentOnMaterializedViewInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON MATERIALIZED VIEW %s IS %s;",
+		QuoteIdentifier(i.Name), commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnMaterializedViewInstruction) Comment() string {
+	return objectComment("Modify", "materialized view", i.Name)
+}
+
+type PostgresCommentOnIndexInstruction struct {
+	Name string
+	Text string
+}
+
+func (i *PostgresCommentOnIndexInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON INDEX %s IS %s;",
+		QuoteIdentifier(i.Name), commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnIndexInstruction) Comment() string {
+	return objectComment("Modify", "index", i.Name)
+}
+
 func commentLiteral(comment string) string {
 	if comment == "" {
 		return sqlNullLiteral

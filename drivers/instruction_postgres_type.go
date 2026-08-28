@@ -174,3 +174,17 @@ type PostgresDropDomainConstraintAction struct {
 func (a *PostgresDropDomainConstraintAction) DomainActionClause() string {
 	return "DROP CONSTRAINT " + QuoteIdentifier(a.ConstraintName)
 }
+
+type PostgresCommentOnTypeInstruction struct {
+	Name string
+	Text string
+}
+
+func (i *PostgresCommentOnTypeInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON TYPE %s IS %s;",
+		QuoteIdentifier(i.Name), commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnTypeInstruction) Comment() string {
+	return objectComment("Modify", "type", i.Name)
+}

@@ -254,6 +254,52 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, `Modify the table "users"`, instruction.Comment())
 	})
 
+	t.Run("PostgresCommentOnView", func(t *testing.T) {
+		instruction := &PostgresCommentOnViewInstruction{
+			Name: "active_users",
+			Text: "the people that signed in",
+		}
+
+		require.Equal(t, `Modify the view "active_users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnMaterializedView", func(t *testing.T) {
+		instruction := &PostgresCommentOnMaterializedViewInstruction{
+			Name: "daily_totals",
+			Text: "the totals of one day",
+		}
+
+		require.Equal(t, `Modify the materialized view "daily_totals"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnIndex", func(t *testing.T) {
+		instruction := &PostgresCommentOnIndexInstruction{
+			Name: "users_email",
+			Text: "the lookup key of the sign in",
+		}
+
+		require.Equal(t, `Modify the index "users_email"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnRoutine", func(t *testing.T) {
+		instruction := &PostgresCommentOnRoutineInstruction{
+			Name:      "add",
+			Arguments: "integer, integer",
+			Text:      "the sum of the two values",
+		}
+
+		require.Equal(t, `Modify the function "add"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnType", func(t *testing.T) {
+		instruction := &PostgresCommentOnTypeInstruction{
+			Name: "mood",
+			Text: "the state of a person",
+		}
+
+		require.Equal(t, `Modify the type "mood"`, instruction.Comment())
+	})
+
 	t.Run("PostgresCreateMaterializedView", func(t *testing.T) {
 		instruction := &PostgresCreateMaterializedViewInstruction{
 			Name:  "sales_of_the_month",

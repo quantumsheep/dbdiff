@@ -7,6 +7,7 @@ type PostgresMaterializedView struct {
 	Def     string
 	Columns []*PostgresViewColumn
 	Indexes []*PostgresIndex
+	Comment string
 }
 
 func (v *PostgresMaterializedView) HasEqualColumns(other *PostgresMaterializedView) bool {
@@ -37,8 +38,16 @@ func (v *PostgresMaterializedView) DropInstruction() *PostgresDropMaterializedVi
 func (v *PostgresMaterializedView) Instructions() []Instruction {
 	instructions := []Instruction{v.CreateInstruction()}
 
+	// CREATE MATERIALIZED VIEW accepts no comment, so the comment takes its own statement.
+	if v.Comment != "" {
+		instructions = append(instructions, &PostgresCommentOnMaterializedViewInstruction{
+			Name: v.Name,
+			Text: v.Comment,
+		})
+	}
+
 	for _, index := range v.Indexes {
-		instructions = append(instructions, index.CreateInstruction())
+		instructions = append(instructions, index.Instructions()...)
 	}
 
 	return instructions

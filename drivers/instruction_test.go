@@ -810,6 +810,62 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresCommentOnView", func(t *testing.T) {
+		instruction := &PostgresCommentOnViewInstruction{
+			Name: "active_users",
+			Text: "the people that signed in",
+		}
+
+		require.Equal(t,
+			`COMMENT ON VIEW "active_users" IS 'the people that signed in';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCommentOnMaterializedView", func(t *testing.T) {
+		instruction := &PostgresCommentOnMaterializedViewInstruction{
+			Name: "daily_totals",
+			Text: "the totals of one day",
+		}
+
+		require.Equal(t,
+			`COMMENT ON MATERIALIZED VIEW "daily_totals" IS 'the totals of one day';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCommentOnIndex", func(t *testing.T) {
+		instruction := &PostgresCommentOnIndexInstruction{
+			Name: "users_email",
+			Text: "the lookup key of the sign in",
+		}
+
+		require.Equal(t,
+			`COMMENT ON INDEX "users_email" IS 'the lookup key of the sign in';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCommentOnRoutine", func(t *testing.T) {
+		instruction := &PostgresCommentOnRoutineInstruction{
+			Name:      "add",
+			Arguments: "integer, integer",
+			Text:      "the sum of the two values",
+		}
+
+		require.Equal(t,
+			`COMMENT ON ROUTINE "add"(integer, integer) IS 'the sum of the two values';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCommentOnType", func(t *testing.T) {
+		instruction := &PostgresCommentOnTypeInstruction{
+			Name: "mood",
+			Text: "the state of a person",
+		}
+
+		require.Equal(t,
+			`COMMENT ON TYPE "mood" IS 'the state of a person';`,
+			instruction.String())
+	})
+
 	t.Run("PostgresCommentWithAQuote", func(t *testing.T) {
 		instruction := &PostgresCommentOnTableInstruction{
 			Name: "users",

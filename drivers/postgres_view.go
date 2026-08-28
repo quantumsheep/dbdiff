@@ -15,6 +15,8 @@ type PostgresView struct {
 
 	// The query text of the view holds no check option, so the diff compares this field too.
 	CheckOption string
+
+	Comment string
 }
 
 func (v *PostgresView) HasEqualColumns(other *PostgresView) bool {
@@ -37,6 +39,20 @@ func (v *PostgresView) CreateInstruction() *PostgresCreateViewInstruction {
 		Query:       v.Def,
 		CheckOption: v.CheckOption,
 	}
+}
+
+// CREATE VIEW accepts no comment, so the comment takes its own statement.
+func (v *PostgresView) Instructions() []Instruction {
+	instructions := []Instruction{v.CreateInstruction()}
+
+	if v.Comment != "" {
+		instructions = append(instructions, &PostgresCommentOnViewInstruction{
+			Name: v.Name,
+			Text: v.Comment,
+		})
+	}
+
+	return instructions
 }
 
 // A view can read a materialized view, and a materialized view can read a view, so one

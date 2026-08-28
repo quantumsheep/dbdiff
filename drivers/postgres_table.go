@@ -442,14 +442,21 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	for _, targetIndex := range t.Indexes {
 		sourceIndex, found := other.IndexByName(targetIndex.Name)
 		if !found {
-			instructions = append(instructions, targetIndex.CreateInstruction())
+			instructions = append(instructions, targetIndex.Instructions()...)
 			continue
 		}
 
 		if targetIndex.Def != sourceIndex.Def {
-			instructions = append(instructions,
-				&SQLDropIndexInstruction{Name: sourceIndex.Name},
-				targetIndex.CreateInstruction())
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: sourceIndex.Name})
+			instructions = append(instructions, targetIndex.Instructions()...)
+			continue
+		}
+
+		if targetIndex.Comment != sourceIndex.Comment {
+			instructions = append(instructions, &PostgresCommentOnIndexInstruction{
+				Name: targetIndex.Name,
+				Text: targetIndex.Comment,
+			})
 		}
 	}
 
@@ -808,7 +815,7 @@ func (t *PostgresTable) Instructions() []Instruction {
 		instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 
 		for _, index := range t.Indexes {
-			instructions = append(instructions, index.CreateInstruction())
+			instructions = append(instructions, index.Instructions()...)
 		}
 
 		for _, trigger := range t.Triggers {
@@ -830,7 +837,7 @@ func (t *PostgresTable) Instructions() []Instruction {
 	instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 
 	for _, index := range t.Indexes {
-		instructions = append(instructions, index.CreateInstruction())
+		instructions = append(instructions, index.Instructions()...)
 	}
 
 	// The mode USING INDEX names an index, so this statement comes after the index loop.

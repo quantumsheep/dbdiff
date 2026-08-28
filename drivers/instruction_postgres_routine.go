@@ -291,3 +291,19 @@ func (i *PostgresDropOperatorInstruction) String() string {
 func (i *PostgresDropOperatorInstruction) Comment() string {
 	return "Drop the operator " + i.Name
 }
+
+// The word ROUTINE covers a function and a procedure, so one type serves both kinds.
+type PostgresCommentOnRoutineInstruction struct {
+	Name      string
+	Arguments string
+	Text      string
+}
+
+func (i *PostgresCommentOnRoutineInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON ROUTINE %s(%s) IS %s;",
+		QuoteIdentifier(i.Name), i.Arguments, commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnRoutineInstruction) Comment() string {
+	return objectComment("Modify", "function", i.Name)
+}

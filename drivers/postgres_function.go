@@ -9,6 +9,15 @@ type PostgresFunction struct {
 	ReturnType    string
 	Kind          string
 	Def           string
+	Comment       string
+}
+
+func (f *PostgresFunction) CommentInstruction() *PostgresCommentOnRoutineInstruction {
+	return &PostgresCommentOnRoutineInstruction{
+		Name:      f.Name,
+		Arguments: f.Arguments,
+		Text:      f.Comment,
+	}
 }
 
 func (f *PostgresFunction) Signature() string {
