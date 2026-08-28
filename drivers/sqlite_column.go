@@ -91,7 +91,7 @@ func (c *SQLiteColumn) Definition() string {
 	}
 
 	if c.Collation != "" {
-		value += " COLLATE " + c.Collation
+		value += " COLLATE " + QuoteIdentifier(c.Collation)
 	}
 
 	if c.IsGenerated() {

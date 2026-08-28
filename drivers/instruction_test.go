@@ -633,7 +633,7 @@ func TestInstructions(t *testing.T) {
 		}
 
 		require.Equal(t, `CREATE TABLE "people" (
-	"name" TEXT COLLATE NOCASE,
+	"name" TEXT COLLATE "NOCASE",
 	"age" INTEGER CHECK (age > 0)
 );`, instruction.String())
 	})
