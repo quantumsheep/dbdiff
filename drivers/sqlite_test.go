@@ -4086,6 +4086,46 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("GooseMigrationsDirectorySource", func(t *testing.T) {
+		migrationsDirectory := t.TempDir()
+
+		WriteSQLFile(t, migrationsDirectory, "00001_create_users.sql", `
+			-- +goose Up
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+
+			-- +goose Down
+			DROP TABLE users;
+		`)
+
+		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
+
+		driver := NewTestSQLiteDriverWithPaths(t, migrationsDirectory, sourcePath)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				Name: "users",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+				},
+				ForeignKeys: []*SQLiteForeignKey{},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("SQLFileTargetOnBothSides", func(t *testing.T) {
 		targetPath := WriteSQLFile(t, t.TempDir(), "target.sql", `
 			CREATE TABLE users (

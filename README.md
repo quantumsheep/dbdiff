@@ -456,10 +456,9 @@ source.
 ### Limits of a SQL file
 
 - The SQL must be correct for the engine that the `--driver` flag names.
-- dbdiff reads no annotation of a migration tool. A goose file holds the up migration and
-  the down migration in one file, behind a `-- +goose` comment. dbdiff applies both parts,
-  so a goose directory gives a wrong schema. A golang-migrate directory and a directory of
-  numbered files work.
+- dbdiff reads the up migration of a goose file, and it stops at the `-- +goose Down`
+  line. It reads no other annotation of a migration tool. A golang-migrate directory and a
+  directory of numbered files work.
 - dbdiff reads the top level of the directory only. It reads no subdirectory.
 - dbdiff applies each file in one call. PostgreSQL runs the statements of one call in an
   implicit transaction block, and it refuses `CREATE INDEX CONCURRENTLY` there. Write the
