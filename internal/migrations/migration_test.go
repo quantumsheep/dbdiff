@@ -71,6 +71,18 @@ func TestMigrationIdentity(t *testing.T) {
 		require.Equal(t, MigrationChecksum([]byte("SELECT 1;")), migrations[0].Checksum)
 	})
 
+	t.Run("ReadDirectorySkipsADownFile", func(t *testing.T) {
+		directory := t.TempDir()
+
+		WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;")
+		WriteSQLFile(t, directory, "20260814101500_init.down.sql", "SELECT 2;")
+
+		migrations, err := ReadMigrationDirectory(directory)
+		require.NoError(t, err)
+		require.Len(t, migrations, 1)
+		require.Equal(t, "init", migrations[0].Name)
+	})
+
 	t.Run("ReadDirectoryThatIsAbsent", func(t *testing.T) {
 		migrations, err := ReadMigrationDirectory(filepath.Join(t.TempDir(), "absent"))
 		require.NoError(t, err)

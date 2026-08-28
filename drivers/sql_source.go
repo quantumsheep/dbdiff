@@ -103,7 +103,7 @@ func collectSQLFiles(directory string) ([]string, error) {
 	var files []string
 
 	for _, entry := range entries {
-		if entry.IsDir() || !HasSQLExtension(entry.Name()) || isDownMigration(entry.Name()) {
+		if entry.IsDir() || !HasSQLExtension(entry.Name()) || IsDownMigration(entry.Name()) {
 			continue
 		}
 
@@ -119,6 +119,6 @@ func HasSQLExtension(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".sql")
 }
 
-func isDownMigration(name string) bool {
+func IsDownMigration(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".down.sql")
 }

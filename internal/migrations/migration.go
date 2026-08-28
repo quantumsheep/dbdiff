@@ -102,7 +102,7 @@ func ReadMigrationDirectory(directory string) ([]*Migration, error) {
 	var migrations []*Migration
 
 	for _, entry := range entries {
-		if entry.IsDir() || !drivers.HasSQLExtension(entry.Name()) {
+		if entry.IsDir() || !drivers.HasSQLExtension(entry.Name()) || drivers.IsDownMigration(entry.Name()) {
 			continue
 		}
 
