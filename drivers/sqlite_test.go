@@ -532,6 +532,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -563,6 +564,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_users_temp",
 				Action: &SQLRenameTableAction{NewName: "users"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -593,6 +595,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -620,6 +623,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_users_temp",
 				Action: &SQLRenameTableAction{NewName: "users"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -650,6 +654,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -676,6 +681,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_users_temp",
 				Action: &SQLRenameTableAction{NewName: "users"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -789,6 +795,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_measures_temp",
@@ -816,6 +823,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_measures_temp",
 				Action: &SQLRenameTableAction{NewName: "measures"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -850,6 +858,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_measures_temp",
@@ -881,6 +890,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_measures_temp",
 				Action: &SQLRenameTableAction{NewName: "measures"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -914,6 +924,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_measures_temp",
@@ -941,6 +952,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_measures_temp",
 				Action: &SQLRenameTableAction{NewName: "measures"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -994,6 +1006,7 @@ func TestSQLiteDriver(t *testing.T) {
 		`)
 		driver.ExecOnTarget(`CREATE TABLE events (id INTEGER, label TEXT) STRICT;`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_events_temp",
@@ -1020,6 +1033,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_events_temp",
 				Action: &SQLRenameTableAction{NewName: "events"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -1176,6 +1190,7 @@ func TestSQLiteDriver(t *testing.T) {
 		`)
 		driver.ExecOnTarget(`CREATE TABLE people (name TEXT COLLATE NOCASE);`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_people_temp",
@@ -1198,6 +1213,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_people_temp",
 				Action: &SQLRenameTableAction{NewName: "people"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -1217,6 +1233,7 @@ func TestSQLiteDriver(t *testing.T) {
 		`)
 		driver.ExecOnTarget(`CREATE TABLE people (age INTEGER, name TEXT);`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_people_temp",
@@ -1242,6 +1259,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_people_temp",
 				Action: &SQLRenameTableAction{NewName: "people"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -1264,6 +1282,7 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE people (name TEXT, CHECK (length(name) < 100));
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_people_temp",
@@ -1288,6 +1307,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_people_temp",
 				Action: &SQLRenameTableAction{NewName: "people"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -1469,6 +1489,7 @@ func TestSQLiteDriver(t *testing.T) {
 		`)
 		driver.ExecOnTarget(`CREATE TABLE t (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_t_temp",
@@ -1492,6 +1513,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_t_temp",
 				Action: &SQLRenameTableAction{NewName: "t"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -1627,6 +1649,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				Name: "_children_temp",
 				Columns: []*SQLiteColumn{
@@ -1662,6 +1685,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_children_temp",
 				Action: &SQLRenameTableAction{NewName: "children"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -1772,6 +1796,7 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE items (id INTEGER, CONSTRAINT items_new CHECK (id > 0));
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_items_temp",
@@ -1799,6 +1824,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_items_temp",
 				Action: &SQLRenameTableAction{NewName: "items"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2189,6 +2215,7 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -2227,6 +2254,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Keys:      []string{`"name"`},
 				Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2289,6 +2317,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -2320,6 +2349,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_users_temp",
 				Action: &SQLRenameTableAction{NewName: "users"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2402,6 +2432,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_members_temp",
@@ -2437,6 +2468,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_members_temp",
 				Action: &SQLRenameTableAction{NewName: "members"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2552,6 +2584,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_memberships_temp",
@@ -2584,6 +2617,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_memberships_temp",
 				Action: &SQLRenameTableAction{NewName: "memberships"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2618,6 +2652,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_memberships_temp",
@@ -2651,6 +2686,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_memberships_temp",
 				Action: &SQLRenameTableAction{NewName: "memberships"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2682,6 +2718,7 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE INDEX idx_users_age ON users (age);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -2713,6 +2750,7 @@ func TestSQLiteDriver(t *testing.T) {
 				TableName: "users",
 				Keys:      []string{`"age"`},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2744,6 +2782,7 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE INDEX idx_users_age ON users (age);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -2775,6 +2814,7 @@ func TestSQLiteDriver(t *testing.T) {
 				TableName: "users",
 				Keys:      []string{`"age"`},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2805,6 +2845,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -2831,6 +2872,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_users_temp",
 				Action: &SQLRenameTableAction{NewName: "users"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -2862,6 +2904,7 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
 				Name:        "_users_temp",
@@ -2891,6 +2934,7 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLiteCreateTriggerInstruction{
 				Definition: "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END",
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)
@@ -3130,6 +3174,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
 			&SQLiteCreateTableInstruction{
 				Name: "_posts_temp",
 				Columns: []*SQLiteColumn{
@@ -3168,6 +3213,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:   "_posts_temp",
 				Action: &SQLRenameTableAction{NewName: "posts"},
 			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
 		})
 
 		driver.ExecOnSource(diff)

@@ -98,7 +98,25 @@ func (d *SQLiteDriver) Diff(ctx context.Context) ([]Instruction, error) {
 		instructions = append(instructions, dataInstructions...)
 	}
 
+	// SQLite refuses the DROP TABLE of a recreation while another table names the
+	// dropped table and the enforcement of the foreign keys is on.
+	if holdsTableRecreation(instructions) {
+		instructions = append([]Instruction{&SQLitePragmaForeignKeysInstruction{}}, instructions...)
+		instructions = append(instructions, &SQLitePragmaForeignKeysInstruction{Enabled: true})
+	}
+
 	return instructions, nil
+}
+
+func holdsTableRecreation(instructions []Instruction) bool {
+	for index := range instructions {
+		name, _ := tableRecreationAt(instructions, index)
+		if name != "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {

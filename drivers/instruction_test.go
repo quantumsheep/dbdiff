@@ -356,6 +356,13 @@ func TestInstructions(t *testing.T) {
 );`, instruction.String())
 	})
 
+	t.Run("SQLitePragmaForeignKeys", func(t *testing.T) {
+		require.Equal(t, "PRAGMA foreign_keys = OFF;",
+			(&SQLitePragmaForeignKeysInstruction{}).String())
+		require.Equal(t, "PRAGMA foreign_keys = ON;",
+			(&SQLitePragmaForeignKeysInstruction{Enabled: true}).String())
+	})
+
 	t.Run("SQLiteCreateIndex", func(t *testing.T) {
 		instruction := &SQLiteCreateIndexInstruction{
 			Name:      "idx_users_name",

@@ -168,3 +168,23 @@ func (i *SQLiteDropTriggerInstruction) String() string {
 func (i *SQLiteDropTriggerInstruction) Comment() string {
 	return objectComment("Drop", "trigger", i.Name)
 }
+
+type SQLitePragmaForeignKeysInstruction struct {
+	Enabled bool
+}
+
+func (i *SQLitePragmaForeignKeysInstruction) String() string {
+	if i.Enabled {
+		return "PRAGMA foreign_keys = ON;"
+	}
+
+	return "PRAGMA foreign_keys = OFF;"
+}
+
+func (i *SQLitePragmaForeignKeysInstruction) Comment() string {
+	if i.Enabled {
+		return "Turn the enforcement of the foreign keys on again"
+	}
+
+	return "Turn the enforcement of the foreign keys off for the recreation of a table"
+}

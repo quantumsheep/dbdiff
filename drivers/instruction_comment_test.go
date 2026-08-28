@@ -110,6 +110,13 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, `Create the virtual table "documents"`, instruction.Comment())
 	})
 
+	t.Run("SQLitePragmaForeignKeys", func(t *testing.T) {
+		require.Equal(t, "Turn the enforcement of the foreign keys off for the recreation of a table",
+			(&SQLitePragmaForeignKeysInstruction{}).Comment())
+		require.Equal(t, "Turn the enforcement of the foreign keys on again",
+			(&SQLitePragmaForeignKeysInstruction{Enabled: true}).Comment())
+	})
+
 	t.Run("SQLiteCreateIndex", func(t *testing.T) {
 		instruction := &SQLiteCreateIndexInstruction{
 			Name:      "users_email",
