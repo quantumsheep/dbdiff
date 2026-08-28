@@ -3662,6 +3662,34 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CompareRowsOfAPartitionedTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		schema := `
+			CREATE TABLE measurements (
+				id integer PRIMARY KEY,
+				value integer
+			) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+		`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO measurements (id, value) VALUES (1, 5);`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO measurements (id, value) VALUES (1, 5), (2, 7);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "measurements",
+				ColumnNames: []string{"id", "value"},
+				Expressions: []string{"2", "7"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CompareRowsOfATableWithoutAPrimaryKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true

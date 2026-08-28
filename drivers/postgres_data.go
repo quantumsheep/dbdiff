@@ -33,6 +33,12 @@ func (d *PostgresDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 	}
 
 	for _, targetTable := range targetTables {
+		// A SELECT of the parent returns the rows of each partition, so the partition
+		// gets no comparison of its own.
+		if targetTable.IsPartition() {
+			continue
+		}
+
 		sourceTable, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
 			return table.Name == targetTable.Name
 		})
