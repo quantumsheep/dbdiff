@@ -129,6 +129,38 @@ func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
 	return nil, false
 }
 
+func identityOptionDefaults(sourceOptions string, columnType string) string {
+	maxValue := "9223372036854775807"
+
+	switch columnType {
+	case "smallint":
+		maxValue = "32767"
+	case "integer":
+		maxValue = "2147483647"
+	}
+
+	var defaults []string
+
+	for _, option := range splitSequenceOptions(sourceOptions) {
+		switch strings.ToUpper(strings.Fields(option)[0]) {
+		case "START":
+			defaults = append(defaults, "START WITH 1")
+		case "INCREMENT":
+			defaults = append(defaults, "INCREMENT BY 1")
+		case "MINVALUE":
+			defaults = append(defaults, "MINVALUE 1")
+		case "MAXVALUE":
+			defaults = append(defaults, "MAXVALUE "+maxValue)
+		case "CACHE":
+			defaults = append(defaults, "CACHE 1")
+		case "CYCLE":
+			defaults = append(defaults, "NO CYCLE")
+		}
+	}
+
+	return strings.Join(defaults, " ")
+}
+
 func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) ([]Instruction, error) {
 	var instructions []Instruction
 
@@ -274,11 +306,18 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 
 		// The options of an identity column live in its sequence.
 		if targetColumn.Identity != "" && sourceColumn.Identity != "" &&
-			targetColumn.IdentityOptions != sourceColumn.IdentityOptions &&
-			targetColumn.IdentityOptions != "" {
+			targetColumn.IdentityOptions != sourceColumn.IdentityOptions {
+			options := targetColumn.IdentityOptions
+
+			// The read builds the options from the values that differ from the defaults,
+			// so an empty target resets each option that the source names.
+			if options == "" {
+				options = identityOptionDefaults(sourceColumn.IdentityOptions, targetColumn.Type)
+			}
+
 			instructions = append(instructions, alterTable(&PostgresSetIdentityOptionsAction{
 				ColumnName: targetColumn.Name,
-				Options:    targetColumn.IdentityOptions,
+				Options:    options,
 			}))
 		}
 
