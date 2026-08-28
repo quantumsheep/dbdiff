@@ -196,6 +196,8 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
+	var dropNotNullInstructions []Instruction
+
 	for _, parentName := range t.Inherits {
 		if !slices.Contains(other.Inherits, parentName) {
 			instructions = append(instructions,
@@ -269,7 +271,9 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				instructions = append(instructions,
 					alterTable(&PostgresSetNotNullAction{ColumnName: targetColumn.Name}))
 			} else {
-				instructions = append(instructions,
+				// PostgreSQL refuses to remove the flag of a column of the primary key,
+				// so this action waits for the constraint blocks below.
+				dropNotNullInstructions = append(dropNotNullInstructions,
 					alterTable(&PostgresDropNotNullAction{ColumnName: targetColumn.Name}))
 			}
 		}
@@ -432,6 +436,8 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				alterTable(&PostgresDropConstraintAction{ConstraintName: sourceConstraint.Name}))
 		}
 	}
+
+	instructions = append(instructions, dropNotNullInstructions...)
 
 	for _, targetIndex := range t.Indexes {
 		sourceIndex, found := other.IndexByName(targetIndex.Name)

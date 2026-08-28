@@ -1639,16 +1639,16 @@ func TestPostgresDriver(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []AlterTableAction{
-					&PostgresDropNotNullAction{ColumnName: "id"},
-				},
-			},
-			&PostgresAlterTableInstruction{
-				Name: "users",
-				Actions: []AlterTableAction{
 					&PostgresDropDefaultAction{ColumnName: "id"},
 				},
 			},
 			&PostgresDropSequenceInstruction{Name: "users_id_seq"},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresDropNotNullAction{ColumnName: "id"},
+				},
+			},
 		})
 
 		driver.ExecOnSource(diff)
@@ -4224,6 +4224,54 @@ func TestPostgresDriver(t *testing.T) {
 			{"id": int64(2), "body": nil},
 			{"id": int64(3), "body": nil},
 		}, rows)
+	})
+
+	t.Run("CompareRowsOfATableWithTheKeyOnAnotherColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnSource(`CREATE TABLE items (a integer PRIMARY KEY, b integer);`)
+		driver.ExecOnSource(`INSERT INTO items (a, b) VALUES (1, 2);`)
+
+		driver.ExecOnTarget(`CREATE TABLE items (a integer, b integer PRIMARY KEY);`)
+		driver.ExecOnTarget(`INSERT INTO items (a, b) VALUES (1, 2);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []AlterTableAction{
+					&PostgresSetNotNullAction{ColumnName: "b"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "items_pkey"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "items_pkey",
+							Type: "p",
+							Def:  "PRIMARY KEY (b)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []AlterTableAction{
+					&PostgresDropNotNullAction{ColumnName: "a"},
+				},
+			},
+			&SQLCommentInstruction{
+				Text: `The table "items" holds another primary key in the source, so dbdiff compares no row of it.`,
+			},
+		})
+
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CompareRowsOfATableWithAnotherPrimaryKey", func(t *testing.T) {
