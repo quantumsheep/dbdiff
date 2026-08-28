@@ -3378,6 +3378,27 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("Procedures", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE PROCEDURE record_run() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		driver.ExecOnSource(`CREATE PROCEDURE outdated() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		driver.ExecOnSource(`CREATE PROCEDURE untouched() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		driver.ExecOnTarget(`CREATE PROCEDURE record_run() LANGUAGE sql AS $$ SELECT 2 $$;`)
+		driver.ExecOnTarget(`CREATE PROCEDURE untouched() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresCreateProcedureInstruction{
+				Definition: "CREATE OR REPLACE PROCEDURE record_run()\n LANGUAGE sql\nAS $procedure$ SELECT 2 $procedure$",
+			},
+			&PostgresDropProcedureInstruction{
+				Name:      "outdated",
+				Arguments: "",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CreateExtension", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithTwoDatabases(t)
 

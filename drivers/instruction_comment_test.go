@@ -342,6 +342,23 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, `Drop the function "subtract"`, instruction.Comment())
 	})
 
+	t.Run("PostgresCreateProcedure", func(t *testing.T) {
+		instruction := &PostgresCreateProcedureInstruction{
+			Definition: "CREATE OR REPLACE PROCEDURE audit(entry text)\n LANGUAGE sql\nAS $procedure$ SELECT 1 $procedure$",
+		}
+
+		require.Equal(t, `Create the procedure "audit"`, instruction.Comment())
+	})
+
+	t.Run("PostgresDropProcedure", func(t *testing.T) {
+		instruction := &PostgresDropProcedureInstruction{
+			Name:      "audit",
+			Arguments: "entry text",
+		}
+
+		require.Equal(t, `Drop the procedure "audit"`, instruction.Comment())
+	})
+
 	t.Run("PostgresCreateAggregate", func(t *testing.T) {
 		instruction := &PostgresCreateAggregateInstruction{
 			Name:      "total",

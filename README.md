@@ -708,6 +708,7 @@ as `changed`.
 | Domains         | ➖                                      | ✅         |
 | Composite types | ➖                                      | ✅         |
 | Functions       | ➖                                      | ✅         |
+| Procedures      | ➖                                      | ✅         |
 | Aggregates      | ➖                                      | ✅         |
 | Operators       | ➖                                      | ✅         |
 | Extensions      | ➖                                      | ✅         |

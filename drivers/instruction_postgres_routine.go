@@ -31,6 +31,31 @@ func (i *PostgresDropFunctionInstruction) Comment() string {
 	return objectComment("Drop", "function", i.Name)
 }
 
+type PostgresCreateProcedureInstruction struct {
+	Definition string
+}
+
+func (i *PostgresCreateProcedureInstruction) String() string {
+	return i.Definition + ";"
+}
+
+func (i *PostgresCreateProcedureInstruction) Comment() string {
+	return definitionComment("Create", "procedure", i.Definition, "PROCEDURE")
+}
+
+type PostgresDropProcedureInstruction struct {
+	Name      string
+	Arguments string
+}
+
+func (i *PostgresDropProcedureInstruction) String() string {
+	return fmt.Sprintf("DROP PROCEDURE %s(%s);", QuoteIdentifier(i.Name), i.Arguments)
+}
+
+func (i *PostgresDropProcedureInstruction) Comment() string {
+	return objectComment("Drop", "procedure", i.Name)
+}
+
 type PostgresCreateAggregateInstruction struct {
 	Name               string
 	Arguments          string

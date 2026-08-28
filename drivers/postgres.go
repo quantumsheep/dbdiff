@@ -1110,15 +1110,17 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*PostgresFunction, error) {
 	// The regexp_replace call removes the schema prefix of the header. The target schema
 	// and the source schema hold a different name, and the diff compares the two texts.
+	// pg_get_function_result gives NULL for a procedure.
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			p.proname,
 			pg_get_function_identity_arguments(p.oid),
-			pg_get_function_result(p.oid),
+			coalesce(pg_get_function_result(p.oid), ''),
+			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
 			regexp_replace(
 				pg_get_functiondef(p.oid),
-				'^CREATE OR REPLACE FUNCTION ' || quote_ident(current_schema()) || '\.',
-				'CREATE OR REPLACE FUNCTION '
+				'^CREATE OR REPLACE (FUNCTION|PROCEDURE) ' || quote_ident(current_schema()) || '\.',
+				'CREATE OR REPLACE \1 '
 			)
 		FROM pg_proc p
 		WHERE p.pronamespace = current_schema()::regnamespace
@@ -1139,7 +1141,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 	for rows.Next() {
 		function := &PostgresFunction{}
 
-		err := rows.Scan(&function.Name, &function.Arguments, &function.ReturnType, &function.Def)
+		err := rows.Scan(&function.Name, &function.Arguments, &function.ReturnType, &function.Kind, &function.Def)
 		if err != nil {
 			return nil, err
 		}
