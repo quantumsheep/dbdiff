@@ -49,6 +49,10 @@ type SQLiteTable struct {
 	PrimaryKeyConflict string
 	UniqueConstraints  []*SQLiteUniqueConstraint
 
+	// A key clause holds the quoted column name with its COLLATE clause and its DESC
+	// keyword, which no PRAGMA reports.
+	PrimaryKeyKeys []string
+
 	Indexes     []*SQLiteIndex
 	Triggers    []*SQLiteTrigger
 	ForeignKeys []*SQLiteForeignKey
@@ -101,6 +105,7 @@ func (t *SQLiteTable) CreateTableInstruction() *SQLiteCreateTableInstruction {
 		PrimaryKey:         t.PrimaryKey,
 		PrimaryKeyName:     t.PrimaryKeyName,
 		PrimaryKeyConflict: t.PrimaryKeyConflict,
+		PrimaryKeyKeys:     t.PrimaryKeyKeys,
 		UniqueConstraints:  t.UniqueConstraints,
 		ForeignKeys:        t.ForeignKeys,
 		CheckConstraints:   t.CheckConstraints,
@@ -182,6 +187,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) ||
 			t.PrimaryKeyName != other.PrimaryKeyName ||
 			t.PrimaryKeyConflict != other.PrimaryKeyConflict ||
+			!slices.Equal(t.PrimaryKeyKeys, other.PrimaryKeyKeys) ||
 			!equalUniqueConstraints(t.UniqueConstraints, other.UniqueConstraints),
 		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||
 			!equalCheckConstraints(t.CheckConstraints, other.CheckConstraints),

@@ -286,6 +286,7 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 			uniqueConstraints = append(uniqueConstraints, &SQLiteUniqueConstraint{
 				Name:     constraintName,
 				Columns:  key,
+				Keys:     parsed.UniqueKeysOf(key),
 				Conflict: parsed.UniqueConflictOf(key),
 			})
 
@@ -338,10 +339,16 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		}
 	}
 
+	primaryKeyKeys := parsed.PrimaryKeyKeys
+	if len(primaryKeyKeys) != len(primaryKey) {
+		primaryKeyKeys = nil
+	}
+
 	return &SQLiteTable{
 		Name:               tableName,
 		Columns:            columns,
 		PrimaryKey:         primaryKey,
+		PrimaryKeyKeys:     primaryKeyKeys,
 		UniqueConstraints:  uniqueConstraints,
 		Indexes:            indexes,
 		Triggers:           triggers,

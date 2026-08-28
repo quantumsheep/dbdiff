@@ -57,6 +57,37 @@ func constraintColumnNames(list string) []string {
 	return names
 }
 
+// No PRAGMA reports the COLLATE clause and the DESC keyword of a key of a table
+// constraint, so the text of the CREATE TABLE statement gives them. A list of plain
+// names gives nil, so a plain constraint keeps its plain form.
+func constraintKeyClauses(list string) []string {
+	inner := strings.TrimSuffix(strings.TrimPrefix(list, "("), ")")
+
+	var clauses []string
+
+	holdsModifier := false
+
+	for _, part := range strings.Split(inner, ",") {
+		tokens := splitTopLevelTokens(part)
+		if len(tokens) == 0 {
+			continue
+		}
+
+		modifiers := indexKeyModifiers(part)
+		if modifiers != "" {
+			holdsModifier = true
+		}
+
+		clauses = append(clauses, QuoteIdentifier(unquoteIdentifier(tokens[0]))+modifiers)
+	}
+
+	if !holdsModifier {
+		return nil
+	}
+
+	return clauses
+}
+
 // PRAGMA index_info reports no collation and no direction, so the text of the CREATE INDEX
 // statement gives them. ASC is the default of SQLite, and this function drops it, so an
 // index that names it equals an index that does not.
@@ -151,9 +182,11 @@ type SQLiteTableDefinition struct {
 	UniqueNames        map[string]string
 	ForeignKeyNames    map[string]string
 	UniqueConflicts    map[string]string
+	UniqueKeys         map[string][]string
 	ForeignKeyDefers   map[string]string
 	PrimaryKeyName     string
 	PrimaryKeyConflict string
+	PrimaryKeyKeys     []string
 	WithoutRowID       bool
 	Strict             bool
 }
@@ -170,6 +203,10 @@ func (d *SQLiteTableDefinition) UniqueNameOf(columns []string) string {
 	return d.UniqueNames[strings.Join(columns, ",")]
 }
 
+func (d *SQLiteTableDefinition) UniqueKeysOf(columns []string) []string {
+	return d.UniqueKeys[strings.Join(columns, ",")]
+}
+
 func (d *SQLiteTableDefinition) ForeignKeyNameOf(columns []string) string {
 	return d.ForeignKeyNames[strings.Join(columns, ",")]
 }
@@ -183,6 +220,7 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 	parsed := &SQLiteTableDefinition{
 		Columns:          make(map[string]*SQLiteColumn),
 		UniqueConflicts:  make(map[string]string),
+		UniqueKeys:       make(map[string][]string),
 		ForeignKeyDefers: make(map[string]string),
 		UniqueNames:      make(map[string]string),
 		ForeignKeyNames:  make(map[string]string),
@@ -217,11 +255,13 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 				key := strings.Join(constraintColumnNames(constraint[1]), ",")
 				parsed.UniqueConflicts[key] = conflictResolution(constraint[1:])
 				parsed.UniqueNames[key] = constraintName
+				parsed.UniqueKeys[key] = constraintKeyClauses(constraint[1])
 			}
 
 			if strings.EqualFold(constraint[0], "PRIMARY") && len(constraint) > 2 {
 				parsed.PrimaryKeyName = constraintName
 				parsed.PrimaryKeyConflict = conflictResolution(constraint[2:])
+				parsed.PrimaryKeyKeys = constraintKeyClauses(constraint[2])
 			}
 
 			if strings.EqualFold(constraint[0], "FOREIGN") && len(constraint) > 2 {

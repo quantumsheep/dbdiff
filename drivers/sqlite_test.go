@@ -2558,6 +2558,100 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ModifyUniqueConstraintKeyModifiers", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE members (
+				id INTEGER PRIMARY KEY,
+				team TEXT NOT NULL,
+				name TEXT NOT NULL,
+				UNIQUE (team, name)
+			);
+
+			INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice'), (2, 'blue', 'Bob');
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE members (
+				id INTEGER PRIMARY KEY,
+				team TEXT NOT NULL,
+				name TEXT NOT NULL,
+				UNIQUE (team COLLATE NOCASE, name DESC)
+			);
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_members_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:    "team",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "name",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+				},
+				UniqueConstraints: []*SQLiteUniqueConstraint{
+					{
+						Columns: []string{"team", "name"},
+						Keys:    []string{`"team" COLLATE NOCASE`, `"name" DESC`},
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_members_temp",
+				ColumnNames:       []string{"id", "team", "name"},
+				SelectExpressions: []string{`"id"`, `"team"`, `"name"`},
+				SourceTableName:   "members",
+			},
+			&SQLDropTableInstruction{Name: "members"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_members_temp",
+				Action: &SQLRenameTableAction{NewName: "members"},
+			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
+		})
+
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("members", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "team": "red", "name": "Alice"},
+			{"id": int64(2), "team": "blue", "name": "Bob"},
+		}, rows)
+
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("EqualUniqueConstraintKeyModifiers", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		schema := `
+			CREATE TABLE members (
+				id INTEGER PRIMARY KEY,
+				team TEXT NOT NULL,
+				name TEXT NOT NULL,
+				UNIQUE (team COLLATE NOCASE, name DESC)
+			);
+		`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnTarget(schema)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CreateTableWithCompositePrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -2705,6 +2799,70 @@ func TestSQLiteDriver(t *testing.T) {
 			{"team": "blue", "member": "Bob", "level": int64(1)},
 			{"team": "red", "member": "Alice", "level": int64(3)},
 		}, rows)
+	})
+
+	t.Run("ModifyCompositePrimaryKeyKeyModifiers", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				PRIMARY KEY (member, team)
+			);
+
+			INSERT INTO memberships (team, member) VALUES ('red', 'Alice');
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				PRIMARY KEY (member COLLATE NOCASE, team DESC)
+			);
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_memberships_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name:    "team",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+					{
+						Name:    "member",
+						Type:    "TEXT",
+						NotNull: true,
+					},
+				},
+				PrimaryKey:     []string{"member", "team"},
+				PrimaryKeyKeys: []string{`"member" COLLATE NOCASE`, `"team" DESC`},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_memberships_temp",
+				ColumnNames:       []string{"team", "member"},
+				SelectExpressions: []string{`"team"`, `"member"`},
+				SourceTableName:   "memberships",
+			},
+			&SQLDropTableInstruction{Name: "memberships"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_memberships_temp",
+				Action: &SQLRenameTableAction{NewName: "memberships"},
+			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
+		})
+
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("memberships", "ORDER BY member")
+
+		require.Equal(t, []map[string]any{
+			{"team": "red", "member": "Alice"},
+		}, rows)
+
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("ModifyCompositePrimaryKey", func(t *testing.T) {

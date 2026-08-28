@@ -33,9 +33,14 @@ type SQLiteCreateTableInstruction struct {
 	PrimaryKey         []string
 	PrimaryKeyName     string
 	PrimaryKeyConflict string
-	UniqueConstraints  []*SQLiteUniqueConstraint
-	ForeignKeys        []*SQLiteForeignKey
-	CheckConstraints   []*SQLiteCheckConstraint
+
+	// A key clause holds the quoted column name with its COLLATE clause and its DESC
+	// keyword. An empty list keeps the plain names of PrimaryKey.
+	PrimaryKeyKeys []string
+
+	UniqueConstraints []*SQLiteUniqueConstraint
+	ForeignKeys       []*SQLiteForeignKey
+	CheckConstraints  []*SQLiteCheckConstraint
 	// SQLite accepts a table option after the closing parenthesis. WITHOUT ROWID comes
 	// first, because SQLite refuses the reverse order.
 	WithoutRowID bool
@@ -50,9 +55,14 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	}
 
 	if len(i.PrimaryKey) > 0 {
+		keys := QuoteIdentifiers(i.PrimaryKey)
+		if len(i.PrimaryKeyKeys) == len(i.PrimaryKey) {
+			keys = i.PrimaryKeyKeys
+		}
+
 		lines = append(lines, fmt.Sprintf("\t%sPRIMARY KEY (%s)%s",
 			constraintNameClause(i.PrimaryKeyName),
-			strings.Join(QuoteIdentifiers(i.PrimaryKey), ", "),
+			strings.Join(keys, ", "),
 			conflictClause(i.PrimaryKeyConflict)))
 	}
 
