@@ -2169,6 +2169,42 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("ARecreatedViewKeepsItsGrants", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnSource(`
+			CREATE VIEW numbers AS SELECT 1 AS value;
+			GRANT SELECT ON numbers TO dbdiff_reader;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE VIEW numbers AS SELECT 2 AS value;
+			GRANT SELECT ON numbers TO dbdiff_reader;
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropViewInstruction{Name: "numbers"},
+			&PostgresCreateViewInstruction{
+				Name:  "numbers",
+				Query: " SELECT 2 AS value;",
+			},
+			&PostgresSetOwnerInstruction{
+				ObjectType: "VIEW",
+				ObjectName: "numbers",
+				Owner:      "user",
+			},
+			&PostgresGrantInstruction{
+				Privileges: []string{"SELECT"},
+				ObjectType: "TABLE",
+				ObjectName: "numbers",
+				Grantee:    "dbdiff_reader",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("NoRevokeForADroppedView", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 

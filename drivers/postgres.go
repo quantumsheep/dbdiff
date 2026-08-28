@@ -35,6 +35,8 @@ type PostgresDriver struct {
 	ScratchVersion embeddedpostgres.PostgresVersion
 
 	scratchServer *PostgresScratchServer
+
+	recreatedObjectNames map[string]bool
 }
 
 func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*PostgresDriver, error) {
@@ -114,6 +116,8 @@ func (d *PostgresDriver) Close() error {
 }
 
 func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
+	d.recreatedObjectNames = nil
+
 	err := d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "target")
 	if err != nil {
 		return nil, err
@@ -493,6 +497,16 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 
 // PostgreSQL refuses a change of a column while a view that reads it exists, so every DROP
 // VIEW statement goes into the early removals.
+// A recreated object loses its privileges and its owner, and DiffPrivileges reads this
+// set to give them back.
+func (d *PostgresDriver) markRecreated(name string) {
+	if d.recreatedObjectNames == nil {
+		d.recreatedObjectNames = map[string]bool{}
+	}
+
+	d.recreatedObjectNames[name] = true
+}
+
 func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 	var earlyRemovals []Instruction
 	var additions []Instruction
@@ -519,6 +533,7 @@ func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 		// A type change of a column that the view reads keeps the definition text equal.
 		if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
 			!targetView.HasEqualColumns(sourceView) {
+			d.markRecreated(targetView.Name)
 			additions = append(additions, targetView.CreateInstruction())
 		}
 	}
@@ -571,6 +586,7 @@ func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDif
 
 		// A DROP statement of the view removes every index of it.
 		if targetView.Def != sourceView.Def || !targetView.HasEqualColumns(sourceView) {
+			d.markRecreated(targetView.Name)
 			additions = append(additions, targetView.Instructions()...)
 			continue
 		}
@@ -1318,7 +1334,8 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		sourceOwner, found := lo.Find(sourceOwners, func(owner *PostgresOwner) bool {
 			return owner.ObjectName == targetOwner.ObjectName
 		})
-		if found && sourceOwner.Owner == targetOwner.Owner {
+		if found && sourceOwner.Owner == targetOwner.Owner &&
+			!d.recreatedObjectNames[targetOwner.ObjectName] {
 			continue
 		}
 
@@ -1339,7 +1356,10 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		sourcePrivilege, found := lo.Find(sourcePrivileges, func(privilege *PostgresPrivilege) bool {
 			return privilege.Key() == targetPrivilege.Key()
 		})
-		if !found {
+
+		// The diff drops and creates the object again, and the new object holds the
+		// default privileges, so every grant of the target comes back.
+		if !found || d.recreatedObjectNames[targetPrivilege.ObjectName] {
 			additions = append(additions,
 				targetPrivilege.GrantInstruction(targetPrivilege.Privileges))
 
@@ -1364,7 +1384,8 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 	for _, sourcePrivilege := range sourcePrivileges {
 		// The diff drops an object that the target does not hold, and the drop removes
 		// every privilege of the object.
-		if !slices.Contains(targetObjectNames, sourcePrivilege.ObjectName) {
+		if !slices.Contains(targetObjectNames, sourcePrivilege.ObjectName) ||
+			d.recreatedObjectNames[sourcePrivilege.ObjectName] {
 			continue
 		}
 
