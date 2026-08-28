@@ -1198,21 +1198,3 @@ If an agent still runs, stop it with `TaskStop`. Then confirm that the state is 
 A subagent reads the version of this file from the start of the session. If you change a
 rule here during a session, repeat that rule in the spawn prompt.
 
-# Known gaps
-
-This section records the state of the repo on 2026-08-17. It is not a rule set. Correct an
-item when your task touches it.
-
-- The data comparison prints no row of a table that the target only holds. The schema
-  section creates that table, and the table stays empty.
-- The `--privileges` flag compares the owner and the privileges of an object of `pg_class`.
-  It reads no privilege of a schema, of a function, or of a type, and no default privilege.
-- The PostgreSQL driver compares one schema for each run. The `--schema` flag selects that
-  schema. This item is a boundary of the tool, not a defect. To compare two schemas, run
-  dbdiff two times. The driver prints no `CREATE SCHEMA` statement, and it detects no
-  object that moved from one schema to another schema.
-- A SQL source reads no annotation of a migration tool. A goose file holds the up migration
-  and the down migration in one file, behind a `-- +goose` comment. dbdiff applies both
-  parts. A golang-migrate directory and a directory of numbered files work.
-- A SQL source reads the top level of a directory only. It reads no subdirectory.
-- dbdiff generates no down migration. A rollback is a restore from a backup.
