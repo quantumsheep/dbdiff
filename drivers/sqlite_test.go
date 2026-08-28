@@ -3523,6 +3523,52 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsOfATableWithTheKeyOnAnotherColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnSource(`CREATE TABLE items (a INTEGER PRIMARY KEY, b INTEGER);`)
+		driver.ExecOnSource(`INSERT INTO items (a, b) VALUES (1, 2);`)
+
+		driver.ExecOnTarget(`CREATE TABLE items (a INTEGER, b INTEGER PRIMARY KEY);`)
+		driver.ExecOnTarget(`INSERT INTO items (a, b) VALUES (1, 2);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLitePragmaForeignKeysInstruction{},
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "_items_temp",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "a",
+						Type: "INTEGER",
+					},
+					{
+						Name:       "b",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+				},
+			},
+			&SQLInsertSelectInstruction{
+				TableName:         "_items_temp",
+				ColumnNames:       []string{"a", "b"},
+				SelectExpressions: []string{`"a"`, `"b"`},
+				SourceTableName:   "items",
+			},
+			&SQLDropTableInstruction{Name: "items"},
+			&SQLiteAlterTableInstruction{
+				Name:   "_items_temp",
+				Action: &SQLRenameTableAction{NewName: "items"},
+			},
+			&SQLCommentInstruction{
+				Text: `The table "items" holds another primary key in the source, so dbdiff compares no row of it.`,
+			},
+			&SQLitePragmaForeignKeysInstruction{Enabled: true},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CompareRowsOfATableWithAnotherPrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true

@@ -82,10 +82,15 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 	targetColumnNames := writablePostgresColumnNames(targetTable.Columns)
 	sourceColumnNames := writablePostgresColumnNames(sourceTable.Columns)
 
-	holdsEveryKeyColumn := lo.EveryBy(primaryKeyColumnNames, func(name string) bool {
-		return slices.Contains(sourceColumnNames, name)
-	})
-	if !holdsEveryKeyColumn {
+	sourceKeyColumnNames, err := d.GetTablePrimaryKey(ctx, d.SourceDatabaseConnection, sourceTable.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// A key of other columns matches zero source rows or several source rows, so the
+	// comparison needs the same key on both sides.
+	holdsSameKey := slices.Equal(primaryKeyColumnNames, sourceKeyColumnNames)
+	if !holdsSameKey {
 		comment := &SQLCommentInstruction{
 			Text: fmt.Sprintf("The table %s holds another primary key in the source, so dbdiff compares no row of it.",
 				QuoteIdentifier(targetTable.Name)),

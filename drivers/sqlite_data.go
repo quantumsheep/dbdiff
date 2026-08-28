@@ -87,10 +87,12 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 	targetColumnNames := writableSQLiteColumnNames(targetTable.Columns)
 	sourceColumnNames := writableSQLiteColumnNames(sourceTable.Columns)
 
-	holdsEveryKeyColumn := lo.EveryBy(primaryKeyColumnNames, func(name string) bool {
-		return slices.Contains(sourceColumnNames, name)
-	})
-	if !holdsEveryKeyColumn {
+	sourceKeyColumnNames := sourceTable.PrimaryKeyColumnNames()
+
+	// A key of other columns matches zero source rows or several source rows, so the
+	// comparison needs the same key on both sides.
+	holdsSameKey := slices.Equal(primaryKeyColumnNames, sourceKeyColumnNames)
+	if !holdsSameKey {
 		comment := &SQLCommentInstruction{
 			Text: fmt.Sprintf("The table %s holds another primary key in the source, so dbdiff compares no row of it.",
 				QuoteIdentifier(targetTable.Name)),
