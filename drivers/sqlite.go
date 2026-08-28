@@ -131,7 +131,8 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {
 		instructions = append(instructions, tableInstructions...)
 	}
 
-	for _, sourceTable := range sourceTables {
+	// The reverse order gives each DROP TABLE statement before the table that it names.
+	for _, sourceTable := range slices.Backward(sourceTables) {
 		_, found := lo.Find(targetTables, func(table *SQLiteTable) bool {
 			return table.Name == sourceTable.Name
 		})

@@ -1855,6 +1855,25 @@ func TestSQLiteDriver(t *testing.T) {
 		})
 	})
 
+	t.Run("DropTablesInTheReverseOrder", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents(id)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{Name: "children"},
+			&SQLDropTableInstruction{Name: "parents"},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("TableNameThatNeedsQuotes", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
