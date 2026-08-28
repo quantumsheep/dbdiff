@@ -1110,6 +1110,40 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CreateTableWithANamedPrimaryKey", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE memberships (
+				team TEXT,
+				member TEXT,
+				CONSTRAINT pk_memberships PRIMARY KEY (team, member)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "memberships",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "team",
+						Type: "TEXT",
+					},
+					{
+						Name: "member",
+						Type: "TEXT",
+					},
+				},
+				PrimaryKey:     []string{"team", "member"},
+				PrimaryKeyName: "pk_memberships",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CreateTableWithAUniqueConstraintConflict", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

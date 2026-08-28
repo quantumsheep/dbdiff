@@ -152,6 +152,7 @@ type SQLiteTableDefinition struct {
 	ForeignKeyNames    map[string]string
 	UniqueConflicts    map[string]string
 	ForeignKeyDefers   map[string]string
+	PrimaryKeyName     string
 	PrimaryKeyConflict string
 	WithoutRowID       bool
 	Strict             bool
@@ -219,6 +220,7 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 			}
 
 			if strings.EqualFold(constraint[0], "PRIMARY") && len(constraint) > 2 {
+				parsed.PrimaryKeyName = constraintName
 				parsed.PrimaryKeyConflict = conflictResolution(constraint[2:])
 			}
 

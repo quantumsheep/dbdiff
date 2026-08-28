@@ -45,6 +45,7 @@ type SQLiteTable struct {
 
 	// These two fields hold a key or a constraint of two or more columns only.
 	PrimaryKey         []string
+	PrimaryKeyName     string
 	PrimaryKeyConflict string
 	UniqueConstraints  []*SQLiteUniqueConstraint
 
@@ -98,6 +99,7 @@ func (t *SQLiteTable) CreateTableInstruction() *SQLiteCreateTableInstruction {
 		Name:               t.Name,
 		Columns:            t.Columns,
 		PrimaryKey:         t.PrimaryKey,
+		PrimaryKeyName:     t.PrimaryKeyName,
 		PrimaryKeyConflict: t.PrimaryKeyConflict,
 		UniqueConstraints:  t.UniqueConstraints,
 		ForeignKeys:        t.ForeignKeys,
@@ -178,6 +180,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		Renamed:            make(map[string]string),
 		ForeignKeysChanged: false,
 		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) ||
+			t.PrimaryKeyName != other.PrimaryKeyName ||
 			t.PrimaryKeyConflict != other.PrimaryKeyConflict ||
 			!equalUniqueConstraints(t.UniqueConstraints, other.UniqueConstraints),
 		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||

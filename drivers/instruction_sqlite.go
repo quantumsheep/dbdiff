@@ -31,6 +31,7 @@ type SQLiteCreateTableInstruction struct {
 	Name               string
 	Columns            []*SQLiteColumn
 	PrimaryKey         []string
+	PrimaryKeyName     string
 	PrimaryKeyConflict string
 	UniqueConstraints  []*SQLiteUniqueConstraint
 	ForeignKeys        []*SQLiteForeignKey
@@ -49,7 +50,8 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	}
 
 	if len(i.PrimaryKey) > 0 {
-		lines = append(lines, fmt.Sprintf("\tPRIMARY KEY (%s)%s",
+		lines = append(lines, fmt.Sprintf("\t%sPRIMARY KEY (%s)%s",
+			constraintNameClause(i.PrimaryKeyName),
 			strings.Join(QuoteIdentifiers(i.PrimaryKey), ", "),
 			conflictClause(i.PrimaryKeyConflict)))
 	}

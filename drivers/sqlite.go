@@ -347,6 +347,7 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		Triggers:           triggers,
 		ForeignKeys:        foreignKeys,
 		CheckConstraints:   parsed.CheckConstraints,
+		PrimaryKeyName:     parsed.PrimaryKeyName,
 		PrimaryKeyConflict: parsed.PrimaryKeyConflict,
 		WithoutRowID:       parsed.WithoutRowID,
 		Strict:             parsed.Strict,

@@ -333,6 +333,25 @@ func TestInstructions(t *testing.T) {
 );`, instruction.String())
 	})
 
+	t.Run("SQLiteCreateTableWithANamedPrimaryKey", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "memberships",
+			Columns: []*SQLiteColumn{
+				{
+					Name: "team",
+					Type: "TEXT",
+				},
+			},
+			PrimaryKey:     []string{"team"},
+			PrimaryKeyName: "pk_memberships",
+		}
+
+		require.Equal(t, `CREATE TABLE "memberships" (
+	"team" TEXT,
+	CONSTRAINT "pk_memberships" PRIMARY KEY ("team")
+);`, instruction.String())
+	})
+
 	t.Run("SQLiteCreateTableWithAForeignKeyWithoutParentColumns", func(t *testing.T) {
 		instruction := &SQLiteCreateTableInstruction{
 			Name: "children",
