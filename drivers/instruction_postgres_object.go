@@ -59,18 +59,20 @@ type PostgresCreateSequenceInstruction struct {
 	Min       int64
 	Max       int64
 	Start     int64
+	Cache     int64
 	Cycle     bool
 }
 
 func (i *PostgresCreateSequenceInstruction) String() string {
 	return fmt.Sprintf(
-		"CREATE SEQUENCE %s AS %s INCREMENT BY %d MINVALUE %d MAXVALUE %d START WITH %d %s;",
+		"CREATE SEQUENCE %s AS %s INCREMENT BY %d MINVALUE %d MAXVALUE %d START WITH %d CACHE %d %s;",
 		QuoteIdentifier(i.Name),
 		i.DataType,
 		i.Increment,
 		i.Min,
 		i.Max,
 		i.Start,
+		i.Cache,
 		sequenceCycleClause(i.Cycle),
 	)
 }
@@ -101,6 +103,7 @@ type PostgresAlterSequenceInstruction struct {
 	Min       sql.NullInt64
 	Max       sql.NullInt64
 	Start     sql.NullInt64
+	Cache     sql.NullInt64
 	Cycle     sql.NullBool
 	Restart   sql.NullInt64
 }
@@ -126,6 +129,10 @@ func (i *PostgresAlterSequenceInstruction) String() string {
 
 	if i.Start.Valid {
 		clauses = append(clauses, fmt.Sprintf("START WITH %d", i.Start.Int64))
+	}
+
+	if i.Cache.Valid {
+		clauses = append(clauses, fmt.Sprintf("CACHE %d", i.Cache.Int64))
 	}
 
 	if i.Cycle.Valid {

@@ -1060,7 +1060,7 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 	// A serial column and an identity column own their sequence, and the table creates it.
 	// s.last_value is NULL until the first call of nextval.
 	rows, err := db.QueryContext(ctx, `
-		SELECT s.sequencename, s.data_type::text, s.start_value, s.min_value, s.max_value, s.increment_by, s.cycle, s.last_value
+		SELECT s.sequencename, s.data_type::text, s.start_value, s.min_value, s.max_value, s.increment_by, s.cache_size, s.cycle, s.last_value
 		FROM pg_sequences s
 		JOIN pg_class c ON c.relname = s.sequencename
 			AND c.relkind = 'S'
@@ -1089,6 +1089,7 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 			&sequence.Min,
 			&sequence.Max,
 			&sequence.Increment,
+			&sequence.Cache,
 			&sequence.Cycle,
 			&sequence.CurrentValue,
 		)

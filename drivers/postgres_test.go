@@ -2892,6 +2892,7 @@ func TestPostgresDriver(t *testing.T) {
 				Min:       1,
 				Max:       9223372036854775807,
 				Start:     1,
+				Cache:     1,
 			},
 		})
 
@@ -2908,6 +2909,25 @@ func TestPostgresDriver(t *testing.T) {
 		})
 
 		driver.ExecOnSource(diff)
+	})
+
+	t.Run("AlterSequenceCache", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
+		driver.ExecOnTarget(`CREATE SEQUENCE counter CACHE 20;`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterSequenceInstruction{
+				Name: "counter",
+				Cache: sql.NullInt64{
+					Int64: 20,
+					Valid: true,
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("AlterSequence", func(t *testing.T) {

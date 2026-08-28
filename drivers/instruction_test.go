@@ -1554,10 +1554,11 @@ func TestInstructions(t *testing.T) {
 			Min:       1,
 			Max:       9223372036854775807,
 			Start:     1,
+			Cache:     1,
 		}
 
 		require.Equal(t,
-			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 NO CYCLE;`,
+			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1 NO CYCLE;`,
 			instruction.String())
 	})
 
@@ -1569,11 +1570,12 @@ func TestInstructions(t *testing.T) {
 			Min:       1,
 			Max:       10,
 			Start:     1,
+			Cache:     1,
 			Cycle:     true,
 		}
 
 		require.Equal(t,
-			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 10 START WITH 1 CYCLE;`,
+			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 10 START WITH 1 CACHE 1 CYCLE;`,
 			instruction.String())
 	})
 

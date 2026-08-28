@@ -11,6 +11,7 @@ type PostgresSequence struct {
 	Min       int64
 	Max       int64
 	Increment int64
+	Cache     int64
 	Cycle     bool
 
 	CurrentValue sql.NullInt64
@@ -24,6 +25,7 @@ func (s *PostgresSequence) CreateInstruction() *PostgresCreateSequenceInstructio
 		Min:       s.Min,
 		Max:       s.Max,
 		Start:     s.Start,
+		Cache:     s.Cache,
 		Cycle:     s.Cycle,
 	}
 }
@@ -71,6 +73,14 @@ func (s *PostgresSequence) Diff(other *PostgresSequence) []Instruction {
 	if s.Start != other.Start {
 		instruction.Start = sql.NullInt64{
 			Int64: s.Start,
+			Valid: true,
+		}
+		changed = true
+	}
+
+	if s.Cache != other.Cache {
+		instruction.Cache = sql.NullInt64{
+			Int64: s.Cache,
 			Valid: true,
 		}
 		changed = true
