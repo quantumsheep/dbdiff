@@ -18,11 +18,11 @@ type SQLiteForeignKey struct {
 }
 
 func (fk *SQLiteForeignKey) Clause() string {
-	fromColumns := strings.Join(quoteIdentifiers(fk.From), ", ")
-	toColumns := strings.Join(quoteIdentifiers(fk.To), ", ")
+	fromColumns := strings.Join(QuoteIdentifiers(fk.From), ", ")
+	toColumns := strings.Join(QuoteIdentifiers(fk.To), ", ")
 
 	statement := fmt.Sprintf("%sFOREIGN KEY (%s) REFERENCES %s (%s)",
-		constraintNameClause(fk.Name), fromColumns, quoteIdentifier(fk.Table), toColumns)
+		constraintNameClause(fk.Name), fromColumns, QuoteIdentifier(fk.Table), toColumns)
 
 	if fk.OnUpdate != "NO ACTION" && fk.OnUpdate != "" {
 		statement += fmt.Sprintf(" ON UPDATE %s", fk.OnUpdate)

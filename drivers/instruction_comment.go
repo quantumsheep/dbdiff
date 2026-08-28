@@ -52,10 +52,8 @@ func markTableRecreations(instructions []Instruction, comments []string) {
 	}
 }
 
-// The recreation of a table of SQLite prints six parts: a temporary table, the copy of the
-// rows, the removal of the old table, the rename of the temporary table, the indexes, and
-// the triggers. The rename names the table, and the search of that rename stops at the
-// next CREATE TABLE statement, which starts another table.
+// The rename of a table recreation names the table, and the search of that rename stops at
+// the next CREATE TABLE statement, which starts another table.
 func tableRecreationAt(instructions []Instruction, index int) (string, int) {
 	createTable, isCreateTable := instructions[index].(*SQLiteCreateTableInstruction)
 	if !isCreateTable {
@@ -136,7 +134,7 @@ func objectComment(verb string, kind string, name string) string {
 		return verb + " the " + kind
 	}
 
-	return verb + " the " + kind + " " + quoteIdentifier(name)
+	return verb + " the " + kind + " " + QuoteIdentifier(name)
 }
 
 func tableObjectComment(verb string, kind string, name string, tableName string) string {
@@ -146,12 +144,12 @@ func tableObjectComment(verb string, kind string, name string, tableName string)
 		return comment
 	}
 
-	return comment + " of the table " + quoteIdentifier(tableName)
+	return comment + " of the table " + QuoteIdentifier(tableName)
 }
 
 func ownedObjectComment(verb string, kind string, ownerKind string, ownerName string) string {
 	return verb + " the " + kind + " of the " + strings.ToLower(ownerKind) + " " +
-		quoteIdentifier(ownerName)
+		QuoteIdentifier(ownerName)
 }
 
 func definitionComment(verb string, kind string, definition string, keyword string) string {
@@ -166,9 +164,6 @@ func tableDefinitionComment(verb string, kind string, definition string, keyword
 	return tableObjectComment(verb, kind, name, tableName)
 }
 
-// PostgreSQL and SQLite give the definition text of an index, of a trigger, of a view, of
-// a rule, of a function, and of a statistics object. The name of the object follows the
-// keyword of its kind, and the name of the table follows the keyword of the owner.
 func parseDefinition(definition string, keyword string, ownerKeyword string) (string, string) {
 	tokens := definitionTokens(definition)
 

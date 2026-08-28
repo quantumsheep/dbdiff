@@ -12,9 +12,6 @@ type PostgresOperator struct {
 	Function      string
 }
 
-// postgresOperatorArgument stays in this model file, and not in an instruction file,
-// because Signature also uses it to build an identity key. That key never reaches the
-// output. PostgresDropOperatorInstruction.String uses it too, to render the argument list.
 func postgresOperatorArgument(argument sql.NullString) string {
 	if argument.Valid {
 		return argument.String

@@ -103,7 +103,7 @@ func (s *PostgresScratchServer) CreateDatabase(ctx context.Context, name string)
 
 	defer connection.Close()
 
-	_, err = connection.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", quoteIdentifier(name)))
+	_, err = connection.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", QuoteIdentifier(name)))
 	if err != nil {
 		return "", fmt.Errorf("failed to create the temporary database %q: %w", name, err)
 	}
@@ -123,8 +123,7 @@ func (s *PostgresScratchServer) Stop() error {
 }
 
 // This directory keeps the extracted server between two runs. Its name holds the version,
-// and the default version takes the module version of the library, because a new library
-// can hold a new default.
+// because a new library can hold a new default.
 func postgresScratchBinariesPath(version embeddedpostgres.PostgresVersion) (string, error) {
 	cacheDirectory, err := os.UserCacheDir()
 	if err != nil {
@@ -175,15 +174,19 @@ func DetectPostgresScratchVersion(ctx context.Context, connectionString string) 
 }
 
 func postgresScratchVersionOfConfig(ctx context.Context, config *PostgresDriverConfig) embeddedpostgres.PostgresVersion {
-	sourceHoldsSQL := IsSQLSource(config.SourceConnectionString)
 	targetHoldsSQL := IsSQLSource(config.TargetConnectionString)
+	sourceHoldsSQL := IsSQLSource(config.SourceConnectionString)
+
+	if targetHoldsSQL && !sourceHoldsSQL {
+		return DetectPostgresScratchVersion(ctx, config.SourceConnectionString)
+	}
 
 	if sourceHoldsSQL && !targetHoldsSQL {
 		return DetectPostgresScratchVersion(ctx, config.TargetConnectionString)
 	}
 
-	if targetHoldsSQL && !sourceHoldsSQL {
-		return DetectPostgresScratchVersion(ctx, config.SourceConnectionString)
+	if targetHoldsSQL && sourceHoldsSQL && config.ScratchServerVersion != "" {
+		return embeddedpostgres.PostgresVersion(config.ScratchServerVersion)
 	}
 
 	return ""
@@ -207,10 +210,10 @@ func findFreePort() (uint32, error) {
 
 func (d *PostgresDriver) OpenSide(ctx context.Context, connectionString string, schema string, role string) (*sql.DB, error) {
 	if !IsSQLSource(connectionString) {
-		return openPostgresConnection(connectionString, schema)
+		return OpenPostgresConnection(connectionString, schema)
 	}
 
-	source, err := NewSQLSource(connectionString)
+	sqlSource, err := NewSQLSource(connectionString)
 	if err != nil {
 		return nil, err
 	}
@@ -225,12 +228,12 @@ func (d *PostgresDriver) OpenSide(ctx context.Context, connectionString string, 
 		return nil, err
 	}
 
-	connection, err := openPostgresConnection(databaseConnectionString, schema)
+	connection, err := OpenPostgresConnection(databaseConnectionString, schema)
 	if err != nil {
 		return nil, err
 	}
 
-	err = source.ApplyTo(ctx, connection)
+	err = sqlSource.ApplyTo(ctx, connection)
 	if err != nil {
 		connection.Close()
 		return nil, err

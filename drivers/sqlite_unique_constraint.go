@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// A SQLiteUniqueConstraint is a UNIQUE constraint of two or more columns. A constraint of
-// one column belongs to the definition of that column.
 type SQLiteUniqueConstraint struct {
 	Name string
 
@@ -23,13 +21,11 @@ func (c *SQLiteUniqueConstraint) Equal(other *SQLiteUniqueConstraint) bool {
 
 func (c *SQLiteUniqueConstraint) Clause() string {
 	clause := fmt.Sprintf("%sUNIQUE (%s)",
-		constraintNameClause(c.Name), strings.Join(quoteIdentifiers(c.Columns), ", "))
+		constraintNameClause(c.Name), strings.Join(QuoteIdentifiers(c.Columns), ", "))
 
 	return clause + conflictClause(c.Conflict)
 }
 
-// conflictClause returns the ON CONFLICT clause of a constraint, with a leading space. An
-// empty resolution gives an empty text.
 func conflictClause(resolution string) string {
 	if resolution == "" {
 		return ""

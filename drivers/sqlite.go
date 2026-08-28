@@ -14,14 +14,14 @@ import (
 )
 
 type SQLLiteDriverConfig struct {
-	SourceDatabasePath string
 	TargetDatabasePath string
+	SourceDatabasePath string
 	CompareData        bool
 }
 
 type SQLiteDriver struct {
-	SourceDatabaseConnection *sql.DB
 	TargetDatabaseConnection *sql.DB
+	SourceDatabaseConnection *sql.DB
 	CompareData              bool
 
 	temporaryDirectory string
@@ -32,37 +32,37 @@ func NewSQLiteDriver(ctx context.Context, config *SQLLiteDriverConfig) (*SQLiteD
 		CompareData: config.CompareData,
 	}
 
-	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceDatabasePath, "source")
-	if err != nil {
-		driver.RemoveTemporaryDirectory()
-		return nil, err
-	}
-
-	driver.SourceDatabaseConnection = sourceDatabaseConnection
-
 	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetDatabasePath, "target")
 	if err != nil {
-		driver.SourceDatabaseConnection.Close()
 		driver.RemoveTemporaryDirectory()
-
 		return nil, err
 	}
 
 	driver.TargetDatabaseConnection = targetDatabaseConnection
 
+	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceDatabasePath, "source")
+	if err != nil {
+		driver.TargetDatabaseConnection.Close()
+		driver.RemoveTemporaryDirectory()
+
+		return nil, err
+	}
+
+	driver.SourceDatabaseConnection = sourceDatabaseConnection
+
 	return driver, nil
 }
 
-func trimSQLitePrefix(path string) string {
+func TrimSQLitePrefix(path string) string {
 	return strings.TrimPrefix(path, "sqlite://")
 }
 
 func (d *SQLiteDriver) Close() error {
-	sourceError := d.SourceDatabaseConnection.Close()
 	targetError := d.TargetDatabaseConnection.Close()
+	sourceError := d.SourceDatabaseConnection.Close()
 	removeError := d.RemoveTemporaryDirectory()
 
-	return firstError(sourceError, targetError, removeError)
+	return FirstError(targetError, sourceError, removeError)
 }
 
 func (d *SQLiteDriver) Diff(ctx context.Context) ([]Instruction, error) {
@@ -104,26 +104,26 @@ func (d *SQLiteDriver) Diff(ctx context.Context) ([]Instruction, error) {
 func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
 
-	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(table *SQLiteTable) bool {
-			return table.Name == sourceTable.Name
+	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, targetTable := range targetTables {
+		sourceTable, found := lo.Find(sourceTables, func(table *SQLiteTable) bool {
+			return table.Name == targetTable.Name
 		})
 		if !found {
-			instructions = append(instructions, sourceTable.Instructions()...)
+			instructions = append(instructions, targetTable.Instructions()...)
 			continue
 		}
 
-		tableInstructions, err := sourceTable.DiffTable(targetTable)
+		tableInstructions, err := targetTable.DiffTable(sourceTable)
 		if err != nil {
 			return nil, err
 		}
@@ -131,12 +131,12 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {
 		instructions = append(instructions, tableInstructions...)
 	}
 
-	for _, targetTable := range targetTables {
-		_, found := lo.Find(sourceTables, func(table *SQLiteTable) bool {
-			return table.Name == targetTable.Name
+	for _, sourceTable := range sourceTables {
+		_, found := lo.Find(targetTables, func(table *SQLiteTable) bool {
+			return table.Name == sourceTable.Name
 		})
 		if !found {
-			instructions = append(instructions, &SQLDropTableInstruction{Name: targetTable.Name})
+			instructions = append(instructions, &SQLDropTableInstruction{Name: sourceTable.Name})
 		}
 	}
 
@@ -146,26 +146,26 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]Instruction, error) {
 func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
 
-	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetViews, err := d.GetViews(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceView := range sourceViews {
-		targetView, found := lo.Find(targetViews, func(view *SQLiteView) bool {
-			return view.Name == sourceView.Name
+	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, targetView := range targetViews {
+		sourceView, found := lo.Find(sourceViews, func(view *SQLiteView) bool {
+			return view.Name == targetView.Name
 		})
 		if !found {
-			instructions = append(instructions, sourceView.Instructions()...)
+			instructions = append(instructions, targetView.Instructions()...)
 			continue
 		}
 
-		subInstructions, err := sourceView.Diff(targetView)
+		subInstructions, err := targetView.Diff(sourceView)
 		if err != nil {
 			return nil, err
 		}
@@ -173,36 +173,34 @@ func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]Instruction, error) {
 		instructions = append(instructions, subInstructions...)
 	}
 
-	for _, targetView := range targetViews {
-		_, found := lo.Find(sourceViews, func(view *SQLiteView) bool {
-			return view.Name == targetView.Name
+	for _, sourceView := range sourceViews {
+		_, found := lo.Find(targetViews, func(view *SQLiteView) bool {
+			return view.Name == sourceView.Name
 		})
 		if !found {
-			instructions = append(instructions, &SQLDropViewInstruction{Name: targetView.Name})
+			instructions = append(instructions, &SQLDropViewInstruction{Name: sourceView.Name})
 		}
 	}
 
 	return instructions, nil
 }
 
-// PRAGMA table_list names the kind of each table. A virtual table takes its own statement,
-// and a shadow table belongs to the module of a virtual table, so this method returns
-// neither of the two.
-//
-// The order comes from sqlite_master, which holds the tables in the order of the creation.
-// A table that holds a foreign key comes after the table that it names, so keep that order.
+// A virtual table takes its own statement, and a shadow table belongs to its module.
+// The order of sqlite_master is the order of the creation, so a table that holds a foreign
+// key comes after the table that it names. Keep that order.
 func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT master.name
 		FROM sqlite_master AS master
 		WHERE master.type = 'table' AND master.name NOT LIKE 'sqlite_%'
+		AND master.name <> ?
 		AND NOT EXISTS (
 			SELECT 1 FROM pragma_table_list AS list
 			WHERE list.schema = 'main' AND list.name = master.name
 			AND list.type IN ('virtual', 'shadow')
 		)
 		ORDER BY master.rowid;
-	`)
+	`, MigrationHistoryTableName)
 	if err != nil {
 		return nil, err
 	}
@@ -298,10 +296,9 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
-	// PRAGMA foreign_key_list reports no DEFERRABLE clause. SQLite writes a key of one
-	// column as a column constraint or as a table constraint, and dbdiff writes the table
-	// form, so a key of one column reads either place. Without that rule a diff of the two
-	// forms never settles.
+	// PRAGMA foreign_key_list reports no DEFERRABLE clause. SQLite writes a key of one column
+	// as a column constraint or as a table constraint, and dbdiff writes the table form, so a
+	// key of one column reads either place.
 	for _, foreignKey := range foreignKeys {
 		foreignKey.Name = parsed.ForeignKeyNameOf(foreignKey.From)
 		foreignKey.Deferrable = parsed.DeferrableOf(foreignKey.From)
@@ -370,39 +367,39 @@ func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQL
 }
 
 func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]Instruction, error) {
-	sourceTables, err := d.GetVirtualTables(ctx, d.SourceDatabaseConnection)
+	targetTables, err := d.GetVirtualTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	targetTables, err := d.GetVirtualTables(ctx, d.TargetDatabaseConnection)
+	sourceTables, err := d.GetVirtualTables(ctx, d.SourceDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
 	var instructions []Instruction
 
-	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(table *SQLiteVirtualTable) bool {
-			return table.Name == sourceTable.Name
-		})
-		if !found {
-			instructions = append(instructions, sourceTable.CreateInstruction())
-			continue
-		}
-
-		if sourceTable.SQL != targetTable.SQL {
-			instructions = append(instructions,
-				targetTable.DropInstruction(), sourceTable.CreateInstruction())
-		}
-	}
-
 	for _, targetTable := range targetTables {
-		_, found := lo.Find(sourceTables, func(table *SQLiteVirtualTable) bool {
+		sourceTable, found := lo.Find(sourceTables, func(table *SQLiteVirtualTable) bool {
 			return table.Name == targetTable.Name
 		})
 		if !found {
-			instructions = append(instructions, targetTable.DropInstruction())
+			instructions = append(instructions, targetTable.CreateInstruction())
+			continue
+		}
+
+		if targetTable.SQL != sourceTable.SQL {
+			instructions = append(instructions,
+				sourceTable.DropInstruction(), targetTable.CreateInstruction())
+		}
+	}
+
+	for _, sourceTable := range sourceTables {
+		_, found := lo.Find(targetTables, func(table *SQLiteVirtualTable) bool {
+			return table.Name == sourceTable.Name
+		})
+		if !found {
+			instructions = append(instructions, sourceTable.DropInstruction())
 		}
 	}
 
@@ -433,9 +430,8 @@ const (
 	storedGeneratedColumn       = 3
 )
 
-// GetTableColumns reads PRAGMA table_xinfo, because PRAGMA table_info gives no generated
-// column. The PRAGMA gives no expression for such a column, so parseTableDefinition reads
-// the expression from the CREATE TABLE statement of the table.
+// PRAGMA table_info gives no generated column, so this method reads PRAGMA table_xinfo.
+// That PRAGMA gives no expression, so parseTableDefinition reads it.
 func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {
 	definition, err := d.GetTableDefinition(ctx, db, tableName)
 	if err != nil {
@@ -444,7 +440,7 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 
 	parsed := parseTableDefinition(definition)
 
-	rows, err := db.QueryContext(ctx, "PRAGMA table_xinfo("+quoteIdentifier(tableName)+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA table_xinfo("+QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -518,9 +514,8 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 	return columns, nil
 }
 
-// A key of one column gives an empty list, because it stays a column constraint.
 func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+quoteIdentifier(tableName)+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +574,7 @@ func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, table
 
 // This method sorts the keys, because SQLite gives no stable order.
 func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, tableName string) ([][]string, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+quoteIdentifier(tableName)+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +626,7 @@ func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, table
 }
 
 func (d *SQLiteDriver) GetIndexColumnNames(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+QuoteIdentifier(indexName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -671,7 +666,7 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 		return nil, err
 	}
 
-	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+quoteIdentifier(tableName)+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA index_list("+QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -722,8 +717,7 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 	return indexes, nil
 }
 
-// An index that a UNIQUE constraint or a PRIMARY KEY builds holds no text, and the map
-// holds no entry for it.
+// An index that a UNIQUE constraint or a PRIMARY KEY builds holds no text.
 func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tableName string) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
 	if err != nil {
@@ -753,11 +747,10 @@ func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tabl
 	return definitions, nil
 }
 
-// PRAGMA index_info gives no name for a key that an expression builds, so that key comes
-// from definitionKeys. The PRAGMA also gives no direction and no collation, so
-// indexKeyModifiers reads those two parts from the same text.
+// PRAGMA index_info gives no name for an expression key, no direction, and no collation,
+// so definitionKeys and indexKeyModifiers read those parts from the text.
 func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName string, definitionKeys []string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+quoteIdentifier(indexName)+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA index_info("+QuoteIdentifier(indexName)+");")
 	if err != nil {
 		return nil, err
 	}
@@ -783,7 +776,7 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 				modifiers = indexKeyModifiers(definitionKeys[keyPosition])
 			}
 
-			keys = append(keys, quoteIdentifier(name.String)+modifiers)
+			keys = append(keys, QuoteIdentifier(name.String)+modifiers)
 
 			continue
 		}
@@ -874,7 +867,7 @@ func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 }
 
 func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteForeignKey, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+quoteIdentifier(tableName)+");")
+	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,7 @@ type SQLiteAlterTableInstruction struct {
 
 func (i *SQLiteAlterTableInstruction) String() string {
 	return fmt.Sprintf("ALTER TABLE %s %s;",
-		quoteIdentifier(i.Name), i.Action.TableActionClause())
+		QuoteIdentifier(i.Name), i.Action.TableActionClause())
 }
 
 func (i *SQLiteAlterTableInstruction) Comment() string {
@@ -27,8 +27,6 @@ func (a *SQLiteAddColumnAction) TableActionClause() string {
 	return "ADD COLUMN " + a.Column.Definition()
 }
 
-// PrimaryKey and UniqueConstraints hold a group of two or more columns only. A key or a
-// constraint of one column stays in the definition of that column.
 type SQLiteCreateTableInstruction struct {
 	Name               string
 	Columns            []*SQLiteColumn
@@ -52,7 +50,7 @@ func (i *SQLiteCreateTableInstruction) String() string {
 
 	if len(i.PrimaryKey) > 0 {
 		lines = append(lines, fmt.Sprintf("\tPRIMARY KEY (%s)%s",
-			strings.Join(quoteIdentifiers(i.PrimaryKey), ", "),
+			strings.Join(QuoteIdentifiers(i.PrimaryKey), ", "),
 			conflictClause(i.PrimaryKeyConflict)))
 	}
 
@@ -79,7 +77,7 @@ func (i *SQLiteCreateTableInstruction) String() string {
 	}
 
 	statement := fmt.Sprintf("CREATE TABLE %s (\n%s\n)",
-		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+		QuoteIdentifier(i.Name), strings.Join(lines, ",\n"))
 
 	if len(options) > 0 {
 		statement += " " + strings.Join(options, ", ")
@@ -120,8 +118,8 @@ func (i *SQLiteCreateIndexInstruction) String() string {
 	}
 
 	statement += fmt.Sprintf("INDEX %s ON %s (%s)",
-		quoteIdentifier(i.Name),
-		quoteIdentifier(i.TableName),
+		QuoteIdentifier(i.Name),
+		QuoteIdentifier(i.TableName),
 		strings.Join(i.Keys, ", "))
 
 	if i.Condition != nil {
@@ -164,7 +162,7 @@ type SQLiteDropTriggerInstruction struct {
 }
 
 func (i *SQLiteDropTriggerInstruction) String() string {
-	return "DROP TRIGGER " + quoteIdentifier(i.Name) + ";"
+	return "DROP TRIGGER " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *SQLiteDropTriggerInstruction) Comment() string {

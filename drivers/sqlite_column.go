@@ -17,7 +17,7 @@ type SQLiteColumn struct {
 
 	Default sql.NullString
 
-	// GeneratedExpression holds the expression with the enclosing parentheses.
+	// The value holds the enclosing parentheses.
 	GeneratedExpression string
 
 	GeneratedStored bool
@@ -26,7 +26,6 @@ type SQLiteColumn struct {
 
 	Collation string
 
-	// Check holds the check with the enclosing parentheses.
 	Check string
 
 	PrimaryKeyConflict string
@@ -55,7 +54,7 @@ func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
 }
 
 func (c *SQLiteColumn) Definition() string {
-	value := quoteIdentifier(c.Name)
+	value := QuoteIdentifier(c.Name)
 
 	// SQLite accepts a column with no type, and the short form of a generated column takes
 	// that form in most schemas.

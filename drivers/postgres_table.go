@@ -17,8 +17,7 @@ type PostgresTable struct {
 	PartitionParent string
 	PartitionBound  string
 
-	// Inherits names the parent of a table of INHERITS. That table is no partition, so it
-	// keeps its own columns and its own statement.
+	// A table of INHERITS is no partition, so it keeps its own columns and its own statement.
 	Inherits []string
 
 	References []string
@@ -132,8 +131,7 @@ func (t *PostgresTable) ColumnByName(name string) (*PostgresColumn, bool) {
 func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) ([]Instruction, error) {
 	var instructions []Instruction
 
-	// A partition holds the columns, the constraints, and the indexes of its parent. The
-	// diff of the parent covers each of them.
+	// A partition holds the columns, the constraints, and the indexes of its parent.
 	if t.IsPartition() || other.IsPartition() {
 		return nil, nil
 	}
@@ -145,30 +143,29 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	for _, sourceColumn := range t.Columns {
-		targetColumn, found := other.ColumnByName(sourceColumn.Name)
+	for _, targetColumn := range t.Columns {
+		sourceColumn, found := other.ColumnByName(targetColumn.Name)
 		if !found {
 			instructions = append(instructions,
-				alterTable(&PostgresAddColumnAction{Column: sourceColumn}))
-			instructions = append(instructions, sourceColumn.StorageInstructions(t.Name)...)
-			instructions = append(instructions, sourceColumn.StatisticsInstructions(t.Name)...)
+				alterTable(&PostgresAddColumnAction{Column: targetColumn}))
+			instructions = append(instructions, targetColumn.StorageInstructions(t.Name)...)
+			instructions = append(instructions, targetColumn.StatisticsInstructions(t.Name)...)
 
 			continue
 		}
 
-		if sourceColumn.HasEqualAttributes(targetColumn) {
+		if targetColumn.HasEqualAttributes(sourceColumn) {
 			continue
 		}
 
-		// PostgreSQL holds no action that changes the expression of a generated column.
-		// The column keeps no data of its own, so one DROP COLUMN action and one ADD
-		// COLUMN action rebuild it with no loss.
-		if sourceColumn.GeneratedExpression != targetColumn.GeneratedExpression {
+		// PostgreSQL holds no action that changes the expression of a generated column, and the
+		// column keeps no data of its own.
+		if targetColumn.GeneratedExpression != sourceColumn.GeneratedExpression {
 			instructions = append(instructions, &PostgresAlterTableInstruction{
 				Name: t.Name,
 				Actions: []AlterTableAction{
-					&SQLDropColumnAction{ColumnName: targetColumn.Name},
-					&PostgresAddColumnAction{Column: sourceColumn},
+					&SQLDropColumnAction{ColumnName: sourceColumn.Name},
+					&PostgresAddColumnAction{Column: targetColumn},
 				},
 			})
 
@@ -177,106 +174,101 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 
 		// PostgreSQL refuses to remove the NOT NULL flag of an identity column, so this
 		// action comes before the NOT NULL block below.
-		if targetColumn.Identity != "" && sourceColumn.Identity == "" {
+		if sourceColumn.Identity != "" && targetColumn.Identity == "" {
 			instructions = append(instructions,
-				alterTable(&PostgresDropIdentityAction{ColumnName: sourceColumn.Name}))
+				alterTable(&PostgresDropIdentityAction{ColumnName: targetColumn.Name}))
 		}
 
-		typeChanged := sourceColumn.Type != targetColumn.Type ||
-			sourceColumn.Collation != targetColumn.Collation
+		typeChanged := targetColumn.Type != sourceColumn.Type ||
+			targetColumn.Collation != sourceColumn.Collation
 
-		// PostgreSQL changes a collation through the TYPE action, so a new collation
-		// prints that action too.
+		// PostgreSQL changes a collation through the TYPE action.
 		if typeChanged {
-			usingCast, err := columnUsingClause(sourceColumn, targetColumn, hasAutomaticCast)
+			usingCast, err := columnUsingClause(targetColumn, sourceColumn, hasAutomaticCast)
 			if err != nil {
 				return nil, err
 			}
 
 			instructions = append(instructions, alterTable(&PostgresAlterColumnTypeAction{
-				ColumnName: sourceColumn.Name,
-				DataType:   sourceColumn.Type,
-				Collation:  sourceColumn.Collation,
+				ColumnName: targetColumn.Name,
+				DataType:   targetColumn.Type,
+				Collation:  targetColumn.Collation,
 				UsingCast:  usingCast,
 			}))
 		}
 
-		if sourceColumn.NotNull != targetColumn.NotNull {
-			if sourceColumn.NotNull {
+		if targetColumn.NotNull != sourceColumn.NotNull {
+			if targetColumn.NotNull {
 				instructions = append(instructions,
-					alterTable(&PostgresSetNotNullAction{ColumnName: sourceColumn.Name}))
+					alterTable(&PostgresSetNotNullAction{ColumnName: targetColumn.Name}))
 			} else {
 				instructions = append(instructions,
-					alterTable(&PostgresDropNotNullAction{ColumnName: sourceColumn.Name}))
+					alterTable(&PostgresDropNotNullAction{ColumnName: targetColumn.Name}))
 			}
 		}
 
-		if sourceColumn.Default != targetColumn.Default {
-			if sourceColumn.Default.Valid {
+		if targetColumn.Default != sourceColumn.Default {
+			if targetColumn.Default.Valid {
 				instructions = append(instructions, alterTable(&PostgresSetDefaultAction{
-					ColumnName: sourceColumn.Name,
-					Expression: sourceColumn.Default.String,
+					ColumnName: targetColumn.Name,
+					Expression: targetColumn.Default.String,
 				}))
 			} else {
 				instructions = append(instructions,
-					alterTable(&PostgresDropDefaultAction{ColumnName: sourceColumn.Name}))
+					alterTable(&PostgresDropDefaultAction{ColumnName: targetColumn.Name}))
 			}
 		}
 
-		// A TYPE action gives the column the storage mode of the new type, so a column
-		// that changes its type and holds a mode takes that mode again. That action comes
-		// above, so this action always follows it. The mode DEFAULT gives the column the
-		// mode of its type again, and PostgreSQL 16 accepts that mode.
-		if sourceColumn.Storage != targetColumn.Storage ||
-			(typeChanged && sourceColumn.Storage != "") {
-			storage := sourceColumn.Storage
+		// A TYPE action gives the column the storage mode of the new type, so this action always
+		// follows it. The mode DEFAULT gives the column the mode of its type again.
+		if targetColumn.Storage != sourceColumn.Storage ||
+			(typeChanged && targetColumn.Storage != "") {
+			storage := targetColumn.Storage
 			if storage == "" {
 				storage = "DEFAULT"
 			}
 
 			instructions = append(instructions, alterTable(&PostgresSetStorageAction{
-				ColumnName: sourceColumn.Name,
+				ColumnName: targetColumn.Name,
 				Storage:    storage,
 			}))
 		}
 
-		// A TYPE action keeps the statistics target, so this action needs no such test.
-		// The value -1 gives the column the default target of the server again.
-		if sourceColumn.StatisticsTarget != targetColumn.StatisticsTarget {
-			target := int64(-1)
-			if sourceColumn.StatisticsTarget.Valid {
-				target = sourceColumn.StatisticsTarget.Int64
+		// A TYPE action keeps the statistics source, and the value -1 gives the default source.
+		if targetColumn.StatisticsTarget != sourceColumn.StatisticsTarget {
+			source := int64(-1)
+			if targetColumn.StatisticsTarget.Valid {
+				source = targetColumn.StatisticsTarget.Int64
 			}
 
 			instructions = append(instructions, alterTable(&PostgresSetStatisticsAction{
-				ColumnName: sourceColumn.Name,
-				Target:     target,
+				ColumnName: targetColumn.Name,
+				Source:     source,
 			}))
 		}
 
-		// The options of an identity column live in its sequence, so this action changes
-		// that sequence and never the identity itself.
-		if sourceColumn.Identity != "" && targetColumn.Identity != "" &&
-			sourceColumn.IdentityOptions != targetColumn.IdentityOptions &&
-			sourceColumn.IdentityOptions != "" {
+		// The options of an identity column live in its sequence.
+		if targetColumn.Identity != "" && sourceColumn.Identity != "" &&
+			targetColumn.IdentityOptions != sourceColumn.IdentityOptions &&
+			targetColumn.IdentityOptions != "" {
 			instructions = append(instructions, alterTable(&PostgresSetIdentityOptionsAction{
-				ColumnName: sourceColumn.Name,
-				Options:    sourceColumn.IdentityOptions,
+				ColumnName: targetColumn.Name,
+				Options:    targetColumn.IdentityOptions,
 			}))
 		}
 
 		// PostgreSQL refuses to add an identity to a column that accepts a null value, so
 		// these two actions come after the NOT NULL block above.
-		if sourceColumn.Identity != "" && sourceColumn.Identity != targetColumn.Identity {
-			if targetColumn.Identity == "" {
+		if targetColumn.Identity != "" && targetColumn.Identity != sourceColumn.Identity {
+			if sourceColumn.Identity == "" {
 				instructions = append(instructions, alterTable(&PostgresAddIdentityAction{
-					ColumnName: sourceColumn.Name,
-					Identity:   sourceColumn.Identity,
+					ColumnName: targetColumn.Name,
+					Identity:   targetColumn.Identity,
 				}))
 			} else {
 				instructions = append(instructions, alterTable(&PostgresSetIdentityAction{
-					ColumnName: sourceColumn.Name,
-					Identity:   sourceColumn.Identity,
+					ColumnName: targetColumn.Name,
+					Identity:   targetColumn.Identity,
 				}))
 			}
 		}
@@ -302,64 +294,64 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		})
 	}
 
-	for _, sourceColumn := range t.Columns {
-		targetColumn, found := other.ColumnByName(sourceColumn.Name)
+	for _, targetColumn := range t.Columns {
+		sourceColumn, found := other.ColumnByName(targetColumn.Name)
 		if !found {
 			continue
 		}
 
-		if sourceColumn.Comment != targetColumn.Comment {
+		if targetColumn.Comment != sourceColumn.Comment {
 			instructions = append(instructions, &PostgresCommentOnColumnInstruction{
 				TableName:  t.Name,
-				ColumnName: sourceColumn.Name,
-				Text:       sourceColumn.Comment,
+				ColumnName: targetColumn.Name,
+				Text:       targetColumn.Comment,
 			})
 		}
 	}
 
 	// PostgreSQL drops every constraint and every index of a column with the column, so
 	// these two blocks come before the column removals below.
-	for _, sourceConstraint := range t.Constraints {
-		targetConstraint, found := other.ConstraintByName(sourceConstraint.Name)
+	for _, targetConstraint := range t.Constraints {
+		sourceConstraint, found := other.ConstraintByName(targetConstraint.Name)
 		if !found {
 			instructions = append(instructions,
-				alterTable(&PostgresAddConstraintAction{Constraint: sourceConstraint}))
+				alterTable(&PostgresAddConstraintAction{Constraint: targetConstraint}))
 
 			continue
 		}
 
-		if sourceConstraint.Def != targetConstraint.Def {
+		if targetConstraint.Def != sourceConstraint.Def {
 			instructions = append(instructions,
-				alterTable(&PostgresDropConstraintAction{ConstraintName: targetConstraint.Name}),
-				alterTable(&PostgresAddConstraintAction{Constraint: sourceConstraint}))
+				alterTable(&PostgresDropConstraintAction{ConstraintName: sourceConstraint.Name}),
+				alterTable(&PostgresAddConstraintAction{Constraint: targetConstraint}))
 		}
 	}
 
-	for _, targetConstraint := range other.Constraints {
-		_, found := t.ConstraintByName(targetConstraint.Name)
+	for _, sourceConstraint := range other.Constraints {
+		_, found := t.ConstraintByName(sourceConstraint.Name)
 		if !found {
 			instructions = append(instructions,
-				alterTable(&PostgresDropConstraintAction{ConstraintName: targetConstraint.Name}))
+				alterTable(&PostgresDropConstraintAction{ConstraintName: sourceConstraint.Name}))
 		}
 	}
 
-	for _, sourceIndex := range t.Indexes {
-		targetIndex, found := other.IndexByName(sourceIndex.Name)
+	for _, targetIndex := range t.Indexes {
+		sourceIndex, found := other.IndexByName(targetIndex.Name)
 		if !found {
-			instructions = append(instructions, sourceIndex.CreateInstruction())
+			instructions = append(instructions, targetIndex.CreateInstruction())
 			continue
 		}
 
-		if sourceIndex.Def != targetIndex.Def {
+		if targetIndex.Def != sourceIndex.Def {
 			instructions = append(instructions,
-				&SQLDropIndexInstruction{Name: targetIndex.Name},
-				sourceIndex.CreateInstruction())
+				&SQLDropIndexInstruction{Name: sourceIndex.Name},
+				targetIndex.CreateInstruction())
 		}
 	}
 
 	// The mode USING INDEX names an index, so this block comes after the index additions
 	// above. It comes before the index removals below, because PostgreSQL refuses to drop
-	// the index that the replica identity of the target holds.
+	// the index that the replica identity of the source holds.
 	if t.ReplicaIdentity != other.ReplicaIdentity ||
 		t.ReplicaIdentityIndex != other.ReplicaIdentityIndex {
 		instructions = append(instructions, alterTable(&PostgresReplicaIdentityAction{
@@ -368,58 +360,58 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}))
 	}
 
-	for _, targetIndex := range other.Indexes {
-		_, found := t.IndexByName(targetIndex.Name)
+	for _, sourceIndex := range other.Indexes {
+		_, found := t.IndexByName(sourceIndex.Name)
 		if !found {
-			instructions = append(instructions, &SQLDropIndexInstruction{Name: targetIndex.Name})
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: sourceIndex.Name})
 		}
 	}
 
-	for _, targetColumn := range other.Columns {
-		_, found := t.ColumnByName(targetColumn.Name)
+	for _, sourceColumn := range other.Columns {
+		_, found := t.ColumnByName(sourceColumn.Name)
 		if !found {
 			instructions = append(instructions,
-				alterTable(&SQLDropColumnAction{ColumnName: targetColumn.Name}))
+				alterTable(&SQLDropColumnAction{ColumnName: sourceColumn.Name}))
 		}
 	}
 
-	for _, sourceTrigger := range t.Triggers {
-		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
+	for _, targetTrigger := range t.Triggers {
+		sourceTrigger, found := other.TriggerByName(targetTrigger.Name)
 		if !found {
-			instructions = append(instructions, sourceTrigger.CreateInstruction())
-			instructions = append(instructions, sourceTrigger.EnableInstructions(t.Name)...)
+			instructions = append(instructions, targetTrigger.CreateInstruction())
+			instructions = append(instructions, targetTrigger.EnableInstructions(t.Name)...)
 
 			continue
 		}
 
-		// A new trigger takes the mode ENABLE, so the mode of the source comes after the
+		// A new trigger takes the mode ENABLE, so the mode of the target comes after the
 		// CREATE TRIGGER statement below.
-		if sourceTrigger.Def != targetTrigger.Def {
+		if targetTrigger.Def != sourceTrigger.Def {
 			instructions = append(instructions,
 				&PostgresDropTriggerInstruction{
-					Name:      targetTrigger.Name,
+					Name:      sourceTrigger.Name,
 					TableName: t.Name,
 				},
-				sourceTrigger.CreateInstruction())
-			instructions = append(instructions, sourceTrigger.EnableInstructions(t.Name)...)
+				targetTrigger.CreateInstruction())
+			instructions = append(instructions, targetTrigger.EnableInstructions(t.Name)...)
 
 			continue
 		}
 
-		if sourceTrigger.EnableMode != targetTrigger.EnableMode {
+		if targetTrigger.EnableMode != sourceTrigger.EnableMode {
 			instructions = append(instructions, alterTable(&PostgresTriggerEnableAction{
-				Mode:        sourceTrigger.EnableMode,
-				TriggerName: sourceTrigger.Name,
+				Mode:        targetTrigger.EnableMode,
+				TriggerName: targetTrigger.Name,
 			}))
 		}
 	}
 
-	for _, targetTrigger := range other.Triggers {
-		_, found := t.TriggerByName(targetTrigger.Name)
+	for _, sourceTrigger := range other.Triggers {
+		_, found := t.TriggerByName(sourceTrigger.Name)
 		if !found {
 			instructions = append(instructions,
 				&PostgresDropTriggerInstruction{
-					Name:      targetTrigger.Name,
+					Name:      sourceTrigger.Name,
 					TableName: t.Name,
 				})
 		}
@@ -428,9 +420,8 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	return instructions, nil
 }
 
-// The name of a child can sort before the name of its parent, and a statement needs the
-// parent: a partition needs its parent, a table of INHERITS needs each parent of it, and a
-// foreign key needs the table that it names.
+// A statement needs the parent: a partition needs its parent, a table of INHERITS needs
+// each parent of it, and a foreign key needs the table that it names.
 func sortTablesByDependency(tables []*PostgresTable) []*PostgresTable {
 	tableByName := make(map[string]*PostgresTable, len(tables))
 
@@ -479,28 +470,26 @@ func sortTablesByDependency(tables []*PostgresTable) []*PostgresTable {
 	return sorted
 }
 
-// The action of a rule can name a second table, so DiffTables prints these instructions
-// after every table.
 func (t *PostgresTable) DiffRules(other *PostgresTable) []Instruction {
 	var instructions []Instruction
 
-	for _, sourceRule := range t.Rules {
-		targetRule, found := other.RuleByName(sourceRule.Name)
+	for _, targetRule := range t.Rules {
+		sourceRule, found := other.RuleByName(targetRule.Name)
 		if !found {
-			instructions = append(instructions, sourceRule.CreateInstruction())
+			instructions = append(instructions, targetRule.CreateInstruction())
 			continue
 		}
 
-		if sourceRule.Def != targetRule.Def {
+		if targetRule.Def != sourceRule.Def {
 			instructions = append(instructions,
-				targetRule.DropInstruction(), sourceRule.CreateInstruction())
+				sourceRule.DropInstruction(), targetRule.CreateInstruction())
 		}
 	}
 
-	for _, targetRule := range other.Rules {
-		_, found := t.RuleByName(targetRule.Name)
+	for _, sourceRule := range other.Rules {
+		_, found := t.RuleByName(sourceRule.Name)
 		if !found {
-			instructions = append(instructions, targetRule.DropInstruction())
+			instructions = append(instructions, sourceRule.DropInstruction())
 		}
 	}
 
@@ -517,30 +506,30 @@ func (t *PostgresTable) RuleInstructions() []Instruction {
 	return instructions
 }
 
-func diffStorageParameters(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
-	if slices.Equal(sourceTable.StorageParameters, targetTable.StorageParameters) {
+func diffStorageParameters(targetTable *PostgresTable, sourceTable *PostgresTable) []Instruction {
+	if slices.Equal(targetTable.StorageParameters, sourceTable.StorageParameters) {
 		return nil
 	}
 
 	var instructions []Instruction
 
-	if len(sourceTable.StorageParameters) > 0 {
+	if len(targetTable.StorageParameters) > 0 {
 		instructions = append(instructions, &PostgresAlterTableInstruction{
-			Name: sourceTable.Name,
+			Name: targetTable.Name,
 			Actions: []AlterTableAction{
-				&PostgresSetStorageParametersAction{Parameters: sourceTable.StorageParameters},
+				&PostgresSetStorageParametersAction{Parameters: targetTable.StorageParameters},
 			},
 		})
 	}
 
 	var removed []string
 
-	for _, parameter := range targetTable.StorageParameters {
+	for _, parameter := range sourceTable.StorageParameters {
 		name := storageParameterName(parameter)
 
-		held := slices.ContainsFunc(sourceTable.StorageParameters,
-			func(sourceParameter string) bool {
-				return storageParameterName(sourceParameter) == name
+		held := slices.ContainsFunc(targetTable.StorageParameters,
+			func(targetParameter string) bool {
+				return storageParameterName(targetParameter) == name
 			})
 		if !held {
 			removed = append(removed, name)
@@ -549,7 +538,7 @@ func diffStorageParameters(sourceTable *PostgresTable, targetTable *PostgresTabl
 
 	if len(removed) > 0 {
 		instructions = append(instructions, &PostgresAlterTableInstruction{
-			Name:    sourceTable.Name,
+			Name:    targetTable.Name,
 			Actions: []AlterTableAction{&PostgresResetStorageParametersAction{Names: removed}},
 		})
 	}
@@ -566,49 +555,49 @@ func storageParameterName(parameter string) string {
 	return name
 }
 
-func diffRowLevelSecurity(sourceTable *PostgresTable, targetTable *PostgresTable) []Instruction {
+func diffRowLevelSecurity(targetTable *PostgresTable, sourceTable *PostgresTable) []Instruction {
 	var instructions []Instruction
 
 	alterTable := func(mode string) Instruction {
 		return &PostgresAlterTableInstruction{
-			Name:    sourceTable.Name,
+			Name:    targetTable.Name,
 			Actions: []AlterTableAction{&PostgresRowLevelSecurityAction{Mode: mode}},
 		}
 	}
 
-	if sourceTable.RowLevelSecurity != targetTable.RowLevelSecurity {
-		if sourceTable.RowLevelSecurity {
+	if targetTable.RowLevelSecurity != sourceTable.RowLevelSecurity {
+		if targetTable.RowLevelSecurity {
 			instructions = append(instructions, alterTable("ENABLE"))
 		} else {
 			instructions = append(instructions, alterTable("DISABLE"))
 		}
 	}
 
-	if sourceTable.ForceRowLevelSecurity != targetTable.ForceRowLevelSecurity {
-		if sourceTable.ForceRowLevelSecurity {
+	if targetTable.ForceRowLevelSecurity != sourceTable.ForceRowLevelSecurity {
+		if targetTable.ForceRowLevelSecurity {
 			instructions = append(instructions, alterTable("FORCE"))
 		} else {
 			instructions = append(instructions, alterTable("NO FORCE"))
 		}
 	}
 
-	for _, sourcePolicy := range sourceTable.Policies {
-		targetPolicy, found := targetTable.PolicyByName(sourcePolicy.Name)
+	for _, targetPolicy := range targetTable.Policies {
+		sourcePolicy, found := sourceTable.PolicyByName(targetPolicy.Name)
 		if !found {
-			instructions = append(instructions, sourcePolicy.CreateInstruction())
+			instructions = append(instructions, targetPolicy.CreateInstruction())
 			continue
 		}
 
-		if !sourcePolicy.Equal(targetPolicy) {
+		if !targetPolicy.Equal(sourcePolicy) {
 			instructions = append(instructions,
-				targetPolicy.DropInstruction(), sourcePolicy.CreateInstruction())
+				sourcePolicy.DropInstruction(), targetPolicy.CreateInstruction())
 		}
 	}
 
-	for _, targetPolicy := range targetTable.Policies {
-		_, found := sourceTable.PolicyByName(targetPolicy.Name)
+	for _, sourcePolicy := range sourceTable.Policies {
+		_, found := targetTable.PolicyByName(sourcePolicy.Name)
 		if !found {
-			instructions = append(instructions, targetPolicy.DropInstruction())
+			instructions = append(instructions, sourcePolicy.DropInstruction())
 		}
 	}
 
@@ -655,7 +644,6 @@ func (t *PostgresTable) TriggerByName(name string) (*PostgresTrigger, bool) {
 	return nil, false
 }
 
-// DiffTables prints every foreign key after every table.
 func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction {
 	var constraints []*PostgresConstraint
 
@@ -701,8 +689,7 @@ func (t *PostgresTable) ForeignKeyInstructions() []Instruction {
 	return instructions
 }
 
-// The list holds no rule, because the action of a rule can name a second table. DiffTables
-// prints every rule after every table.
+// The action of a rule can name a second table, so DiffTables prints the rules apart.
 func (t *PostgresTable) Instructions() []Instruction {
 	if t.IsPartition() {
 		return []Instruction{

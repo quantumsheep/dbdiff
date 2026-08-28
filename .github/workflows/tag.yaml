@@ -36,7 +36,7 @@ jobs:
           CGO_ENABLED: ${{ runner.os == 'Windows' && '' || '1' }}
         run: >-
           go build -v
-          -ldflags "-X main.version=${{ github.ref_name }}"
+          -ldflags "-X github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers.version=${{ github.ref_name }}"
           -o ./bin/dbdiff-${{ matrix.platform.suffix }}
           ./cmd/dbdiff
 

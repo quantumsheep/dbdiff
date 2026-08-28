@@ -77,45 +77,45 @@ func (d *PostgresDomain) Diff(other *PostgresDomain) []Instruction {
 		}
 	}
 
-	for _, sourceConstraint := range d.Constraints {
-		targetConstraint, found := other.ConstraintByName(sourceConstraint.Name)
+	for _, targetConstraint := range d.Constraints {
+		sourceConstraint, found := other.ConstraintByName(targetConstraint.Name)
 		if !found {
 			instructions = append(instructions, &PostgresAlterDomainInstruction{
 				Name: d.Name,
 				Action: &PostgresAddDomainConstraintAction{
-					ConstraintName: sourceConstraint.Name,
-					Definition:     sourceConstraint.Def,
+					ConstraintName: targetConstraint.Name,
+					Definition:     targetConstraint.Def,
 				},
 			})
 
 			continue
 		}
 
-		if sourceConstraint.Def != targetConstraint.Def {
+		if targetConstraint.Def != sourceConstraint.Def {
 			instructions = append(instructions,
 				&PostgresAlterDomainInstruction{
 					Name: d.Name,
 					Action: &PostgresDropDomainConstraintAction{
-						ConstraintName: targetConstraint.Name,
+						ConstraintName: sourceConstraint.Name,
 					},
 				},
 				&PostgresAlterDomainInstruction{
 					Name: d.Name,
 					Action: &PostgresAddDomainConstraintAction{
-						ConstraintName: sourceConstraint.Name,
-						Definition:     sourceConstraint.Def,
+						ConstraintName: targetConstraint.Name,
+						Definition:     targetConstraint.Def,
 					},
 				})
 		}
 	}
 
-	for _, targetConstraint := range other.Constraints {
-		_, found := d.ConstraintByName(targetConstraint.Name)
+	for _, sourceConstraint := range other.Constraints {
+		_, found := d.ConstraintByName(sourceConstraint.Name)
 		if !found {
 			instructions = append(instructions, &PostgresAlterDomainInstruction{
 				Name: d.Name,
 				Action: &PostgresDropDomainConstraintAction{
-					ConstraintName: targetConstraint.Name,
+					ConstraintName: sourceConstraint.Name,
 				},
 			})
 		}

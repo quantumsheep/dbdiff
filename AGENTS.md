@@ -3,10 +3,14 @@
 ## What dbdiff is
 
 dbdiff is a command line tool in Go. It reads the schema of two databases. Then it prints
-the SQL statements that make the target schema equal to the source schema.
+the SQL statements that make the source schema equal to the target schema.
 
-The command takes two arguments. The first argument is the source. The second argument is
-the target. The source holds the wanted state. The output changes the target.
+The command takes two arguments. The first argument is the source. It holds the current
+schema, and the output changes it. The second argument is the target. It holds the final
+schema, which is the wanted state.
+
+The whole codebase reads the two words in that one way. The `drivers` package walks the
+target objects first, and it prints the statements that change the source.
 
 dbdiff supports SQLite and PostgreSQL. It compares schemas. The `--data` flag adds the
 comparison of the rows, and the default value of that flag is off.
@@ -24,8 +28,8 @@ Read this section before you write any code.
    its removal lets a reader break the code. See [Comments](#comments).
 3. **Keep the file architecture.** One file holds one schema object of one engine. See
    [Repo layout](#repo-layout).
-4. **Copy the diff algorithm of the drivers that exist.** Every driver walks the source
-   objects first and the target objects second. See [How a diff works](#how-a-diff-works).
+4. **Copy the diff algorithm of the drivers that exist.** Every driver walks the target
+   objects first and the source objects second. See [How a diff works](#how-a-diff-works).
 5. **Test every change of a driver.** Each new behavior gets a subtest. See
    [Tests](#tests).
 6. **Run the generated SQL in the test.** A test that only compares strings proves
@@ -61,9 +65,19 @@ argument with `cmd.StringArg`.
 
 ```
 dbdiff/
-├── cmd/dbdiff/          main.go parses the flags and selects one driver. main_test.go
-│                        builds the binary and checks the output and the exit code.
+├── cmd/dbdiff/          main.go builds the root command. main_test.go builds the binary
+│                        and checks the output and the exit code.
+│   ├── cmd/             One package per command. A command lives in <command>/command.go,
+│   │                    and a subcommand lives in <command>/cmd/<subcommand>/command.go.
+│   │                    A command_test.go file sits beside each command.go. The name of
+│   │                    the package joins the path: cmdmigrategenerate. See
+│   │                    [Package names](#package-names).
+│   ├── internal/helpers/ Version and OnUsageError, which every command reads
+│   ├── internal/drivers/ NewDriver, the one driver switch of the program
+│   ├── internal/migrations/ The functions of the six migrate commands
+│   └── internal/clitest/ The helpers that build the binary and run it
 ├── drivers/             One package. It holds every driver and every schema model.
+├── internal/migrations/ One package. It holds the migration files and the migrators.
 ├── docker-compose.yml   The PostgreSQL service for the tests
 └── .github/workflows/   test.yaml (build and test) and tag.yaml (release)
 ```
@@ -74,9 +88,10 @@ The `drivers` package uses one file per schema object per engine:
 drivers/
 ├── driver.go                  The Driver interface and SectionDiff
 ├── driver_detection.go        DetectDriver and the driver names
-├── identifier.go              quoteIdentifier and quoteIdentifiers
+├── identifier.go              QuoteIdentifier and QuoteIdentifiers
 ├── instruction_comment.go     AnnotateInstructions and the builders of a comment text
 ├── sql_source.go              The SQL file source: detection, file order, apply
+├── sql_statement.go           The no-transaction directive and the split of the statements
 ├── driver_detection_test.go   The tests of DetectDriver
 ├── sqlite.go                  The SQLite driver: connections, queries, top-level diff
 ├── sqlite_table.go            SQLiteTable and its diff
@@ -120,16 +135,92 @@ drivers/
 
 Do not add a package. Add a file to `drivers/` with the name `<engine>_<object>.go`.
 
+The migration code takes two packages. `internal/migrations` holds the model of a
+migration and the migrator of each engine. It knows no command and no flag:
+
+```
+internal/migrations/
+├── migration.go                A migration file name, its checksum, and its state
+├── migration_file.go           The render and the write of a migration file, and the split of the enum values
+├── migration_config.go         MigrationConfig and the reader of dbdiff.yaml
+├── migrator.go                 The Migrator interface and NewMigrator, the one migrator switch of the program
+├── sqlite_migrator.go          The SQLite migrator
+├── postgres_migrator.go        The PostgreSQL migrator
+├── testing.go                  The migrator harnesses, WriteSQLFile, and GenerateSQLiteMigration
+├── migration_test.go           The tests of the file name, the config, and the set
+├── migration_file_test.go      The tests of the write of a file and of the split of the enum values
+├── sqlite_migrator_test.go     The tests of the SQLite migrator
+└── postgres_migrator_test.go   The tests of the PostgreSQL migrator
+```
+
+`cmd/dbdiff/internal/migrations` holds the function of each migrate command. A function of
+this package reads a flag, writes to a stream, or asks a question:
+
+```
+cmd/dbdiff/internal/migrations/
+├── command.go                  GetMigrationConfigFromCommand and OpenSet
+├── runner.go                   LoadMigrationSet, and the functions of status, preview, up, step, and verify
+└── runner_test.go              The tests of status, preview, up, step, and verify
+```
+
+The two packages take one name. A file that imports both names the model package
+`coremigrations`. See [Package names](#package-names).
+
+## Package names
+
+A command package takes the name of its path, with no separator: `cmd/dbdiff/cmd/diff`
+holds `package cmddiff`, and `cmd/dbdiff/cmd/migrate/cmd/generate` holds
+`package cmdmigrategenerate`. The name of the package differs from the name of the
+directory for that reason, so every import of a command package writes the name:
+
+```go
+cmdmigrategenerate "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/migrate/cmd/generate"
+```
+
+A test file of a command package takes the same name with the suffix `_test`.
+
+Each package of `cmd/dbdiff/internal` keeps its plain name: `drivers`, `migrations`,
+`helpers`, and `clitest`. Two of them take the name of a package of the module root. A
+file that imports both writes a prefix on the one of the root:
+
+| Import path                                 | Name in a file that imports both |
+| ------------------------------------------- | -------------------------------- |
+| `cmd/dbdiff/internal/drivers`               | `drivers`                        |
+| `drivers`                                    | `dbdiffdrivers`                  |
+| `cmd/dbdiff/internal/migrations`            | `migrations`                     |
+| `internal/migrations`                        | `coremigrations`                 |
+
 ## Build and run
 
 ```bash
 go build -o ./bin/dbdiff ./cmd/dbdiff
-go run ./cmd/dbdiff <source> <target>
+go run ./cmd/dbdiff diff <source> <target>
 go run ./cmd/dbdiff --driver postgres <source> <target>
 ```
 
+A form with no command name runs the `diff` command. `DefaultCommand` of the root command
+holds that rule.
+
 The `--driver` flag accepts `sqlite3` and `postgres`. An empty value starts the detection
 of `DetectDriver`. See [Driver detection](#driver-detection).
+
+The `dbdiff` command holds `--driver` and `--schema`, because the `diff` command and every
+subcommand of `migrate` read them. The `Local` field of a flag is false, so a flag of a
+command applies to each subcommand of that command.
+
+Every other flag belongs to the command that reads it:
+
+| Command                | Flags                                                  |
+| ---------------------- | ------------------------------------------------------ |
+| `diff`                 | `--privileges`, `--comments`, `--data`                 |
+| Each `migrate` command | `--config`, `--source`, `--target`                     |
+| `migrate preview`      | The three flags above, and `--run`                     |
+
+Each subcommand of `migrate` writes its flags in its own
+`Command` function, and the `migrate` command itself declares no flag. A flag holds the
+value that the parser writes into it, so each command needs its own instances. With the
+flags on each subcommand, the help of that subcommand names them. A change of the text of
+one of the three migration flags touches each of the six files.
 
 The SQLite driver needs CGO, because `go-sqlite3` is a C binding. If a build fails with an
 undefined symbol, set `CGO_ENABLED=1` before the build.
@@ -152,7 +243,10 @@ A driver holds two `*sql.DB` fields: `SourceDatabaseConnection` and
 `New<Engine>Driver(ctx context.Context, config *<Engine>DriverConfig)`. The constructor
 takes a context, because a SQL source runs statements before the diff starts. The config
 struct holds the two connection strings. To register a new driver, add a case to the switch
-in `cmd/dbdiff/main.go` and a value to the flag validator.
+in `NewDriver` of `cmd/dbdiff/internal/drivers/drivers.go`. Add a case to the switch in
+`NewMigrator` of `internal/migrations/migrator.go`. Add a value to `SupportedDriverNames` in
+`driver_detection.go`. The validator of the `--driver` flag of `cmd/dbdiff/main.go` reads
+that list.
 
 A driver opens one side with `OpenSide(ctx, path, ...)`. That method reads a database, or
 it builds a temporary database from a SQL source. `Close` releases the temporary
@@ -199,16 +293,16 @@ SQLite uses this method.
 ## How a diff works
 
 Every diff function follows the same three steps. The first step reads the objects of the
-source and the objects of the target. The second step walks the source objects. The third
-step walks the target objects.
+target and the objects of the source. The second step walks the target objects. The third
+step walks the source objects.
 
-In the second step, the function looks for the target object with the same name. When the
+In the second step, the function looks for the source object with the same name. When the
 name is absent, the function prints a `CREATE` statement. When the object exists and
 differs, the function prints an `ALTER` statement, or a `DROP` statement and a `CREATE`
 statement.
 
-In the third step, the function prints a `DROP` statement for each target object that the
-source does not hold.
+In the third step, the function prints a `DROP` statement for each source object that the
+target does not hold.
 
 Rules for the output:
 
@@ -321,13 +415,13 @@ The SQLite driver reads the schema with `PRAGMA` statements and with `sqlite_mas
 | Views         | `SELECT name, sql FROM sqlite_master WHERE type='view'`    |
 
 A `PRAGMA` statement takes no placeholder. The driver puts the name through
-`quoteIdentifier` before it joins the name into the statement.
+`QuoteIdentifier` before it joins the name into the statement.
 
 `NewSQLiteDriver` removes the `sqlite://` prefix from each path.
 
 `SQLiteTable.DiffTable` compares the columns, the indexes, and the triggers of one table.
 `SQLiteDriver.DiffTables` calls that one method. It calls `DiffIndexes` and `DiffTriggers`
-in no other place, because those two methods compare the target that `DiffTable` can drop.
+in no other place, because those two methods compare the source that `DiffTable` can drop.
 
 SQLite does not support `ALTER COLUMN`. `DiffTable` recreates the table when a column
 changes, when a foreign key changes, or when a table constraint changes.
@@ -339,8 +433,8 @@ in this order:
    map. A new column takes its `DEFAULT` value, or `NULL`.
 3. `DROP TABLE "<name>"`.
 4. `ALTER TABLE "_<name>_temp" RENAME TO "<name>"`.
-5. One `CREATE INDEX` statement for each index of the source table.
-6. One `CREATE TRIGGER` statement for each trigger of the source table.
+5. One `CREATE INDEX` statement for each index of the target table.
+6. One `CREATE TRIGGER` statement for each trigger of the target table.
 
 Part 3 removes each index and each trigger of the table. Parts 5 and 6 build every one of
 them again. `DiffTable` returns the list at that point, and it compares no index and no
@@ -348,10 +442,10 @@ trigger. Without that step the diff prints a `CREATE INDEX` statement two times,
 prints a `DROP INDEX` statement for an index that part 3 removed. A trigger that the two
 sides both hold gets no statement, and the recreation loses it.
 
-`DiffColumns` detects a rename. A source column that the target does not hold, and that
-holds the attributes of exactly one free target column, is a rename. Two candidates make
+`DiffColumns` detects a rename. A target column that the source does not hold, and that
+holds the attributes of exactly one free source column, is a rename. Two candidates make
 the guess unsafe. In that case the column becomes an addition, and the old columns become
-removals. A target column that another rename holds is not a candidate.
+removals. A source column that another rename holds is not a candidate.
 `IsTypeChangeCompatible`
 holds the type list that a recreation can convert: `TEXT`, `INTEGER`, `REAL`, and `BLOB`.
 An incompatible type change becomes a `DROP COLUMN` statement and an `ADD COLUMN`
@@ -385,7 +479,7 @@ for that addition.
 `GetTriggers` reads the triggers of a table and the triggers of a view, because
 `sqlite_master` holds the name of the view in `tbl_name` of an `INSTEAD OF` trigger.
 `SQLiteView.Diff` compares them. A `DROP VIEW` statement removes every trigger of the view,
-so the recreation of a view builds each trigger of the source again.
+so the recreation of a view builds each trigger of the target again.
 
 `GetTableForeignKeys` sorts the foreign keys with `sort.SliceStable`, because SQLite gives
 no stable order. Keep that sort. Without it the output changes between two runs.
@@ -418,7 +512,7 @@ name into the `search_path` runtime parameter with `pgx.ParseConfig`, so every q
 
 `Diff` calls `VerifySchema` for each side first. PostgreSQL accepts a search path that
 names no schema, and it then reads an empty schema. Without that check the diff prints a
-`DROP` statement for every object of the target.
+`DROP` statement for every object of the source.
 
 | Data        | Source                                                   |
 | ----------- | -------------------------------------------------------- |
@@ -426,7 +520,7 @@ names no schema, and it then reads an empty schema. Without that check the diff 
 | Materialized views | `pg_matviews`                                     |
 | Columns     | `information_schema.columns`                             |
 | Views       | `information_schema.views`                               |
-| Constraints | `pg_constraint` with `pg_get_constraintdef(oid)`         |
+| Constraints | `pg_constraint` with `pg_get_constraintdef(oid)`, without the type `n` |
 | Indexes     | `pg_indexes`, without the indexes of a constraint        |
 | Triggers    | `pg_trigger` with `pg_get_triggerdef(oid)` and `tgenabled` |
 | Sequences   | `pg_sequences`, without the sequence that a column owns  |
@@ -472,7 +566,7 @@ PostgreSQL rejects it.
 `GetTables` sorts the tables with `sortTablesByDependency`. The name of a child can sort
 before the name of its parent, and a statement needs the parent: a
 `CREATE TABLE ... PARTITION OF` statement needs the parent of the partition, and a foreign
-key needs the table that it names. `DiffTables` walks the target tables backward, because a
+key needs the table that it names. `DiffTables` walks the source tables backward, because a
 `DROP TABLE` statement takes the reverse order. Keep that sort and that direction.
 
 PostgreSQL accepts no comment and no row level security option in a `CREATE TABLE`
@@ -498,8 +592,8 @@ view, so a query of `information_schema.views` finds none of them. The view keep
 indexes, because `pg_indexes` holds them and `GetTable` reads no index of a view.
 
 Each `Diff<Object>s` function returns a `SectionDiff`. That type holds an `EarlyRemovals`
-field, an `Additions` field, and a `Removals` field. The source loop writes into
-`Additions`, and the target loop writes into `Removals`. A modification that needs a `DROP`
+field, an `Additions` field, and a `Removals` field. The target loop writes into
+`Additions`, and the source loop writes into `Removals`. A modification that needs a `DROP`
 statement and a `CREATE` statement stays in `Additions`, because it is one modification of
 one object.
 
@@ -542,8 +636,8 @@ invalid. `GetSequences` reads `last_value`, and `Diff` adds a `RESTART WITH` cla
 the current value falls outside the new range. Add that clause in no other case, because a
 restart changes data.
 
-`PostgresType.Diff` prints `ALTER TYPE ... ADD VALUE` when the target values are the first
-values of the source. Every other change prints `DROP TYPE` and `CREATE TYPE`.
+`PostgresType.Diff` prints `ALTER TYPE ... ADD VALUE` when the source values are the first
+values of the target. Every other change prints `DROP TYPE` and `CREATE TYPE`.
 
 `GetTable` reads `attidentity` and `attgenerated` for each column. `pg_attrdef` holds the
 expression of a stored generated column, and it holds the default value of every other
@@ -578,10 +672,23 @@ different name. The diff then prints a `DROP` statement and a `CREATE` statement
 object that did not change, and the `CREATE` statement builds the object in the SOURCE
 schema. Keep that step in every new query that reads a definition text.
 
+The constraint query of `GetTable` drops a row of the type `n`. PostgreSQL 18 keeps the
+NOT NULL flag of a column in `pg_constraint` too, and the column holds that flag already.
+Without that step the flag reaches the diff two times. A renamed column then gives two
+statements, because `ALTER TABLE ... RENAME COLUMN` keeps the constraint name of the old
+column name, and the two sides name one flag with two names. The `ADD CONSTRAINT` statement
+also fails with the code 55000, because a column holds one not-null constraint only. The
+domain query drops the same kind of row, for the same reason.
+
+The default version of the temporary server is PostgreSQL 18, so a comparison of two SQL
+sources reads that catalog. The `postgres` service of `docker-compose.yml` runs
+PostgreSQL 17, which holds no row of the type `n`. A test of a rule of PostgreSQL 18 needs
+a SQL source for that reason.
+
 The constraint query of `GetTable` sorts the rows with `ORDER BY conname`. PostgreSQL
 gives no stable order, so without that clause the output changes between two runs.
 
-A query that casts a name to `regclass` takes the name from `quoteIdentifier`. A query
+A query that casts a name to `regclass` takes the name from `QuoteIdentifier`. A query
 that compares a name to a text column takes the raw name. `GetTable` passes both forms to
 the index query.
 
@@ -592,7 +699,7 @@ fails, because the column removal dropped the constraint already.
 
 `GetViews` sorts the views with `sortViewsByDependency`. A view can read a second view, so
 a `CREATE VIEW` statement needs the views that it reads first, and a `DROP VIEW` statement
-takes the reverse order. `DiffViews` walks the source views forward and the target views
+takes the reverse order. `DiffViews` walks the target views forward and the source views
 backward.
 
 ## SQL sources
@@ -604,11 +711,12 @@ A path that holds `://` is a connection URL, so it never names SQL text. `IsSQLS
 `NewSQLSource` reads the file list. A file gives a list of one. A directory gives the
 `.sql` files of its top level, in the order of the names. It drops a file whose name ends
 in `.down.sql`, because a down migration removes the schema that its up migration built. A
-directory that holds no `.sql` file is an error.
+directory that holds no `.sql` file gives an empty schema. The first `migrate generate`
+reads that case, because the migrations directory holds no file yet.
 
-`ApplyTo` sends each whole file in one `ExecContext` call. Do not add a statement splitter.
-Both engines accept several statements in one call, and a correct splitter needs a parser,
-because a function body of PostgreSQL holds a semicolon.
+`ApplyTo` calls `ApplySQLContent` for each file, and the directive
+`-- dbdiff:no-transaction` decides the shape of the call. See
+[The no-transaction directive](#the-no-transaction-directive).
 
 Each engine materializes a source in its own file:
 
@@ -622,10 +730,16 @@ Each engine materializes a source in its own file:
 `postgresScratchVersionOfConfig` selects the version of the temporary server. A comparison
 of SQL text against a database reads the major version of that database with
 `DetectPostgresScratchVersion`, and the temporary server takes the version of the same
-major. The statements then match the engine that runs them. Two SQL sources give an empty
-version, and the library then selects its default version. Do not name a version in the
-code. A server that gives no version also gives an empty value, and the diff reports the
-connection later.
+major. The statements then match the engine that runs them. Two SQL sources hold no live
+server to read the version from. Instead, the version comes from the `version` key of
+`dbdiff.yaml`, carried as `MigrationConfig.Version` through the `NewDriver` function of
+`cmd/dbdiff/internal/drivers/drivers.go` into `PostgresDriverConfig.ScratchServerVersion`.
+An
+empty key gives an empty version, and the library then selects its default version, which
+can hold newer syntax than the server that later runs a generated migration file. Do not
+name a version in the code. The user names it, because only the user knows the version of
+the real server. A server that gives no version also gives an empty value, and the diff
+reports the connection later.
 
 Four settings of the temporary server matter. Keep them:
 
@@ -638,6 +752,108 @@ Four settings of the temporary server matter. Keep them:
 - `BinariesPath` names a stable directory of the cache of the user. Without it every run
   extracts the archive again. The name holds the version, and the default version takes the
   module version of the library, so a new library reads no stale binaries.
+
+## The no-transaction directive
+
+`drivers/sql_statement.go` holds `NoTransactionDirective`, `FileUsesTransaction`, and
+`SplitSQLStatements`. The file sits in `drivers`, because the replay of a SQL source and
+the apply of a migration both read it, and `drivers` imports neither of the two migrations
+packages.
+
+A file that holds no directive runs in ONE call. Keep that path. A call of several
+statements needs no split, and a split adds a risk for no gain.
+
+A file that holds the line `-- dbdiff:no-transaction` runs ONE call for each statement.
+PostgreSQL runs the statements of one call in an implicit transaction block, and it refuses
+`CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, and every other statement of that
+kind there. The directive is the one signal that starts the split. Never read the SQL text
+to make that decision.
+
+Two callers read the directive:
+
+| Caller                                        | What it does with the directive                |
+| --------------------------------------------- | ----------------------------------------------- |
+| `ApplySQLContent` of `drivers/sql_source.go`  | Splits the file of a SQL source                 |
+| `applyOneMigration` of `cmd/dbdiff/internal/migrations/runner.go` | Opens no transaction, and splits the file |
+
+`SplitSQLStatements` reads a line comment, a block comment that nests, a string of the form
+`'...'`, a string of the form `E'...'` with its backslash escapes, a quoted identifier, and
+a dollar quote of the form `$$...$$` or `$tag$...$tag$`. A function body of PostgreSQL holds
+a semicolon, and the dollar quote covers that case. A dollar that no tag follows names a
+parameter, for example `$1`. A comment stays with the statement below it.
+
+`RunMigrationPreview` runs no file that holds the directive. The preview needs one
+transaction that it rolls back at the end, and the directive asks for the opposite.
+
+## Migrations
+
+The `migrate` command group builds a directory of migration files from a diff, and it
+applies them to a database with a lock and a history table. It shares the `drivers`
+package.
+
+The `migrate` command group gives the word `source` to the directory of the migration
+files. It gives the word `target` to the other side: the wanted schema of `generate`, and
+the database that the five other commands change. The `--target` flag takes the value of
+the `DBDIFF_TARGET` variable when the flag and the `target` key of `dbdiff.yaml` both hold
+no value.
+
+`cmd/dbdiff/internal/migrations/command.go` holds the readers of the configuration file of
+a migrate command: `GetMigrationConfigFromCommand` and `OpenSet`. A new subcommand of
+`migrate` writes its own flags, and it reads them with these two functions.
+
+`Migrator` in `migrator.go` is a sibling of `Driver`, not a wrapper of it. A migration
+needs `Lock`, `Unlock`, `EnsureHistoryTable`, and a `Begin` that returns a
+`MigrationTransaction`, and a plain schema diff takes no lock and writes no history row, so
+`Driver` holds none of these methods. The command builds the driver and the migrator.
+`NewDriver` of `cmd/dbdiff/internal/drivers/drivers.go` and `NewMigrator` of
+`internal/migrations/migrator.go` hold the one engine switch of each half. The `drivers`
+package exports no function that selects between the two engines.
+
+`internal/migrations` imports `drivers`, and `drivers` imports nothing of it. The constant
+`MigrationHistoryTableName` stays in `drivers/driver.go` for that reason, because the diff
+hides the table. The migrators read `drivers.QuoteIdentifier`,
+`drivers.OpenPostgresConnection`, `drivers.TrimSQLitePrefix`, and `drivers.FirstError`.
+
+The internal driver package takes the name `drivers` too, so a file that imports both gives
+an alias to one of them. A file that imports both names the schema package
+`dbdiffdrivers`. See [Package names](#package-names).
+
+The `generate` command of `cmd/dbdiff/cmd/migrate/cmd/generate/command.go` diffs the
+wanted schema against the replay of the migration directory, and it writes the result into
+the next file with `WriteMigrationFiles` of `migration_file.go`. It builds the directory
+before the diff, because `NewSQLSource` reads no path that is absent.
+
+`LoadMigrationSet` reads the files of the directory and the rows of the history table, and
+`NewMigrationSet` joins them by version into a `MigrationSet`. Each `MigrationEntry` holds
+one of five states:
+
+| State          | Meaning                                                             |
+| -------------- | -------------------------------------------------------------------- |
+| `pending`      | The file holds no row of the history table                          |
+| `applied`      | The file and its row agree on the checksum                          |
+| `changed`      | The file and its row disagree on the checksum                       |
+| `missing`      | The row names no file of the directory                              |
+| `out of order` | The file holds no row, and its version sorts before the last applied version |
+
+`RecordError` covers `changed` and `missing`. `ProblemError` adds `out of order`. `status`,
+`preview`, and `verify` call `RecordError`, because their job is to report the state of the
+database, and an out of order file is a fact to show, not a reason to refuse. `up` and `step`
+call `ProblemError`, because applying an out of order file writes a history row that breaks
+the version order of the record, and only a new generate can fix that record. A command
+that changes the database must refuse the state that a plain report can tolerate.
+
+`RunMigrationPreview` of `cmd/dbdiff/internal/migrations/runner.go` applies every pending
+file in ONE transaction, and it rolls that
+transaction back at the end. Keep that one transaction. A file reads the objects of the
+files before it, and a separate transaction for each file hides those objects. The preview
+then fails on a file that `up` applies without error.
+
+`applyPendingMigrations` in `runner.go` serves both `up` and `step`. It applies
+one whole file for each pending entry, and a reader that is present makes it ask before
+each file. That question is the one difference between the two commands. `step` gives three
+answers: apply the file, apply the rest of the run, and quit. A quit stops the run, and it
+keeps every file that already committed. `applyOneMigration` commits one file at a time,
+and it rolls back no earlier file.
 
 ## Data comparison
 
@@ -652,11 +868,11 @@ table and its column.
 - The comparison covers a table that the source and the target both hold. The schema
   section already creates or drops the other tables.
 - The comparison needs the primary key of the table. A table with no primary key gets a
-  comment line, and no row statement. A table with a different primary key in the target
+  comment line, and no row statement. A table with a different primary key in the source
   gets the same treatment.
-- The output holds an `INSERT` statement for a key of the source only, an `UPDATE`
+- The output holds an `INSERT` statement for a key of the target only, an `UPDATE`
   statement for a key that both sides hold with a different row, and a `DELETE` statement
-  for a key of the target only.
+  for a key of the source only.
 - `formatSQLiteValue` and `formatPostgresValue` make an SQL literal of each value first.
   The comparison then works on the literal, so `NULL` never equals the text `'NULL'`.
 
@@ -664,8 +880,9 @@ table and its column.
 
 # Tests
 
-Every test lives beside the code, in `drivers/<engine>_test.go` and in
-`cmd/dbdiff/main_test.go`. There is no `tests` folder. The tests use
+Every test lives beside the code, in `drivers/<engine>_test.go`, in a `<name>_test.go` of
+a migrations package, and in a `command_test.go`
+file of a command package. There is no `tests` folder. The tests use
 `github.com/stretchr/testify/require`.
 
 ## Run the tests
@@ -687,8 +904,9 @@ that fails there must fail the build, and a silent skip hides that failure.
 
 ## Structure
 
-One engine gets one top-level function: `TestSQLiteDriver` or `TestPostgresDriver`. Each
-behavior gets one `t.Run` subtest. The subtest name is a short noun phrase in CamelCase,
+One engine gets one top-level function for each type under test: `TestSQLiteDriver` and
+`TestSQLiteMigrator`, `TestPostgresDriver` and `TestPostgresMigrator`. Each behavior gets
+one `t.Run` subtest. The subtest name is a short noun phrase in CamelCase,
 for example `AddColumn`, `ModifyIndexes`, or `ForeignKeys`.
 
 Each engine has a test harness type. `TestingSQLiteDriver` and `TestingPostgresDriver`
@@ -702,13 +920,13 @@ connection of the harness open until the cleanup ends.
 
 | Helper                          | Purpose                                          |
 | ------------------------------- | ------------------------------------------------ |
-| `ExecOnSource(sql)`             | Builds the wanted schema                         |
-| `ExecOnTarget(sql)`             | Builds the old schema, or applies the diff       |
+| `ExecOnTarget(sql)`             | Builds the wanted schema                         |
+| `ExecOnSource(sql)`             | Builds the old schema, or applies the diff       |
 | `RequireInstructions(expected)` | Compares the whole instruction list and returns it |
-| `FetchAllFromTarget(table, ...)`| Reads the rows of the target as maps (SQLite)    |
+| `FetchAllFromSource(table, ...)`| Reads the rows of the source as maps (SQLite)    |
 | `WriteSQLFile(directory, name, content)` | Writes one `.sql` file of a SQL source  |
 
-`NewTestSQLiteDriverWithPaths(tb, source, target)` builds a driver for two given paths. Use
+`NewTestSQLiteDriverWithPaths(tb, target, source)` builds a driver for two given paths. Use
 it for a test of a SQL source. `NewTestSQLiteDriver` calls it with two database files.
 
 A test that starts the temporary PostgreSQL server calls `t.Skip` under `testing.Short`,
@@ -719,28 +937,44 @@ Every harness method calls `d.tb.Helper()` on its first line.
 ## How to write a test
 
 1. Create the harness with `NewTestSQLiteDriver(t)` or `NewTestPostgresDriver(t)`.
-2. Build the wanted schema with `ExecOnSource`.
-3. Build the old schema with `ExecOnTarget`. Insert rows when the change moves data.
+2. Build the wanted schema with `ExecOnTarget`.
+3. Build the old schema with `ExecOnSource`. Insert rows when the change moves data.
 4. Compare the whole output with `RequireInstructions`. Write the expected instructions as
    Go values.
-5. Apply the diff with `driver.ExecOnTarget(diff)`. This step proves that the SQL runs.
-6. If the change moves data, read the rows with `FetchAllFromTarget` and compare them with
+5. Apply the diff with `driver.ExecOnSource(diff)`. This step proves that the SQL runs.
+6. If the change moves data, read the rows with `FetchAllFromSource` and compare them with
    `require.Equal`.
 
 Rules:
 
 - Compare the whole instruction list. Never compare one instruction, and never compare the
   SQL text. `instruction_test.go` covers the text.
-- Always apply the diff to the target after the comparison.
+- Always apply the diff to the source after the comparison.
 - A test that recreates a table must insert rows first, and must compare the rows after.
 - Add a subtest for each new schema object and for each new kind of change.
 
 ## CLI tests
 
-`TestDbdiffCommand` covers the binary. `buildDbdiff` compiles the command into
-`tb.TempDir()` one time. `runDbdiff` runs the binary and returns the standard output, the
-standard error, and the exit code. Add a subtest for each new flag and for each new error
-of the command.
+Each command package holds the tests of its own command. `TestDbdiffCommand` of
+`cmd/dbdiff/main_test.go` runs the binary, so it covers the root command and the `diff`
+command of `cmd/dbdiff/cmd/diff/command.go`.
+`TestMigrateCommand` covers the flow that walks every subcommand of `migrate`, and
+`TestMigrate<Subcommand>Command` covers one subcommand alone. Add a subtest for each new
+flag and for each new error of the command.
+
+The `cmd/dbdiff/internal/clitest` package holds the helpers. `Build` compiles the command
+into `tb.TempDir()` one time, and `Run` runs the binary and returns the standard output,
+the standard error, and the exit code. `Build` names the package path of the command, so a
+test of any directory compiles the same binary.
+
+| Helper                                        | Purpose                            |
+| --------------------------------------------- | ---------------------------------- |
+| `Build(tb)`                                    | Compiles the binary one time       |
+| `Run(tb, binaryPath, args...)`                 | Runs the binary and reads the result |
+| `WriteSQLFile(tb, directory, name, content)`   | Writes one `.sql` file             |
+| `WriteSQLiteDatabase(tb, path, sqlStatements)` | Builds a SQLite database           |
+| `WriteMigrationConfig(tb, directory, content)` | Writes one `dbdiff.yaml` file      |
+| `MakeMigrationsDirectory(tb, directory)`       | Builds the directory of the files  |
 
 ---
 
@@ -751,7 +985,7 @@ of the command.
 - Use tabs for the indentation. `gofmt` writes them.
 - Name a variable with full words: `sourceDatabaseConnection`, not `srcConn`.
 - Return an error to the caller. Never call `os.Exit` or `panic` in the `drivers` package.
-- Wrap an error with context in `cmd/dbdiff/main.go`: `fmt.Errorf("failed to ...: %w", err)`.
+- Wrap an error with context in a command package: `fmt.Errorf("failed to ...: %w", err)`.
 - Close every `*sql.Rows` with `defer rows.Close()`. After the `Next` loop, return the
   error of `rows.Err()`. Without that check the driver reads a truncated schema.
 - The CLI prints the error and exits with the code 1. `main` owns that, because
@@ -772,7 +1006,7 @@ keep the comment. In every other case, delete the comment.
 Four kinds of comment pass the test:
 
 - An order that a later change can break. Example: "PostgreSQL refuses to drop the index
-  that the replica identity of the target holds, so this block comes first."
+  that the replica identity of the source holds, so this block comes first."
 - A rule of the engine that the code cannot show. Example: "SQLite refuses an ADD COLUMN
   action that holds a STORED generated column."
 - A step that looks unnecessary. Name what breaks without the step. Example: "Without this
@@ -784,7 +1018,7 @@ Delete every other comment. These five kinds fail the test:
 
 - A sentence that repeats the name of a function, of a type, or of a field. Delete
   `// GetOwners returns the owner of each object of the schema.`
-- A sentence that reads the code aloud. Delete `// The loop walks the source columns and it
+- A sentence that reads the code aloud. Delete `// The loop walks the target columns and it
   appends each new column.`
 - The SQL synopsis above an instruction type. The `String` method below holds the same text.
 - The same reason in two places. Keep the reason at the place that a reader changes first.
@@ -960,7 +1194,7 @@ rule here during a session, repeat that rule in the spawn prompt.
 This section records the state of the repo on 2026-08-17. It is not a rule set. Correct an
 item when your task touches it.
 
-- The data comparison prints no row of a table that the source only holds. The schema
+- The data comparison prints no row of a table that the target only holds. The schema
   section creates that table, and the table stays empty.
 - The `--privileges` flag compares the owner and the privileges of an object of `pg_class`.
   It reads no privilege of a schema, of a function, or of a type, and no default privilege.
@@ -972,3 +1206,4 @@ item when your task touches it.
   and the down migration in one file, behind a `-- +goose` comment. dbdiff applies both
   parts. A golang-migrate directory and a directory of numbered files work.
 - A SQL source reads the top level of a directory only. It reads no subdirectory.
+- dbdiff generates no down migration. A rollback is a restore from a backup.

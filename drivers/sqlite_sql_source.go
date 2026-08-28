@@ -9,10 +9,10 @@ import (
 
 func (d *SQLiteDriver) OpenSide(ctx context.Context, path string, role string) (*sql.DB, error) {
 	if !IsSQLSource(path) {
-		return sql.Open("sqlite3", trimSQLitePrefix(path))
+		return sql.Open("sqlite3", TrimSQLitePrefix(path))
 	}
 
-	source, err := NewSQLSource(path)
+	sqlSource, err := NewSQLSource(path)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +27,7 @@ func (d *SQLiteDriver) OpenSide(ctx context.Context, path string, role string) (
 		return nil, err
 	}
 
-	err = source.ApplyTo(ctx, connection)
+	err = sqlSource.ApplyTo(ctx, connection)
 	if err != nil {
 		connection.Close()
 		return nil, err

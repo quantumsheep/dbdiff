@@ -51,28 +51,28 @@ func (v *SQLiteView) Diff(other *SQLiteView) ([]Instruction, error) {
 func (v *SQLiteView) DiffTriggers(other *SQLiteView) []Instruction {
 	var instructions []Instruction
 
-	for _, sourceTrigger := range v.Triggers {
-		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
+	for _, targetTrigger := range v.Triggers {
+		sourceTrigger, found := other.TriggerByName(targetTrigger.Name)
 		if !found {
 			instructions = append(instructions, &SQLiteCreateTriggerInstruction{
-				Definition: sourceTrigger.SQL,
+				Definition: targetTrigger.SQL,
 			})
 
 			continue
 		}
 
-		if sourceTrigger.SQL != targetTrigger.SQL {
+		if targetTrigger.SQL != sourceTrigger.SQL {
 			instructions = append(instructions,
-				&SQLiteDropTriggerInstruction{Name: targetTrigger.Name},
-				&SQLiteCreateTriggerInstruction{Definition: sourceTrigger.SQL})
+				&SQLiteDropTriggerInstruction{Name: sourceTrigger.Name},
+				&SQLiteCreateTriggerInstruction{Definition: targetTrigger.SQL})
 		}
 	}
 
-	for _, targetTrigger := range other.Triggers {
-		_, found := v.TriggerByName(targetTrigger.Name)
+	for _, sourceTrigger := range other.Triggers {
+		_, found := v.TriggerByName(sourceTrigger.Name)
 		if !found {
 			instructions = append(instructions, &SQLiteDropTriggerInstruction{
-				Name: targetTrigger.Name,
+				Name: sourceTrigger.Name,
 			})
 		}
 	}

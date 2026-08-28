@@ -7,8 +7,6 @@ import (
 
 type AutomaticCastLookup func(oldType string, newType string) (bool, error)
 
-// PostgreSQL casts automatically in the assignment context, and a cast of another kind
-// needs the clause.
 func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, hasAutomaticCast AutomaticCastLookup) (bool, error) {
 	automatic, err := hasAutomaticCast(oldColumn.Type, newColumn.Type)
 	if err != nil {
@@ -18,9 +16,9 @@ func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, has
 	return !automatic, nil
 }
 
-// HasAutomaticCast asks the database, because the rules of pg_cast are long. ALTER TABLE
-// ALTER COLUMN TYPE uses the assignment context. An unknown type name gives true, and the
-// output then keeps the form that it had before this rule.
+// The rules of pg_cast are long, so this function asks the database. ALTER TABLE ALTER
+// COLUMN TYPE uses the assignment context. An unknown type name gives true, and the output
+// then keeps the form that it had before this rule.
 func (d *PostgresDriver) HasAutomaticCast(ctx context.Context, db *sql.DB, oldType string, newType string) (bool, error) {
 	row := db.QueryRowContext(ctx, `
 		SELECT

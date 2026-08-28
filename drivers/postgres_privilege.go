@@ -5,10 +5,7 @@ import (
 	"strings"
 )
 
-// A PostgresPrivilege is the set of privileges that one role holds on one object.
-//
-// A role belongs to the server and not to the schema, so the comparison of the privileges
-// stays off until the user gives the --privileges flag. A target server holds other role
+// A role belongs to the server and not to the schema. A source server holds other role
 // names in most cases, and a GRANT statement of an absent role fails.
 type PostgresPrivilege struct {
 	ObjectType string
@@ -65,8 +62,7 @@ func (o *PostgresOwner) SetInstruction() *PostgresSetOwnerInstruction {
 	}
 }
 
-// PostgreSQL names a view and a materialized view with the keyword TABLE in a GRANT
-// statement.
+// PostgreSQL names a view and a materialized view with the keyword TABLE in a GRANT.
 func privilegeObjectType(relkind string) string {
 	if relkind == "S" {
 		return "SEQUENCE"
@@ -90,7 +86,7 @@ func ownerObjectType(relkind string) string {
 	return "TABLE"
 }
 
-// sortedPrivileges returns the privileges in one order, so two equal sets compare equal.
+// Two equal sets must compare equal, so the order stays fixed.
 func sortedPrivileges(privileges []string) []string {
 	sorted := slices.Clone(privileges)
 	slices.Sort(sorted)

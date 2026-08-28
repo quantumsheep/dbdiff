@@ -901,7 +901,7 @@ func TestInstructions(t *testing.T) {
 	t.Run("PostgresSetStatisticsAction", func(t *testing.T) {
 		action := &PostgresSetStatisticsAction{
 			ColumnName: "body",
-			Target:     500,
+			Source:     500,
 		}
 
 		require.Equal(t, `ALTER COLUMN "body" SET STATISTICS 500`, action.TableActionClause())
@@ -910,7 +910,7 @@ func TestInstructions(t *testing.T) {
 	t.Run("PostgresResetStatisticsAction", func(t *testing.T) {
 		action := &PostgresSetStatisticsAction{
 			ColumnName: "body",
-			Target:     -1,
+			Source:     -1,
 		}
 
 		require.Equal(t, `ALTER COLUMN "body" SET STATISTICS -1`, action.TableActionClause())

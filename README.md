@@ -12,7 +12,7 @@
 </div>
 
 ```console
-$ dbdiff source.sqlite target.sqlite
+$ dbdiff current.sqlite final.sqlite
 ALTER TABLE "users" ADD COLUMN "created_at" TEXT;
 CREATE INDEX "users_email" ON "users" ("email");
 CREATE VIEW active_users AS SELECT id, email FROM users;
@@ -22,7 +22,8 @@ DROP TABLE "audit";
 - **Two engines.** dbdiff supports SQLite and PostgreSQL.
 - **Databases and files.** Each side is a database, a `.sql` file, or a directory of `.sql` migration files.
 - **One binary.** Each release holds a file for Linux, for Windows, and for macOS.
-- **No write.** dbdiff prints the statements to the standard output. It changes no database.
+- **Write on request.** `dbdiff diff` prints the statements and changes no database. `dbdiff
+  migrate up` applies a migration file to a database.
 - **Rows.** dbdiff compares the schema by default. The `--data` flag adds the comparison of the rows.
 
 ---
@@ -37,6 +38,7 @@ DROP TABLE "audit";
 - [PostgreSQL](#postgresql)
 - [SQL files](#sql-files)
 - [Data comparison](#data-comparison)
+- [Migrations](#migrations)
 - [Supported objects](#supported-objects)
 - [Limits](#limits)
 - [Development](#development)
@@ -62,20 +64,49 @@ go install github.com/quantumsheep/dbdiff/cmd/dbdiff@latest
 
 ## Usage
 
-dbdiff takes two arguments:
+dbdiff takes seven commands:
+
+| Command                           | Result                                                           |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| `dbdiff diff <source> <target>`    | Print the statements that make the source equal to the target     |
+| `dbdiff migrate generate <name>`   | Write the next migration file                                     |
+| `dbdiff migrate status`            | List each migration and its state                                 |
+| `dbdiff migrate preview`           | Print the statements that `up` will run                           |
+| `dbdiff migrate up`                | Apply every pending migration                                     |
+| `dbdiff migrate step`              | Apply every pending migration, and ask before each file           |
+| `dbdiff migrate verify`            | Compare the database against the replay of the applied migrations |
+
+A command line with no command name runs the `diff` command:
 
 ```bash
-dbdiff [flags] <source> <target>
+dbdiff current.sqlite final.sqlite
+dbdiff diff current.sqlite final.sqlite
 ```
 
-The first argument is the source. It holds the wanted schema. The second argument is the
-target. The output changes the target.
+Both lines give the same result. A database file named `migrate` needs the form
+`./migrate`. Without that form, dbdiff reads the bare name `migrate` as a command name:
 
-| Command                              | Result                                           |
-| ------------------------------------ | ------------------------------------------------ |
-| `dbdiff source.sqlite target.sqlite` | Compare two SQLite files                         |
-| `dbdiff schema.sql target.sqlite`    | Compare a SQL file against a database            |
-| `dbdiff ./migrations target.sqlite`  | Compare a migration directory against a database |
+```bash
+dbdiff ./migrate final.sqlite
+```
+
+Read [Migrations](#migrations) for the six commands of `migrate`. The rest of this section
+covers `diff`.
+
+`diff` takes two arguments:
+
+```bash
+dbdiff diff [flags] <source> <target>
+```
+
+The first argument is the source. It holds the current schema. The second argument is the
+target. It holds the final schema. The output changes the source into the target.
+
+| Command                                   | Result                                           |
+| ------------------------------------------ | ------------------------------------------------ |
+| `dbdiff diff current.sqlite final.sqlite` | Compare two SQLite files                         |
+| `dbdiff diff current.sqlite schema.sql`   | Compare a database against a SQL file            |
+| `dbdiff diff current.sqlite ./migrations` | Compare a database against a migration directory |
 
 The output holds one SQL statement per line:
 
@@ -86,16 +117,16 @@ DROP TABLE "audit";
 CREATE VIEW active_users AS SELECT id, email FROM users;
 ```
 
-dbdiff writes the statements to the standard output. It does not change the target
-database. To apply the statements, send them to the client of the engine:
+dbdiff writes the statements to the standard output. It changes no database. To apply the
+statements, send them to the client of the engine:
 
 ```bash
-dbdiff source.sqlite target.sqlite | sqlite3 target.sqlite
+dbdiff diff current.sqlite final.sqlite | sqlite3 current.sqlite
 ```
 
 > [!CAUTION]
 > Read the output before you apply it. A statement can delete a table, a column, or a row
-> of the target database. dbdiff holds no rollback.
+> of the source database. dbdiff holds no rollback.
 
 ### Comments
 
@@ -113,6 +144,8 @@ DROP TABLE "audit";
 
 ## Flags
 
+### `diff`
+
 | Flag       | Value                   | Purpose                                                                                                                        |
 | ---------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `--driver` | `sqlite3` or `postgres` | Select the database engine. The default value comes from the source and the target. See [Driver detection](#driver-detection). |
@@ -120,7 +153,33 @@ DROP TABLE "audit";
 | `--data`   | none                    | Add the comparison of the rows. The default value is off.                                                                      |
 | `--comments` | none                  | Print a comment before each object that the output changes. The default value is off.                                          |
 | `--privileges` | none               | Add the comparison of the owner and the privileges. The postgres driver accepts this flag. The default value is off.            |
-| `--version` | none                   | Print the version of the build and exit.                                                                                       |
+
+### `dbdiff`
+
+`--version` is a global option of the `dbdiff` command itself, not of `diff` or of
+`migrate`. Give it before the command name:
+
+```bash
+dbdiff --version
+```
+
+### `migrate generate`, `migrate status`, `migrate preview`, `migrate up`, `migrate step`, and `migrate verify`
+
+| Flag           | Value                   | Purpose                                                                                                |
+| -------------- | ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--config`     | A file path             | Name the configuration file. The default value is `dbdiff.yaml` of the working directory.                 |
+| `--driver`     | `sqlite3` or `postgres` | Select the database engine. This flag overrides the key `driver` of the configuration file.               |
+| `--source`     | A directory             | Name the directory of the migration files. This flag overrides the key `source` of the configuration file. |
+| `--target`     | A database, a `.sql` file, or a directory of `.sql` files | Name the target. For `generate`, the target is the wanted schema. For the five other commands, the target is the database that the migrations change. This flag overrides the key `target` of the configuration file. |
+| `--schema`     | A schema name           | Name the schema that the postgres driver reads. This flag overrides the key `schema` of the configuration file. |
+
+`migrate preview` also accepts one flag of its own:
+
+| Flag    | Value | Purpose                                                                                |
+| ------- | ----- | ----------------------------------------------------------------------------------------- |
+| `--run` | none  | Apply the statements of every pending file in one transaction, and roll that transaction back. The default value is off. |
+
+Read [Migrations](#migrations) for the five keys of the configuration file.
 
 ## Driver detection
 
@@ -134,11 +193,11 @@ If you give no `--driver` flag, dbdiff reads the engine from the source and the 
 | A `.sql` file or a directory                                | none       |
 | Another path                                                | `sqlite3`  |
 
-One argument is sufficient. In this example the target names the engine, and dbdiff applies
+One argument is sufficient. In this example the source names the engine, and dbdiff applies
 `schema.sql` to a temporary PostgreSQL server:
 
 ```bash
-dbdiff schema.sql postgres://user:password@localhost:5432/production
+dbdiff postgres://user:password@localhost:5432/production schema.sql
 ```
 
 <details>
@@ -154,8 +213,8 @@ dbdiff old_schema.sql new_schema.sql
 In the second case the two arguments name a different engine:
 
 ```bash
-dbdiff sqlite://source.db postgres://user:password@localhost:5432/target
-# dbdiff: "sqlite://source.db" names the sqlite3 driver and "postgres://user:password@localhost:5432/target" names the postgres driver. Use the --driver flag
+dbdiff sqlite://current.db postgres://user:password@localhost:5432/final
+# dbdiff: "sqlite://current.db" names the sqlite3 driver and "postgres://user:password@localhost:5432/final" names the postgres driver. Use the --driver flag
 ```
 
 </details>
@@ -168,8 +227,8 @@ detection when you give it.
 The driver accepts a file path, or a path with the prefix `sqlite://`:
 
 ```bash
-dbdiff source.sqlite target.sqlite
-dbdiff sqlite://source.sqlite sqlite://target.sqlite
+dbdiff current.sqlite final.sqlite
+dbdiff sqlite://current.sqlite sqlite://final.sqlite
 ```
 
 SQLite holds no schema. If you give the `--schema` flag with this driver, dbdiff gives an
@@ -195,8 +254,8 @@ the same text. A change of one of these needs a new table, because SQLite holds 
 triggers of a view, and it builds each of them again after a `DROP VIEW` statement, because
 that statement removes every trigger of the view.
 
-**Rename detection.** The driver detects a renamed column. A source column that the target
-does not hold, and that holds the attributes of exactly one free target column, is a
+**Rename detection.** The driver detects a renamed column. A target column that the source
+does not hold, and that holds the attributes of exactly one free source column, is a
 rename. Two candidates make the guess unsafe. In that case the column becomes an addition,
 and the old column becomes a removal.
 
@@ -273,7 +332,7 @@ table. Two tables can name each other, and no order of two such statements works
 partition takes the foreign keys of its parent, so the output prints none for it.
 
 **Storage parameters.** The driver compares the `WITH` options of a table, for example
-`fillfactor`. A parameter that the source does not hold takes a `RESET` action, which gives
+`fillfactor`. A parameter that the target does not hold takes a `RESET` action, which gives
 that parameter its default value again.
 
 **Unlogged tables.** The driver keeps the `UNLOGGED` keyword of a table. A change of that
@@ -296,7 +355,7 @@ every trigger with `ENABLE`, so that mode needs no statement.
 reads that mode to identify a row of the table. The mode `USING INDEX` names an index, so
 the output prints the `CREATE INDEX` statement of that index first. The output changes the
 mode before a `DROP INDEX` statement, because PostgreSQL refuses to drop the index that the
-replica identity of the target holds.
+replica identity of the source holds.
 
 **Table inheritance.** A table of `INHERITS` is no partition. The driver prints a
 `CREATE TABLE ... INHERITS` statement for it, and it keeps every column of that table.
@@ -397,13 +456,19 @@ source.
   so a goose directory gives a wrong schema. A golang-migrate directory and a directory of
   numbered files work.
 - dbdiff reads the top level of the directory only. It reads no subdirectory.
+- dbdiff applies each file in one call. PostgreSQL runs the statements of one call in an
+  implicit transaction block, and it refuses `CREATE INDEX CONCURRENTLY` there. Write the
+  line `-- dbdiff:no-transaction` in such a file. dbdiff then runs one call for each
+  statement of that file.
+- A directory that holds no `.sql` file gives an empty schema. dbdiff then prints one
+  `DROP` statement for each object of the other side.
 
 ## Data comparison
 
 The `--data` flag adds the comparison of the rows:
 
 ```bash
-dbdiff --data source.sqlite target.sqlite
+dbdiff --data current.sqlite final.sqlite
 ```
 
 The data section comes after the schema section, because a new row needs its table and its
@@ -411,13 +476,213 @@ column. The output holds three kinds of statement:
 
 | Statement | Case                                            |
 | --------- | ----------------------------------------------- |
-| `INSERT`  | A key that the source only holds                |
+| `INSERT`  | A key that the target only holds                |
 | `UPDATE`  | A key that both sides hold with a different row |
-| `DELETE`  | A key that the target only holds                |
+| `DELETE`  | A key that the source only holds                |
 
 The comparison needs the primary key of the table. A table with no primary key gets a
-comment line, and no row statement. A table with a different primary key in the target gets
+comment line, and no row statement. A table with a different primary key in the source gets
 the same treatment.
+
+## Migrations
+
+`dbdiff migrate` reads a configuration file, `dbdiff.yaml`, from the working directory. The
+`--config` flag names another path. The file holds five keys:
+
+| Key          | Purpose                                                                             |
+| ------------ | -------------------------------------------------------------------------------------- |
+| `driver`     | The database engine. The value is `sqlite3` or `postgres`.                             |
+| `source`     | The directory that holds the migration files.                                          |
+| `target`     | The target. A database, a `.sql` file, or a directory of `.sql` files.                  |
+| `schema`     | The name of the schema. The postgres driver reads this key.                            |
+| `version`    | The version of the real PostgreSQL server. Read the note below.                        |
+
+```yaml
+driver: postgres
+source: ./migrations
+target: ./schema.sql
+schema: app
+version: 17.11.0
+```
+
+The `target` key of the file holds the wanted schema of `migrate generate`. The five other
+commands change a database, and they name that database with the `--target` flag. Do not
+put a production connection string in a file that goes into git. Give the `--target` flag,
+or set the `DBDIFF_TARGET` variable:
+
+```bash
+export DBDIFF_TARGET=postgres://user:password@localhost:5432/production
+dbdiff migrate up
+```
+
+`migrate generate` reads no database, because it compares the target against the replay of
+the migration files. That command needs the `driver` key or the
+`--driver` flag. Both sides of the comparison are SQL sources, and detection needs one
+side to name an engine.
+
+With the postgres driver, `migrate generate` runs both sides on a temporary server. Neither
+side is a real database, so dbdiff cannot read the version of the server that will later
+run the file. Set the `version` key to that version. Without it, the temporary server takes
+the default version of its library, and that version can hold syntax that the real server
+refuses. Name the same major version as the database, for example the version that
+`SELECT version();` reports on the database.
+
+### The commands
+
+`migrate generate` compares the target against the replay of the migration directory, and
+it writes the difference as a new file:
+
+```console
+$ dbdiff migrate generate add_created_at
+migrations/20260822143000_add_created_at.sql
+```
+
+`migrate status` lists each migration file and its state:
+
+```console
+$ dbdiff migrate status
+20260822143000_add_created_at            applied   2026-08-22T14:35:00Z
+20260822150000_add_index                 pending
+```
+
+When a file is `changed` or `missing`, `status` exits with the code 1. When a file is only
+`out of order`, it exits with the code 0.
+
+`migrate preview` prints one block for each pending migration file, and it changes no
+database:
+
+```console
+$ dbdiff migrate preview
+20260822150000_add_index
+  -- dbdiff v1.4.0
+  -- generated 2026-08-22T15:00:00Z
+
+  -- Create the index "users_email" of the table "users"
+  CREATE INDEX "users_email" ON "users" ("email");
+20260822151500_add_status
+  -- dbdiff v1.4.0
+  -- generated 2026-08-22T15:15:00Z
+
+  -- Modify the table "users"
+  ALTER TABLE "users" ADD COLUMN "status" TEXT;
+```
+
+Each block holds the whole text of the file, header included. `preview` prints no position
+such as `[1/2]`, because a file is no longer a list of statements to step through.
+
+An out of order file names no statement. Instead, `preview` prints a line that names the
+file and states that `up` will refuse it.
+
+Give the `--run` flag to prove that the statements run. That flag applies every pending
+file in one transaction, and it rolls that transaction back. Each file reads the objects of
+the files before it. `preview --run` skips a file that holds the directive
+`-- dbdiff:no-transaction`, and it prints a line that names the file. dbdiff cannot roll
+such a file back. Read [The no-transaction directive](#the-no-transaction-directive).
+
+`migrate up` applies every pending migration file. Each file runs in one transaction:
+
+```console
+$ dbdiff migrate up
+Applied 20260822150000_add_index.
+```
+
+`migrate step` applies every pending file, and it asks a question before each file:
+
+```console
+$ dbdiff migrate step
+20260822150000_add_index
+  -- dbdiff v1.4.0
+  -- generated 2026-08-22T15:00:00Z
+
+  -- Create the index "users_email" of the table "users"
+  CREATE INDEX "users_email" ON "users" ("email");
+  [a]pply  apply the [r]est  [q]uit ? a
+Applied 20260822150000_add_index.
+20260822151500_add_status
+  -- dbdiff v1.4.0
+  -- generated 2026-08-22T15:15:00Z
+
+  -- Modify the table "users"
+  ALTER TABLE "users" ADD COLUMN "status" TEXT;
+  [a]pply  apply the [r]est  [q]uit ? q
+The run stopped. Every file that dbdiff applied stays applied.
+```
+
+`step` gives three answers: apply the file, apply the rest of the run, and quit. A quit
+stops the run, and it does not roll back a file that already committed. Each file runs in
+its own transaction, and dbdiff opens that transaction only after you answer. `step` needs
+a terminal, because it reads the answer from the standard input. A closed input gives an
+error that names the `up` command. Use `step` to review a migration on a machine with a
+terminal. Use `up` for an automated run, for example a deploy script.
+
+`step` holds the migration lock for the whole run, so another dbdiff process waits while a
+person answers the prompts. `up` suits a script, and `step` suits a person at a terminal.
+
+`step` gives no skip answer. If a step skips a file, the files after it run against a
+schema that the skipped file was to build.
+
+`migrate verify` builds a temporary schema from the migration files that the database
+already applied, and it compares that schema against the database:
+
+```console
+$ dbdiff migrate verify
+The database holds the schema of the migrations.
+```
+
+When `verify` finds a difference, it prints the difference and exits with the code 1. A
+pipeline can use `migrate verify` as a gate.
+
+### The migration file
+
+A migration file is named `<version>_<name>.sql`, for example
+`20260822143000_add_created_at.sql`. The version is a UTC timestamp. The file holds a
+header, and then the comment and the statement of each change:
+
+```sql
+-- dbdiff v1.4.0
+-- generated 2026-08-22T14:30:00Z
+
+-- Modify the table "users"
+ALTER TABLE "users" ADD COLUMN "created_at" TEXT;
+```
+
+`migrate up` and `migrate step` send the whole file to the engine in one call. Read
+[Limits](#limits) for what that means for a failure.
+
+### The no-transaction directive
+
+A file that holds the line `-- dbdiff:no-transaction`, alone on the line, runs outside a
+transaction. dbdiff reads no other value on that line. The directive covers a statement
+that refuses a transaction, for example `CREATE INDEX CONCURRENTLY`, `VACUUM`, and
+`ALTER SYSTEM` of PostgreSQL, and `VACUUM` of SQLite. `PRAGMA foreign_keys` of SQLite is
+also inert inside a transaction. dbdiff generates none of these statements.
+
+```sql
+-- dbdiff:no-transaction
+CREATE INDEX CONCURRENTLY "users_email_idx" ON "users" ("email");
+```
+
+With the postgres driver, put one statement in a file that holds the directive. dbdiff
+sends the whole file to the engine in one call. PostgreSQL puts a call of several
+statements into a transaction of its own. The SQLite driver accepts several statements in
+such a file.
+
+> [!WARNING]
+> The directive costs the atomicity guarantee of a migration, and dbdiff cannot restore
+> it. Two failures can follow. The file can apply, and then fail to write its history row.
+> The next run then applies the file again. The file can also fail halfway. Part of the
+> file stays applied, and dbdiff records no row for it. The next run then applies the file
+> from the start.
+
+`preview --run` skips a file that holds the directive, and it prints a line that names the
+file. A rollback cannot undo such a file, so `preview --run` never applies it.
+
+### The history table
+
+`dbdiff migrate` records each applied file in the table `dbdiff_migrations`, with the
+columns `version`, `name`, `checksum`, and `applied_at`. The checksum detects a file that
+changed after its migration ran. `migrate status` and `migrate verify` report such a file
+as `changed`.
 
 ## Supported objects
 
@@ -483,7 +748,7 @@ constraint of two or more columns as a table constraint.
 ## Limits
 
 - The data comparison covers a table that the source and the target both hold. A table
-  that the source only holds stays empty. The schema section creates that table.
+  that the target only holds stays empty. The schema section creates that table.
 - The `--privileges` flag compares the owner and the privileges of a table, of a view, of a
   materialized view, and of a sequence. It compares no privilege of a schema, of a function,
   or of a type, and it reads no default privilege of `ALTER DEFAULT PRIVILEGES`.
@@ -494,6 +759,19 @@ constraint of two or more columns as a table constraint.
   object that moved from one schema to another schema.
 - A SQL source of the postgres driver needs a download on the first run. Read
   [Limits of a SQL file](#limits-of-a-sql-file) for the other limits.
+- dbdiff generates no down migration. A rollback is a restore from a backup.
+- The name `dbdiff_migrations` is reserved. `dbdiff diff` hides a table with that name.
+- `migrate generate` needs the name of the engine, because both of its sides are SQL
+  sources.
+- With the postgres driver, a `migrate generate` whose `target` is a `.sql` file or a
+  directory of `.sql` files needs the `version` key of `dbdiff.yaml`. Without it, the
+  generated file can hold syntax that the real target server refuses.
+- `migrate preview --run` applies every pending file in one transaction. A file that reads
+  a value that an earlier file added to an enum type fails there. `migrate up` applies that
+  file without error, because `up` commits each file.
+- `migrate up` and `migrate step` send a whole migration file to the engine in one call.
+  dbdiff splits no statement. A file that holds a statement that the engine refuses gives
+  an error that names the file, and not the position of the statement.
 
 ## Development
 

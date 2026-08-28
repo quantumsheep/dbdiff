@@ -20,7 +20,7 @@ func IsSQLSource(path string) bool {
 		return false
 	}
 
-	if hasSQLExtension(path) {
+	if HasSQLExtension(path) {
 		return true
 	}
 
@@ -36,12 +36,12 @@ func NewSQLSource(path string) (*SQLSource, error) {
 	}
 
 	if !information.IsDir() {
-		source := &SQLSource{
+		sqlSource := &SQLSource{
 			Path:  path,
 			Files: []string{path},
 		}
 
-		return source, nil
+		return sqlSource, nil
 	}
 
 	files, err := collectSQLFiles(path)
@@ -49,20 +49,14 @@ func NewSQLSource(path string) (*SQLSource, error) {
 		return nil, err
 	}
 
-	if len(files) == 0 {
-		return nil, fmt.Errorf("the directory %q holds no .sql file", path)
-	}
-
-	source := &SQLSource{
+	sqlSource := &SQLSource{
 		Path:  path,
 		Files: files,
 	}
 
-	return source, nil
+	return sqlSource, nil
 }
 
-// Both engines run a whole file in one call. Never split the statements: a correct split
-// needs a parser, because a function body of PostgreSQL holds a semicolon.
 func (s *SQLSource) ApplyTo(ctx context.Context, db *sql.DB) error {
 	for _, file := range s.Files {
 		content, err := os.ReadFile(file)
@@ -70,13 +64,30 @@ func (s *SQLSource) ApplyTo(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
-		if strings.TrimSpace(string(content)) == "" {
-			continue
-		}
-
-		_, err = db.ExecContext(ctx, string(content))
+		err = ApplySQLContent(ctx, db, string(content))
 		if err != nil {
 			return fmt.Errorf("failed to apply %q: %w", file, err)
+		}
+	}
+
+	return nil
+}
+
+func ApplySQLContent(ctx context.Context, db *sql.DB, content string) error {
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+
+	if FileUsesTransaction(content) {
+		_, err := db.ExecContext(ctx, content)
+
+		return err
+	}
+
+	for _, statement := range SplitSQLStatements(content) {
+		_, err := db.ExecContext(ctx, statement)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -92,7 +103,7 @@ func collectSQLFiles(directory string) ([]string, error) {
 	var files []string
 
 	for _, entry := range entries {
-		if entry.IsDir() || !hasSQLExtension(entry.Name()) || isDownMigration(entry.Name()) {
+		if entry.IsDir() || !HasSQLExtension(entry.Name()) || isDownMigration(entry.Name()) {
 			continue
 		}
 
@@ -104,7 +115,7 @@ func collectSQLFiles(directory string) ([]string, error) {
 	return files, nil
 }
 
-func hasSQLExtension(path string) bool {
+func HasSQLExtension(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".sql")
 }
 

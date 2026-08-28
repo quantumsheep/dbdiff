@@ -24,7 +24,7 @@ type PostgresDropFunctionInstruction struct {
 }
 
 func (i *PostgresDropFunctionInstruction) String() string {
-	return fmt.Sprintf("DROP FUNCTION %s(%s);", quoteIdentifier(i.Name), i.Arguments)
+	return fmt.Sprintf("DROP FUNCTION %s(%s);", QuoteIdentifier(i.Name), i.Arguments)
 }
 
 func (i *PostgresDropFunctionInstruction) Comment() string {
@@ -42,13 +42,13 @@ type PostgresCreateAggregateInstruction struct {
 
 func (i *PostgresCreateAggregateInstruction) String() string {
 	options := []string{
-		fmt.Sprintf("SFUNC = %s", quoteIdentifier(i.TransitionFunction)),
+		fmt.Sprintf("SFUNC = %s", QuoteIdentifier(i.TransitionFunction)),
 		fmt.Sprintf("STYPE = %s", i.StateType),
 	}
 
 	if i.FinalFunction.Valid {
 		options = append(options,
-			fmt.Sprintf("FINALFUNC = %s", quoteIdentifier(i.FinalFunction.String)))
+			fmt.Sprintf("FINALFUNC = %s", QuoteIdentifier(i.FinalFunction.String)))
 	}
 
 	if i.InitialCondition.Valid {
@@ -57,7 +57,7 @@ func (i *PostgresCreateAggregateInstruction) String() string {
 	}
 
 	return fmt.Sprintf("CREATE AGGREGATE %s(%s) (%s);",
-		quoteIdentifier(i.Name), i.Arguments, strings.Join(options, ", "))
+		QuoteIdentifier(i.Name), i.Arguments, strings.Join(options, ", "))
 }
 
 func (i *PostgresCreateAggregateInstruction) Comment() string {
@@ -70,7 +70,7 @@ type PostgresDropAggregateInstruction struct {
 }
 
 func (i *PostgresDropAggregateInstruction) String() string {
-	return fmt.Sprintf("DROP AGGREGATE %s(%s);", quoteIdentifier(i.Name), i.Arguments)
+	return fmt.Sprintf("DROP AGGREGATE %s(%s);", QuoteIdentifier(i.Name), i.Arguments)
 }
 
 func (i *PostgresDropAggregateInstruction) Comment() string {
@@ -86,7 +86,7 @@ type PostgresCreateOperatorInstruction struct {
 }
 
 func (i *PostgresCreateOperatorInstruction) String() string {
-	options := []string{fmt.Sprintf("FUNCTION = %s", quoteIdentifier(i.Function))}
+	options := []string{fmt.Sprintf("FUNCTION = %s", QuoteIdentifier(i.Function))}
 
 	if i.LeftArgument.Valid {
 		options = append(options, fmt.Sprintf("LEFTARG = %s", i.LeftArgument.String))

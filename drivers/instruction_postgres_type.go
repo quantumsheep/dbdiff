@@ -19,7 +19,7 @@ func (i *PostgresCreateEnumTypeInstruction) String() string {
 	})
 
 	return fmt.Sprintf("CREATE TYPE %s AS ENUM (%s);",
-		quoteIdentifier(i.Name), strings.Join(labels, ", "))
+		QuoteIdentifier(i.Name), strings.Join(labels, ", "))
 }
 
 func (i *PostgresCreateEnumTypeInstruction) Comment() string {
@@ -33,7 +33,7 @@ type PostgresAlterTypeAddValueInstruction struct {
 
 func (i *PostgresAlterTypeAddValueInstruction) String() string {
 	return fmt.Sprintf("ALTER TYPE %s ADD VALUE %s;",
-		quoteIdentifier(i.Name), quoteLiteral(i.Value))
+		QuoteIdentifier(i.Name), quoteLiteral(i.Value))
 }
 
 func (i *PostgresAlterTypeAddValueInstruction) Comment() string {
@@ -45,7 +45,7 @@ type PostgresDropTypeInstruction struct {
 }
 
 func (i *PostgresDropTypeInstruction) String() string {
-	return "DROP TYPE " + quoteIdentifier(i.Name) + ";"
+	return "DROP TYPE " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *PostgresDropTypeInstruction) Comment() string {
@@ -59,11 +59,11 @@ type PostgresCreateCompositeTypeInstruction struct {
 
 func (i *PostgresCreateCompositeTypeInstruction) String() string {
 	lines := lo.Map(i.Attributes, func(attribute *PostgresCompositeTypeAttribute, _ int) string {
-		return fmt.Sprintf("\t%s %s", quoteIdentifier(attribute.Name), attribute.Type)
+		return fmt.Sprintf("\t%s %s", QuoteIdentifier(attribute.Name), attribute.Type)
 	})
 
 	return fmt.Sprintf("CREATE TYPE %s AS (\n%s\n);",
-		quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+		QuoteIdentifier(i.Name), strings.Join(lines, ",\n"))
 }
 
 func (i *PostgresCreateCompositeTypeInstruction) Comment() string {
@@ -79,7 +79,7 @@ type PostgresCreateDomainInstruction struct {
 }
 
 func (i *PostgresCreateDomainInstruction) String() string {
-	statement := fmt.Sprintf("CREATE DOMAIN %s AS %s", quoteIdentifier(i.Name), i.BaseType)
+	statement := fmt.Sprintf("CREATE DOMAIN %s AS %s", QuoteIdentifier(i.Name), i.BaseType)
 
 	if i.Default.Valid {
 		statement += " DEFAULT " + i.Default.String
@@ -91,7 +91,7 @@ func (i *PostgresCreateDomainInstruction) String() string {
 
 	clauses := lo.Map(i.Constraints, func(constraint *PostgresDomainConstraint, _ int) string {
 		return fmt.Sprintf("CONSTRAINT %s %s",
-			quoteIdentifier(constraint.Name), constraint.Def)
+			QuoteIdentifier(constraint.Name), constraint.Def)
 	})
 
 	if len(clauses) > 0 {
@@ -110,7 +110,7 @@ type PostgresDropDomainInstruction struct {
 }
 
 func (i *PostgresDropDomainInstruction) String() string {
-	return "DROP DOMAIN " + quoteIdentifier(i.Name) + ";"
+	return "DROP DOMAIN " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *PostgresDropDomainInstruction) Comment() string {
@@ -124,7 +124,7 @@ type PostgresAlterDomainInstruction struct {
 
 func (i *PostgresAlterDomainInstruction) String() string {
 	return fmt.Sprintf("ALTER DOMAIN %s %s;",
-		quoteIdentifier(i.Name), i.Action.DomainActionClause())
+		QuoteIdentifier(i.Name), i.Action.DomainActionClause())
 }
 
 func (i *PostgresAlterDomainInstruction) Comment() string {
@@ -164,7 +164,7 @@ type PostgresAddDomainConstraintAction struct {
 
 func (a *PostgresAddDomainConstraintAction) DomainActionClause() string {
 	return fmt.Sprintf("ADD CONSTRAINT %s %s",
-		quoteIdentifier(a.ConstraintName), a.Definition)
+		QuoteIdentifier(a.ConstraintName), a.Definition)
 }
 
 type PostgresDropDomainConstraintAction struct {
@@ -172,5 +172,5 @@ type PostgresDropDomainConstraintAction struct {
 }
 
 func (a *PostgresDropDomainConstraintAction) DomainActionClause() string {
-	return "DROP CONSTRAINT " + quoteIdentifier(a.ConstraintName)
+	return "DROP CONSTRAINT " + QuoteIdentifier(a.ConstraintName)
 }

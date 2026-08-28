@@ -18,7 +18,7 @@ func (i *PostgresAlterTableInstruction) String() string {
 	})
 
 	return fmt.Sprintf("ALTER TABLE %s %s;",
-		quoteIdentifier(i.Name), strings.Join(clauses, ", "))
+		QuoteIdentifier(i.Name), strings.Join(clauses, ", "))
 }
 
 func (i *PostgresAlterTableInstruction) Comment() string {
@@ -42,14 +42,14 @@ type PostgresAlterColumnTypeAction struct {
 
 func (a *PostgresAlterColumnTypeAction) TableActionClause() string {
 	clause := fmt.Sprintf("ALTER COLUMN %s TYPE %s",
-		quoteIdentifier(a.ColumnName), a.DataType)
+		QuoteIdentifier(a.ColumnName), a.DataType)
 
 	if a.Collation != "" {
-		clause += " COLLATE " + quoteIdentifier(a.Collation)
+		clause += " COLLATE " + QuoteIdentifier(a.Collation)
 	}
 
 	if a.UsingCast {
-		clause += fmt.Sprintf(" USING %s::%s", quoteIdentifier(a.ColumnName), a.DataType)
+		clause += fmt.Sprintf(" USING %s::%s", QuoteIdentifier(a.ColumnName), a.DataType)
 	}
 
 	return clause
@@ -62,17 +62,17 @@ type PostgresSetStorageAction struct {
 
 func (a *PostgresSetStorageAction) TableActionClause() string {
 	return fmt.Sprintf("ALTER COLUMN %s SET STORAGE %s",
-		quoteIdentifier(a.ColumnName), a.Storage)
+		QuoteIdentifier(a.ColumnName), a.Storage)
 }
 
 type PostgresSetStatisticsAction struct {
 	ColumnName string
-	Target     int64
+	Source     int64
 }
 
 func (a *PostgresSetStatisticsAction) TableActionClause() string {
 	return fmt.Sprintf("ALTER COLUMN %s SET STATISTICS %d",
-		quoteIdentifier(a.ColumnName), a.Target)
+		QuoteIdentifier(a.ColumnName), a.Source)
 }
 
 type PostgresSetNotNullAction struct {
@@ -80,7 +80,7 @@ type PostgresSetNotNullAction struct {
 }
 
 func (a *PostgresSetNotNullAction) TableActionClause() string {
-	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " SET NOT NULL"
+	return "ALTER COLUMN " + QuoteIdentifier(a.ColumnName) + " SET NOT NULL"
 }
 
 type PostgresDropNotNullAction struct {
@@ -88,7 +88,7 @@ type PostgresDropNotNullAction struct {
 }
 
 func (a *PostgresDropNotNullAction) TableActionClause() string {
-	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP NOT NULL"
+	return "ALTER COLUMN " + QuoteIdentifier(a.ColumnName) + " DROP NOT NULL"
 }
 
 type PostgresSetDefaultAction struct {
@@ -98,7 +98,7 @@ type PostgresSetDefaultAction struct {
 
 func (a *PostgresSetDefaultAction) TableActionClause() string {
 	return fmt.Sprintf("ALTER COLUMN %s SET DEFAULT %s",
-		quoteIdentifier(a.ColumnName), a.Expression)
+		QuoteIdentifier(a.ColumnName), a.Expression)
 }
 
 type PostgresDropDefaultAction struct {
@@ -106,7 +106,7 @@ type PostgresDropDefaultAction struct {
 }
 
 func (a *PostgresDropDefaultAction) TableActionClause() string {
-	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP DEFAULT"
+	return "ALTER COLUMN " + QuoteIdentifier(a.ColumnName) + " DROP DEFAULT"
 }
 
 type PostgresAddIdentityAction struct {
@@ -116,7 +116,7 @@ type PostgresAddIdentityAction struct {
 
 func (a *PostgresAddIdentityAction) TableActionClause() string {
 	return fmt.Sprintf("ALTER COLUMN %s ADD GENERATED %s AS IDENTITY",
-		quoteIdentifier(a.ColumnName), a.Identity)
+		QuoteIdentifier(a.ColumnName), a.Identity)
 }
 
 type PostgresSetIdentityAction struct {
@@ -126,7 +126,7 @@ type PostgresSetIdentityAction struct {
 
 func (a *PostgresSetIdentityAction) TableActionClause() string {
 	return fmt.Sprintf("ALTER COLUMN %s SET GENERATED %s",
-		quoteIdentifier(a.ColumnName), a.Identity)
+		QuoteIdentifier(a.ColumnName), a.Identity)
 }
 
 type PostgresSetIdentityOptionsAction struct {
@@ -136,7 +136,7 @@ type PostgresSetIdentityOptionsAction struct {
 
 func (a *PostgresSetIdentityOptionsAction) TableActionClause() string {
 	return fmt.Sprintf("ALTER COLUMN %s SET %s",
-		quoteIdentifier(a.ColumnName), a.Options)
+		QuoteIdentifier(a.ColumnName), a.Options)
 }
 
 type PostgresDropIdentityAction struct {
@@ -144,7 +144,7 @@ type PostgresDropIdentityAction struct {
 }
 
 func (a *PostgresDropIdentityAction) TableActionClause() string {
-	return "ALTER COLUMN " + quoteIdentifier(a.ColumnName) + " DROP IDENTITY"
+	return "ALTER COLUMN " + QuoteIdentifier(a.ColumnName) + " DROP IDENTITY"
 }
 
 type PostgresAddConstraintAction struct {
@@ -160,7 +160,7 @@ type PostgresDropConstraintAction struct {
 }
 
 func (a *PostgresDropConstraintAction) TableActionClause() string {
-	return "DROP CONSTRAINT " + quoteIdentifier(a.ConstraintName)
+	return "DROP CONSTRAINT " + QuoteIdentifier(a.ConstraintName)
 }
 
 type PostgresCreateTableInstruction struct {
@@ -190,10 +190,10 @@ func (i *PostgresCreateTableInstruction) String() string {
 	}
 
 	statement := fmt.Sprintf("%s %s (\n%s\n)",
-		keyword, quoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+		keyword, QuoteIdentifier(i.Name), strings.Join(lines, ",\n"))
 
 	if len(i.Inherits) > 0 {
-		statement += " INHERITS (" + strings.Join(quoteIdentifiers(i.Inherits), ", ") + ")"
+		statement += " INHERITS (" + strings.Join(QuoteIdentifiers(i.Inherits), ", ") + ")"
 	}
 
 	if len(i.StorageParameters) > 0 {
@@ -219,7 +219,7 @@ type PostgresCreateTablePartitionInstruction struct {
 
 func (i *PostgresCreateTablePartitionInstruction) String() string {
 	return fmt.Sprintf("CREATE TABLE %s PARTITION OF %s %s;",
-		quoteIdentifier(i.Name), quoteIdentifier(i.ParentName), i.Bound)
+		QuoteIdentifier(i.Name), QuoteIdentifier(i.ParentName), i.Bound)
 }
 
 func (i *PostgresCreateTablePartitionInstruction) Comment() string {
@@ -257,7 +257,7 @@ type PostgresDropTriggerInstruction struct {
 
 func (i *PostgresDropTriggerInstruction) String() string {
 	return fmt.Sprintf("DROP TRIGGER %s ON %s;",
-		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+		QuoteIdentifier(i.Name), QuoteIdentifier(i.TableName))
 }
 
 func (i *PostgresDropTriggerInstruction) Comment() string {
@@ -271,7 +271,7 @@ type PostgresTriggerEnableAction struct {
 }
 
 func (a *PostgresTriggerEnableAction) TableActionClause() string {
-	return a.Mode + " TRIGGER " + quoteIdentifier(a.TriggerName)
+	return a.Mode + " TRIGGER " + QuoteIdentifier(a.TriggerName)
 }
 
 type PostgresSetStorageParametersAction struct {
@@ -305,7 +305,7 @@ type PostgresReplicaIdentityAction struct {
 
 func (a *PostgresReplicaIdentityAction) TableActionClause() string {
 	if a.IndexName != "" {
-		return "REPLICA IDENTITY " + a.Mode + " " + quoteIdentifier(a.IndexName)
+		return "REPLICA IDENTITY " + a.Mode + " " + QuoteIdentifier(a.IndexName)
 	}
 
 	return "REPLICA IDENTITY " + a.Mode
@@ -331,7 +331,7 @@ type PostgresCreatePolicyInstruction struct {
 
 func (i *PostgresCreatePolicyInstruction) String() string {
 	statement := fmt.Sprintf("CREATE POLICY %s ON %s",
-		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+		QuoteIdentifier(i.Name), QuoteIdentifier(i.TableName))
 
 	if i.Permissive != "" {
 		statement += " AS " + i.Permissive
@@ -369,7 +369,7 @@ func policyRoleNames(roles []string) []string {
 			continue
 		}
 
-		names = append(names, quoteIdentifier(role))
+		names = append(names, QuoteIdentifier(role))
 	}
 
 	return names
@@ -382,7 +382,7 @@ type PostgresDropPolicyInstruction struct {
 
 func (i *PostgresDropPolicyInstruction) String() string {
 	return fmt.Sprintf("DROP POLICY %s ON %s;",
-		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+		QuoteIdentifier(i.Name), QuoteIdentifier(i.TableName))
 }
 
 func (i *PostgresDropPolicyInstruction) Comment() string {
@@ -409,7 +409,7 @@ type PostgresDropRuleInstruction struct {
 
 func (i *PostgresDropRuleInstruction) String() string {
 	return fmt.Sprintf("DROP RULE %s ON %s;",
-		quoteIdentifier(i.Name), quoteIdentifier(i.TableName))
+		QuoteIdentifier(i.Name), QuoteIdentifier(i.TableName))
 }
 
 func (i *PostgresDropRuleInstruction) Comment() string {
@@ -423,7 +423,7 @@ type PostgresCommentOnTableInstruction struct {
 
 func (i *PostgresCommentOnTableInstruction) String() string {
 	return fmt.Sprintf("COMMENT ON TABLE %s IS %s;",
-		quoteIdentifier(i.Name), commentLiteral(i.Text))
+		QuoteIdentifier(i.Name), commentLiteral(i.Text))
 }
 
 func (i *PostgresCommentOnTableInstruction) Comment() string {
@@ -438,7 +438,7 @@ type PostgresCommentOnColumnInstruction struct {
 
 func (i *PostgresCommentOnColumnInstruction) String() string {
 	return fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s;",
-		quoteIdentifier(i.TableName), quoteIdentifier(i.ColumnName),
+		QuoteIdentifier(i.TableName), QuoteIdentifier(i.ColumnName),
 		commentLiteral(i.Text))
 }
 
@@ -460,7 +460,7 @@ type PostgresCreateMaterializedViewInstruction struct {
 }
 
 func (i *PostgresCreateMaterializedViewInstruction) String() string {
-	return "CREATE MATERIALIZED VIEW " + quoteIdentifier(i.Name) + " AS " +
+	return "CREATE MATERIALIZED VIEW " + QuoteIdentifier(i.Name) + " AS " +
 		strings.TrimSuffix(i.Query, ";") + ";"
 }
 
@@ -473,7 +473,7 @@ type PostgresDropMaterializedViewInstruction struct {
 }
 
 func (i *PostgresDropMaterializedViewInstruction) String() string {
-	return "DROP MATERIALIZED VIEW " + quoteIdentifier(i.Name) + ";"
+	return "DROP MATERIALIZED VIEW " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *PostgresDropMaterializedViewInstruction) Comment() string {
@@ -487,7 +487,7 @@ type PostgresCreateViewInstruction struct {
 }
 
 func (i *PostgresCreateViewInstruction) String() string {
-	statement := "CREATE VIEW " + quoteIdentifier(i.Name) + " AS " +
+	statement := "CREATE VIEW " + QuoteIdentifier(i.Name) + " AS " +
 		strings.TrimSuffix(i.Query, ";")
 
 	if i.CheckOption != "" {

@@ -7,8 +7,7 @@ import (
 	"github.com/samber/lo"
 )
 
-// equalCheckConstraints compares the value of each check. The slice holds a pointer, so
-// slices.Equal compares the address and never the check.
+// The slice holds a pointer, so slices.Equal compares the address and never the check.
 func equalCheckConstraints(first []*SQLiteCheckConstraint, second []*SQLiteCheckConstraint) bool {
 	return slices.EqualFunc(first, second,
 		func(firstCheck *SQLiteCheckConstraint, secondCheck *SQLiteCheckConstraint) bool {
@@ -27,8 +26,7 @@ type SQLiteTable struct {
 	Name    string
 	Columns []*SQLiteColumn
 
-	// A key or a constraint of one column stays a column constraint. These two fields hold
-	// the columns of a key or of a constraint of two or more columns only.
+	// These two fields hold a key or a constraint of two or more columns only.
 	PrimaryKey         []string
 	PrimaryKeyConflict string
 	UniqueConstraints  []*SQLiteUniqueConstraint
@@ -126,9 +124,8 @@ type SQLiteTableColumnsDiff struct {
 }
 
 // SQLite supports no ALTER COLUMN, so a modified column, a changed foreign key, a changed
-// table constraint, or a changed table option needs a new table. A new STORED generated
-// column needs one too, because SQLite refuses an ADD COLUMN action that holds such a
-// column.
+// table constraint, or a changed table option needs a new table. SQLite also refuses an ADD
+// COLUMN action that holds a STORED generated column.
 func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
 	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged ||
 		d.TableOptionsChanged || d.AddsStoredGeneratedColumn
@@ -148,62 +145,62 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 			!equalCheckConstraints(t.CheckConstraints, other.CheckConstraints),
 	}
 
-	for _, sourceColumn := range t.Columns {
-		targetColumn, found := other.ColumnByName(sourceColumn.Name)
+	for _, targetColumn := range t.Columns {
+		sourceColumn, found := other.ColumnByName(targetColumn.Name)
 		if !found {
 			candidates := lo.Filter(other.Columns, func(column *SQLiteColumn, _ int) bool {
-				_, existsInSourceTable := t.ColumnByName(column.Name)
+				_, existsInTargetTable := t.ColumnByName(column.Name)
 				_, alreadyRenamed := diff.Renamed[column.Name]
-				return !existsInSourceTable && !alreadyRenamed && column.HasEqualAttributes(sourceColumn)
+				return !existsInTargetTable && !alreadyRenamed && column.HasEqualAttributes(targetColumn)
 			})
 
 			// A rename is a guess. Two candidates make the guess unsafe, so the column
 			// becomes an addition and the old columns become removals.
 			if len(candidates) == 1 {
-				diff.Renamed[candidates[0].Name] = sourceColumn.Name
+				diff.Renamed[candidates[0].Name] = targetColumn.Name
 				continue
 			}
 
-			diff.Added = append(diff.Added, sourceColumn.Name)
+			diff.Added = append(diff.Added, targetColumn.Name)
 
-			if sourceColumn.IsGenerated() && sourceColumn.GeneratedStored {
+			if targetColumn.IsGenerated() && targetColumn.GeneratedStored {
 				diff.AddsStoredGeneratedColumn = true
 			}
 
 			continue
 		}
 
-		if *sourceColumn == *targetColumn {
+		if *targetColumn == *sourceColumn {
 			continue
 		}
 
-		if sourceColumn.Type != targetColumn.Type {
-			if sourceColumn.IsTypeChangeCompatible(targetColumn) {
-				diff.Modified = append(diff.Modified, sourceColumn.Name)
+		if targetColumn.Type != sourceColumn.Type {
+			if targetColumn.IsTypeChangeCompatible(sourceColumn) {
+				diff.Modified = append(diff.Modified, targetColumn.Name)
 				continue
 			}
 
-			diff.Removed = append(diff.Removed, targetColumn.Name)
-			diff.Added = append(diff.Added, sourceColumn.Name)
+			diff.Removed = append(diff.Removed, sourceColumn.Name)
+			diff.Added = append(diff.Added, targetColumn.Name)
 			continue
 		}
 
-		diff.Modified = append(diff.Modified, sourceColumn.Name)
+		diff.Modified = append(diff.Modified, targetColumn.Name)
 	}
 
-	for _, targetColumn := range other.Columns {
-		_, found := t.ColumnByName(targetColumn.Name)
-		if !found && !lo.Contains(lo.Keys(diff.Renamed), targetColumn.Name) {
-			diff.Removed = append(diff.Removed, targetColumn.Name)
+	for _, sourceColumn := range other.Columns {
+		_, found := t.ColumnByName(sourceColumn.Name)
+		if !found && !lo.Contains(lo.Keys(diff.Renamed), sourceColumn.Name) {
+			diff.Removed = append(diff.Removed, sourceColumn.Name)
 		}
 	}
 
 	if len(t.ForeignKeys) != len(other.ForeignKeys) {
 		diff.ForeignKeysChanged = true
 	} else {
-		for _, sourceForeignKey := range t.ForeignKeys {
+		for _, targetForeignKey := range t.ForeignKeys {
 			found := lo.SomeBy(other.ForeignKeys, func(foreignKey *SQLiteForeignKey) bool {
-				return foreignKey.Equal(sourceForeignKey)
+				return foreignKey.Equal(targetForeignKey)
 			})
 			if !found {
 				diff.ForeignKeysChanged = true
@@ -241,13 +238,13 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 
 			_, ok := other.ColumnByName(newColumn.Name)
 			if ok {
-				selectColumns = append(selectColumns, quoteIdentifier(newColumn.Name))
+				selectColumns = append(selectColumns, QuoteIdentifier(newColumn.Name))
 				continue
 			}
 
 			oldName, ok := newToOld[newColumn.Name]
 			if ok {
-				selectColumns = append(selectColumns, quoteIdentifier(oldName))
+				selectColumns = append(selectColumns, QuoteIdentifier(oldName))
 				continue
 			}
 
@@ -273,16 +270,16 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 		})
 
 		// The DROP TABLE statement removes each index and each trigger of the table. The
-		// recreation builds every one of them again from the source, so the index diff and
-		// the trigger diff below compare a target that is not there.
+		// recreation builds every one of them again from the target, so the index diff and
+		// the trigger diff below compare a source that is not there.
 		instructions = append(instructions, t.IndexInstructions()...)
 		instructions = append(instructions, t.TriggerInstructions()...)
 
 		return instructions, nil
 	}
 
-	// The map gives no stable order. The loop walks the source columns instead, so the
-	// rename statements follow the shape of the source table on every run.
+	// The map gives no stable order. The loop walks the target columns instead, so the
+	// rename statements follow the shape of the target table on every run.
 	newNameToOldName := lo.Invert(columnsDiff.Renamed)
 
 	for _, column := range t.Columns {
@@ -339,28 +336,28 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]Instruction, error) {
 func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) ([]Instruction, error) {
 	var instructions []Instruction
 
-	for _, sourceTrigger := range t.Triggers {
-		targetTrigger, found := other.TriggerByName(sourceTrigger.Name)
+	for _, targetTrigger := range t.Triggers {
+		sourceTrigger, found := other.TriggerByName(targetTrigger.Name)
 		if !found {
 			instructions = append(instructions, &SQLiteCreateTriggerInstruction{
-				Definition: sourceTrigger.SQL,
+				Definition: targetTrigger.SQL,
 			})
 
 			continue
 		}
 
-		if sourceTrigger.SQL != targetTrigger.SQL {
+		if targetTrigger.SQL != sourceTrigger.SQL {
 			instructions = append(instructions,
-				&SQLiteDropTriggerInstruction{Name: targetTrigger.Name},
-				&SQLiteCreateTriggerInstruction{Definition: sourceTrigger.SQL})
+				&SQLiteDropTriggerInstruction{Name: sourceTrigger.Name},
+				&SQLiteCreateTriggerInstruction{Definition: targetTrigger.SQL})
 		}
 	}
 
-	for _, targetTrigger := range other.Triggers {
-		_, found := t.TriggerByName(targetTrigger.Name)
+	for _, sourceTrigger := range other.Triggers {
+		_, found := t.TriggerByName(sourceTrigger.Name)
 		if !found {
 			instructions = append(instructions, &SQLiteDropTriggerInstruction{
-				Name: targetTrigger.Name,
+				Name: sourceTrigger.Name,
 			})
 		}
 	}
@@ -371,24 +368,24 @@ func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) ([]Instruction, error) {
 func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) ([]Instruction, error) {
 	var instructions []Instruction
 
-	for _, sourceIndex := range t.Indexes {
-		targetIndex, found := other.IndexByName(sourceIndex.Name)
+	for _, targetIndex := range t.Indexes {
+		sourceIndex, found := other.IndexByName(targetIndex.Name)
 		if !found {
-			instructions = append(instructions, sourceIndex.CreateInstruction())
+			instructions = append(instructions, targetIndex.CreateInstruction())
 			continue
 		}
 
-		if !sourceIndex.Equal(targetIndex) {
+		if !targetIndex.Equal(sourceIndex) {
 			instructions = append(instructions,
-				&SQLDropIndexInstruction{Name: targetIndex.Name},
-				sourceIndex.CreateInstruction())
+				&SQLDropIndexInstruction{Name: sourceIndex.Name},
+				targetIndex.CreateInstruction())
 		}
 	}
 
-	for _, targetIndex := range other.Indexes {
-		_, found := t.IndexByName(targetIndex.Name)
+	for _, sourceIndex := range other.Indexes {
+		_, found := t.IndexByName(sourceIndex.Name)
 		if !found {
-			instructions = append(instructions, &SQLDropIndexInstruction{Name: targetIndex.Name})
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: sourceIndex.Name})
 		}
 	}
 

@@ -4,9 +4,6 @@ import (
 	"strings"
 )
 
-// deferrableClause returns the DEFERRABLE clause in these tokens, with no leading space.
-// SQLite accepts the keyword NOT before it, and it accepts the keywords INITIALLY DEFERRED
-// or INITIALLY IMMEDIATE after it.
 func deferrableClause(tokens []string) string {
 	for position, token := range tokens {
 		if !strings.EqualFold(token, "DEFERRABLE") {
@@ -60,12 +57,9 @@ func constraintColumnNames(list string) []string {
 	return names
 }
 
-// indexKeyModifiers returns the collation and the direction of one key of an index, with a
-// leading space. PRAGMA index_info reports neither, so the text of the CREATE INDEX
-// statement gives them.
-//
-// The keyword ASC is the default of SQLite. This function drops it, so an index that names
-// it equals an index that does not.
+// PRAGMA index_info reports no collation and no direction, so the text of the CREATE INDEX
+// statement gives them. ASC is the default of SQLite, and this function drops it, so an
+// index that names it equals an index that does not.
 func indexKeyModifiers(definitionKey string) string {
 	tokens := splitTopLevelTokens(definitionKey)
 	if len(tokens) < 2 {
@@ -89,8 +83,7 @@ func indexKeyModifiers(definitionKey string) string {
 	return " " + strings.Join(modifiers, " ")
 }
 
-// parseTableOptions reads the options that follow the column list of a CREATE TABLE
-// statement. SQLite accepts WITHOUT ROWID and STRICT, in any order and in any case.
+// SQLite accepts WITHOUT ROWID and STRICT, in any order and in any case.
 func parseTableOptions(definition string) (withoutRowID bool, strict bool) {
 	tail := definition[indexAfterColumnList(definition):]
 
@@ -109,7 +102,6 @@ func parseTableOptions(definition string) (withoutRowID bool, strict bool) {
 	return withoutRowID, strict
 }
 
-// A definition with no column list gives the length of the text.
 func indexAfterColumnList(definition string) int {
 	start := indexOfKeyList(definition)
 	if start < 0 {
@@ -151,9 +143,8 @@ func indexAfterColumnList(definition string) int {
 	return len(definition)
 }
 
-// SQLiteTableDefinition holds the parts of a CREATE TABLE statement that no PRAGMA gives.
-// PRAGMA table_xinfo names a generated column, and it gives no expression for it. No PRAGMA
-// reports a collation, the keyword AUTOINCREMENT, or a check.
+// PRAGMA table_xinfo gives no expression of a generated column, and no PRAGMA reports a
+// collation, the keyword AUTOINCREMENT, or a check.
 type SQLiteTableDefinition struct {
 	Columns            map[string]*SQLiteColumn
 	CheckConstraints   []*SQLiteCheckConstraint
@@ -204,8 +195,7 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 			continue
 		}
 
-		// A table constraint starts with its keyword, so it names no column. The keyword
-		// CONSTRAINT and a name can come before that keyword.
+		// A table constraint starts with its keyword, so it names no column.
 		if isTableConstraintKeyword(tokens[0]) {
 			constraint := tokens
 			constraintName := ""
@@ -261,8 +251,7 @@ func isTableConstraintKeyword(token string) bool {
 	return false
 }
 
-// parseColumnAttributes reads the constraints that follow the name of a column. SQLite
-// accepts them in any order, so the loop tests each token.
+// SQLite accepts the constraints of a column in any order, so the loop tests each token.
 func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
 	column := &SQLiteColumn{Name: name}
 
@@ -389,8 +378,7 @@ func splitColumnDefinitions(definition string) []string {
 	return parts
 }
 
-// splitTopLevelTokens cuts a column definition at each run of spaces outside a quote. A
-// group in parentheses stays one token, so an expression keeps its text.
+// A group in parentheses stays one token, so an expression keeps its text.
 func splitTopLevelTokens(part string) []string {
 	var tokens []string
 	var token strings.Builder

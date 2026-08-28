@@ -14,19 +14,21 @@ import (
 )
 
 type PostgresDriverConfig struct {
-	SourceConnectionString string
 	TargetConnectionString string
-	SourceSchema           string
+	SourceConnectionString string
 	TargetSchema           string
+	SourceSchema           string
 	CompareData            bool
 	ComparePrivileges      bool
+
+	ScratchServerVersion string
 }
 
 type PostgresDriver struct {
-	SourceDatabaseConnection *sql.DB
 	TargetDatabaseConnection *sql.DB
-	SourceSchema             string
+	SourceDatabaseConnection *sql.DB
 	TargetSchema             string
+	SourceSchema             string
 	CompareData              bool
 	ComparePrivileges        bool
 
@@ -37,35 +39,35 @@ type PostgresDriver struct {
 
 func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*PostgresDriver, error) {
 	driver := &PostgresDriver{
-		SourceSchema:      config.SourceSchema,
 		TargetSchema:      config.TargetSchema,
+		SourceSchema:      config.SourceSchema,
 		CompareData:       config.CompareData,
 		ComparePrivileges: config.ComparePrivileges,
 		ScratchVersion:    postgresScratchVersionOfConfig(ctx, config),
 	}
 
-	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceConnectionString, config.SourceSchema, "source")
-	if err != nil {
-		driver.StopScratchServer()
-		return nil, err
-	}
-
-	driver.SourceDatabaseConnection = sourceDatabaseConnection
-
 	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetConnectionString, config.TargetSchema, "target")
 	if err != nil {
-		driver.SourceDatabaseConnection.Close()
 		driver.StopScratchServer()
-
 		return nil, err
 	}
 
 	driver.TargetDatabaseConnection = targetDatabaseConnection
 
+	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceConnectionString, config.SourceSchema, "source")
+	if err != nil {
+		driver.TargetDatabaseConnection.Close()
+		driver.StopScratchServer()
+
+		return nil, err
+	}
+
+	driver.SourceDatabaseConnection = sourceDatabaseConnection
+
 	return driver, nil
 }
 
-func openPostgresConnection(connectionString string, schema string) (*sql.DB, error) {
+func OpenPostgresConnection(connectionString string, schema string) (*sql.DB, error) {
 	if schema == "" {
 		return sql.Open("pgx", connectionString)
 	}
@@ -75,13 +77,13 @@ func openPostgresConnection(connectionString string, schema string) (*sql.DB, er
 		return nil, err
 	}
 
-	connectionConfig.RuntimeParams["search_path"] = quoteIdentifier(schema)
+	connectionConfig.RuntimeParams["search_path"] = QuoteIdentifier(schema)
 
 	return stdlib.OpenDB(*connectionConfig), nil
 }
 
 // PostgreSQL accepts a search path that names no schema, and each query then reads an
-// empty schema. Without this check the diff drops every object of the target.
+// empty schema. Without this check the diff drops every object of the source.
 func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema string, role string) error {
 	if schema == "" {
 		return nil
@@ -104,27 +106,25 @@ func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema st
 }
 
 func (d *PostgresDriver) Close() error {
-	sourceError := d.SourceDatabaseConnection.Close()
 	targetError := d.TargetDatabaseConnection.Close()
+	sourceError := d.SourceDatabaseConnection.Close()
 	stopError := d.StopScratchServer()
 
-	return firstError(sourceError, targetError, stopError)
+	return FirstError(targetError, sourceError, stopError)
 }
 
 func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
-	err := d.VerifySchema(ctx, d.SourceDatabaseConnection, d.SourceSchema, "source")
+	err := d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "target")
 	if err != nil {
 		return nil, err
 	}
 
-	err = d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "target")
+	err = d.VerifySchema(ctx, d.SourceDatabaseConnection, d.SourceSchema, "source")
 	if err != nil {
 		return nil, err
 	}
 
-	// A table uses an extension, a type, a domain, a composite type, a sequence, or a
-	// function. An aggregate and an operator use a function. A materialized view reads a
-	// table or a view. Keep this order.
+	// Every section comes after the sections that its objects use. Keep this order.
 	sections := []func(ctx context.Context) (*SectionDiff, error){
 		d.DiffExtensions,
 		d.DiffTypes,
@@ -154,9 +154,8 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 
 	var instructions []Instruction
 
-	// PostgreSQL refuses a DROP statement while another object uses the object, so every
-	// removal takes the reverse section order. An early removal runs before every addition,
-	// because a view blocks a change of the column that it reads.
+	// PostgreSQL refuses a DROP statement while another object uses the object, so a removal
+	// takes the reverse section order. An early removal runs before every addition.
 	for _, sectionDiff := range slices.Backward(sectionDiffs) {
 		instructions = append(instructions, sectionDiff.EarlyRemovals...)
 	}
@@ -184,43 +183,43 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]Instruction, error) {
 type sectionRules[T any] struct {
 	Get    func(ctx context.Context, db *sql.DB) ([]T, error)
 	Key    func(object T) string
-	Create func(source T) Instruction
-	Change func(source T, target T) []Instruction
-	Drop   func(target T) Instruction
+	Create func(target T) Instruction
+	Change func(target T, source T) []Instruction
+	Drop   func(source T) Instruction
 }
 
 func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules sectionRules[T]) (*SectionDiff, error) {
 	var additions []Instruction
 	var removals []Instruction
 
-	sourceObjects, err := rules.Get(ctx, driver.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetObjects, err := rules.Get(ctx, driver.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceObject := range sourceObjects {
-		targetObject, found := lo.Find(targetObjects, func(object T) bool {
-			return rules.Key(object) == rules.Key(sourceObject)
-		})
-		if !found {
-			additions = append(additions, rules.Create(sourceObject))
-			continue
-		}
-
-		additions = append(additions, rules.Change(sourceObject, targetObject)...)
+	sourceObjects, err := rules.Get(ctx, driver.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, targetObject := range targetObjects {
-		_, found := lo.Find(sourceObjects, func(object T) bool {
+		sourceObject, found := lo.Find(sourceObjects, func(object T) bool {
 			return rules.Key(object) == rules.Key(targetObject)
 		})
 		if !found {
-			removals = append(removals, rules.Drop(targetObject))
+			additions = append(additions, rules.Create(targetObject))
+			continue
+		}
+
+		additions = append(additions, rules.Change(targetObject, sourceObject)...)
+	}
+
+	for _, sourceObject := range sourceObjects {
+		_, found := lo.Find(targetObjects, func(object T) bool {
+			return rules.Key(object) == rules.Key(sourceObject)
+		})
+		if !found {
+			removals = append(removals, rules.Drop(sourceObject))
 		}
 	}
 
@@ -239,15 +238,15 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 		Create: func(extension *PostgresExtension) Instruction {
 			return extension.CreateInstruction()
 		},
-		Change: func(source *PostgresExtension, target *PostgresExtension) []Instruction {
-			if source.Version == target.Version {
+		Change: func(target *PostgresExtension, source *PostgresExtension) []Instruction {
+			if target.Version == source.Version {
 				return nil
 			}
 
-			return []Instruction{source.UpdateInstruction()}
+			return []Instruction{target.UpdateInstruction()}
 		},
-		Drop: func(target *PostgresExtension) Instruction {
-			return target.DropInstruction()
+		Drop: func(source *PostgresExtension) Instruction {
+			return source.DropInstruction()
 		},
 	})
 }
@@ -261,11 +260,11 @@ func (d *PostgresDriver) DiffTypes(ctx context.Context) (*SectionDiff, error) {
 		Create: func(enumType *PostgresType) Instruction {
 			return enumType.CreateInstruction()
 		},
-		Change: func(source *PostgresType, target *PostgresType) []Instruction {
-			return source.Diff(target)
+		Change: func(target *PostgresType, source *PostgresType) []Instruction {
+			return target.Diff(source)
 		},
-		Drop: func(target *PostgresType) Instruction {
-			return &PostgresDropTypeInstruction{Name: target.Name}
+		Drop: func(source *PostgresType) Instruction {
+			return &PostgresDropTypeInstruction{Name: source.Name}
 		},
 	})
 }
@@ -279,11 +278,11 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 		Create: func(domain *PostgresDomain) Instruction {
 			return domain.CreateInstruction()
 		},
-		Change: func(source *PostgresDomain, target *PostgresDomain) []Instruction {
-			return source.Diff(target)
+		Change: func(target *PostgresDomain, source *PostgresDomain) []Instruction {
+			return target.Diff(source)
 		},
-		Drop: func(target *PostgresDomain) Instruction {
-			return target.DropInstruction()
+		Drop: func(source *PostgresDomain) Instruction {
+			return source.DropInstruction()
 		},
 	})
 }
@@ -297,11 +296,11 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 		Create: func(compositeType *PostgresCompositeType) Instruction {
 			return compositeType.CreateInstruction()
 		},
-		Change: func(source *PostgresCompositeType, target *PostgresCompositeType) []Instruction {
-			return source.Diff(target)
+		Change: func(target *PostgresCompositeType, source *PostgresCompositeType) []Instruction {
+			return target.Diff(source)
 		},
-		Drop: func(target *PostgresCompositeType) Instruction {
-			return target.DropInstruction()
+		Drop: func(source *PostgresCompositeType) Instruction {
+			return source.DropInstruction()
 		},
 	})
 }
@@ -315,11 +314,11 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 		Create: func(aggregate *PostgresAggregate) Instruction {
 			return aggregate.CreateInstruction()
 		},
-		Change: func(source *PostgresAggregate, target *PostgresAggregate) []Instruction {
-			return source.Diff(target)
+		Change: func(target *PostgresAggregate, source *PostgresAggregate) []Instruction {
+			return target.Diff(source)
 		},
-		Drop: func(target *PostgresAggregate) Instruction {
-			return target.DropInstruction()
+		Drop: func(source *PostgresAggregate) Instruction {
+			return source.DropInstruction()
 		},
 	})
 }
@@ -333,11 +332,11 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 		Create: func(operator *PostgresOperator) Instruction {
 			return operator.CreateInstruction()
 		},
-		Change: func(source *PostgresOperator, target *PostgresOperator) []Instruction {
-			return source.Diff(target)
+		Change: func(target *PostgresOperator, source *PostgresOperator) []Instruction {
+			return target.Diff(source)
 		},
-		Drop: func(target *PostgresOperator) Instruction {
-			return target.DropInstruction()
+		Drop: func(source *PostgresOperator) Instruction {
+			return source.DropInstruction()
 		},
 	})
 }
@@ -351,11 +350,11 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 		Create: func(sequence *PostgresSequence) Instruction {
 			return sequence.CreateInstruction()
 		},
-		Change: func(source *PostgresSequence, target *PostgresSequence) []Instruction {
-			return source.Diff(target)
+		Change: func(target *PostgresSequence, source *PostgresSequence) []Instruction {
+			return target.Diff(source)
 		},
-		Drop: func(target *PostgresSequence) Instruction {
-			return &PostgresDropSequenceInstruction{Name: target.Name}
+		Drop: func(source *PostgresSequence) Instruction {
+			return &PostgresDropSequenceInstruction{Name: source.Name}
 		},
 	})
 }
@@ -364,43 +363,42 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	var additions []Instruction
 	var removals []Instruction
 
-	sourceFunctions, err := d.GetFunctions(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetFunctions, err := d.GetFunctions(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	// The definition starts with CREATE OR REPLACE FUNCTION, so a new function and a
-	// modified function take the same statement. PostgreSQL refuses that statement when the
-	// return type changes.
-	for _, sourceFunction := range sourceFunctions {
-		targetFunction, found := lo.Find(targetFunctions, func(function *PostgresFunction) bool {
-			return function.Signature() == sourceFunction.Signature()
-		})
-		if !found {
-			additions = append(additions, sourceFunction.CreateInstruction())
-			continue
-		}
-
-		if sourceFunction.Def != targetFunction.Def {
-			if sourceFunction.ReturnType != targetFunction.ReturnType {
-				additions = append(additions, targetFunction.DropInstruction())
-			}
-
-			additions = append(additions, sourceFunction.CreateInstruction())
-		}
+	sourceFunctions, err := d.GetFunctions(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
 	}
 
+	// CREATE OR REPLACE FUNCTION covers a new function and a modified function. PostgreSQL
+	// refuses that statement when the return type changes.
 	for _, targetFunction := range targetFunctions {
-		_, found := lo.Find(sourceFunctions, func(function *PostgresFunction) bool {
+		sourceFunction, found := lo.Find(sourceFunctions, func(function *PostgresFunction) bool {
 			return function.Signature() == targetFunction.Signature()
 		})
 		if !found {
-			removals = append(removals, targetFunction.DropInstruction())
+			additions = append(additions, targetFunction.CreateInstruction())
+			continue
+		}
+
+		if targetFunction.Def != sourceFunction.Def {
+			if targetFunction.ReturnType != sourceFunction.ReturnType {
+				additions = append(additions, sourceFunction.DropInstruction())
+			}
+
+			additions = append(additions, targetFunction.CreateInstruction())
+		}
+	}
+
+	for _, sourceFunction := range sourceFunctions {
+		_, found := lo.Find(targetFunctions, func(function *PostgresFunction) bool {
+			return function.Signature() == sourceFunction.Signature()
+		})
+		if !found {
+			removals = append(removals, sourceFunction.DropInstruction())
 		}
 	}
 
@@ -410,8 +408,8 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	}, nil
 }
 
-func isTableDropped(name string, sourceTables []*PostgresTable) bool {
-	_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
+func isTableDropped(name string, targetTables []*PostgresTable) bool {
+	_, found := lo.Find(targetTables, func(table *PostgresTable) bool {
 		return table.Name == name
 	})
 
@@ -422,18 +420,18 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	var additions []Instruction
 	var removals []Instruction
 
-	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
+	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
 	hasAutomaticCast := func(oldType string, newType string) (bool, error) {
-		return d.HasAutomaticCast(ctx, d.TargetDatabaseConnection, oldType, newType)
+		return d.HasAutomaticCast(ctx, d.SourceDatabaseConnection, oldType, newType)
 	}
 
 	// The action of a rule can name a second table, so every rule comes after every table.
@@ -442,47 +440,46 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	// Two tables can name each other, so every foreign key comes after every table.
 	var foreignKeyInstructions []Instruction
 
-	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(table *PostgresTable) bool {
-			return table.Name == sourceTable.Name
+	for _, targetTable := range targetTables {
+		sourceTable, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
+			return table.Name == targetTable.Name
 		})
 		if !found {
-			additions = append(additions, sourceTable.Instructions()...)
+			additions = append(additions, targetTable.Instructions()...)
 			foreignKeyInstructions = append(foreignKeyInstructions,
-				sourceTable.ForeignKeyInstructions()...)
-			ruleInstructions = append(ruleInstructions, sourceTable.RuleInstructions()...)
+				targetTable.ForeignKeyInstructions()...)
+			ruleInstructions = append(ruleInstructions, targetTable.RuleInstructions()...)
 
 			continue
 		}
 
-		subInstructions, err := sourceTable.DiffTable(targetTable, hasAutomaticCast)
+		subInstructions, err := targetTable.DiffTable(sourceTable, hasAutomaticCast)
 		if err != nil {
 			return nil, err
 		}
 
 		additions = append(additions, subInstructions...)
-		ruleInstructions = append(ruleInstructions, sourceTable.DiffRules(targetTable)...)
+		ruleInstructions = append(ruleInstructions, targetTable.DiffRules(sourceTable)...)
 	}
 
 	additions = append(additions, foreignKeyInstructions...)
 	additions = append(additions, ruleInstructions...)
 
 	// The reverse order gives each DROP TABLE statement before the table that it names.
-	for _, targetTable := range slices.Backward(targetTables) {
-		_, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
-			return table.Name == targetTable.Name
+	for _, sourceTable := range slices.Backward(sourceTables) {
+		_, found := lo.Find(targetTables, func(table *PostgresTable) bool {
+			return table.Name == sourceTable.Name
 		})
 		if found {
 			continue
 		}
 
-		// A DROP TABLE statement of a parent removes every partition of it, so a second
-		// statement for the partition fails.
-		if targetTable.IsPartition() && isTableDropped(targetTable.PartitionParent, sourceTables) {
+		// A DROP TABLE statement of a parent removes every partition of it.
+		if sourceTable.IsPartition() && isTableDropped(sourceTable.PartitionParent, targetTables) {
 			continue
 		}
 
-		removals = append(removals, &SQLDropTableInstruction{Name: targetTable.Name})
+		removals = append(removals, &SQLDropTableInstruction{Name: sourceTable.Name})
 	}
 
 	return &SectionDiff{
@@ -491,53 +488,52 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	}, nil
 }
 
-// DiffViews writes every DROP VIEW statement into the early removals. PostgreSQL refuses a
-// change of a column while a view that reads it exists.
+// PostgreSQL refuses a change of a column while a view that reads it exists, so every DROP
+// VIEW statement goes into the early removals.
 func (d *PostgresDriver) DiffViews(ctx context.Context) (*SectionDiff, error) {
 	var earlyRemovals []Instruction
 	var additions []Instruction
-
-	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
 
 	targetViews, err := d.GetViews(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceView := range sourceViews {
-		targetView, found := lo.Find(targetViews, func(view *PostgresView) bool {
-			return view.Name == sourceView.Name
+	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, targetView := range targetViews {
+		sourceView, found := lo.Find(sourceViews, func(view *PostgresView) bool {
+			return view.Name == targetView.Name
 		})
 		if !found {
-			additions = append(additions, sourceView.CreateInstruction())
+			additions = append(additions, targetView.CreateInstruction())
 			continue
 		}
 
-		// A type change of a column that the view reads keeps the definition text equal,
-		// so the columns give the second condition.
-		if sourceView.Def != targetView.Def || sourceView.CheckOption != targetView.CheckOption ||
-			!sourceView.HasEqualColumns(targetView) {
-			additions = append(additions, sourceView.CreateInstruction())
+		// A type change of a column that the view reads keeps the definition text equal.
+		if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
+			!targetView.HasEqualColumns(sourceView) {
+			additions = append(additions, targetView.CreateInstruction())
 		}
 	}
 
 	// PostgreSQL refuses a DROP VIEW statement while another view still reads the view, so
 	// a backward walk drops each dependent view first.
-	for _, targetView := range slices.Backward(targetViews) {
-		sourceView, found := lo.Find(sourceViews, func(view *PostgresView) bool {
-			return view.Name == targetView.Name
+	for _, sourceView := range slices.Backward(sourceViews) {
+		targetView, found := lo.Find(targetViews, func(view *PostgresView) bool {
+			return view.Name == sourceView.Name
 		})
 		if !found {
-			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: targetView.Name})
+			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: sourceView.Name})
 			continue
 		}
 
-		if sourceView.Def != targetView.Def || sourceView.CheckOption != targetView.CheckOption ||
-			!sourceView.HasEqualColumns(targetView) {
-			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: targetView.Name})
+		if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
+			!targetView.HasEqualColumns(sourceView) {
+			earlyRemovals = append(earlyRemovals, &SQLDropViewInstruction{Name: sourceView.Name})
 		}
 	}
 
@@ -551,48 +547,45 @@ func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDif
 	var earlyRemovals []Instruction
 	var additions []Instruction
 
-	sourceViews, err := d.GetMaterializedViews(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetViews, err := d.GetMaterializedViews(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceView := range sourceViews {
-		targetView, found := lo.Find(targetViews, func(view *PostgresMaterializedView) bool {
-			return view.Name == sourceView.Name
-		})
-		if !found {
-			additions = append(additions, sourceView.Instructions()...)
-			continue
-		}
-
-		// A DROP statement of the view removes every index of it, so a changed view builds
-		// each index again.
-		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
-			additions = append(additions, sourceView.Instructions()...)
-			continue
-		}
-
-		additions = append(additions, diffMaterializedViewIndexes(sourceView, targetView)...)
+	sourceViews, err := d.GetMaterializedViews(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
 	}
 
-	// PostgreSQL refuses a DROP statement while another view still reads the view, so a
-	// backward walk drops each dependent view first.
-	for _, targetView := range slices.Backward(targetViews) {
+	for _, targetView := range targetViews {
 		sourceView, found := lo.Find(sourceViews, func(view *PostgresMaterializedView) bool {
 			return view.Name == targetView.Name
 		})
 		if !found {
-			earlyRemovals = append(earlyRemovals, targetView.DropInstruction())
+			additions = append(additions, targetView.Instructions()...)
 			continue
 		}
 
-		if sourceView.Def != targetView.Def || !sourceView.HasEqualColumns(targetView) {
-			earlyRemovals = append(earlyRemovals, targetView.DropInstruction())
+		// A DROP statement of the view removes every index of it.
+		if targetView.Def != sourceView.Def || !targetView.HasEqualColumns(sourceView) {
+			additions = append(additions, targetView.Instructions()...)
+			continue
+		}
+
+		additions = append(additions, diffMaterializedViewIndexes(targetView, sourceView)...)
+	}
+
+	for _, sourceView := range slices.Backward(sourceViews) {
+		targetView, found := lo.Find(targetViews, func(view *PostgresMaterializedView) bool {
+			return view.Name == sourceView.Name
+		})
+		if !found {
+			earlyRemovals = append(earlyRemovals, sourceView.DropInstruction())
+			continue
+		}
+
+		if targetView.Def != sourceView.Def || !targetView.HasEqualColumns(sourceView) {
+			earlyRemovals = append(earlyRemovals, sourceView.DropInstruction())
 		}
 	}
 
@@ -602,27 +595,27 @@ func (d *PostgresDriver) DiffMaterializedViews(ctx context.Context) (*SectionDif
 	}, nil
 }
 
-func diffMaterializedViewIndexes(sourceView *PostgresMaterializedView, targetView *PostgresMaterializedView) []Instruction {
+func diffMaterializedViewIndexes(targetView *PostgresMaterializedView, sourceView *PostgresMaterializedView) []Instruction {
 	var instructions []Instruction
 
-	for _, sourceIndex := range sourceView.Indexes {
-		targetIndex, found := targetView.IndexByName(sourceIndex.Name)
+	for _, targetIndex := range targetView.Indexes {
+		sourceIndex, found := sourceView.IndexByName(targetIndex.Name)
 		if !found {
-			instructions = append(instructions, sourceIndex.CreateInstruction())
+			instructions = append(instructions, targetIndex.CreateInstruction())
 			continue
 		}
 
-		if sourceIndex.Def != targetIndex.Def {
+		if targetIndex.Def != sourceIndex.Def {
 			instructions = append(instructions,
-				&SQLDropIndexInstruction{Name: targetIndex.Name},
-				sourceIndex.CreateInstruction())
+				&SQLDropIndexInstruction{Name: sourceIndex.Name},
+				targetIndex.CreateInstruction())
 		}
 	}
 
-	for _, targetIndex := range targetView.Indexes {
-		_, found := sourceView.IndexByName(targetIndex.Name)
+	for _, sourceIndex := range sourceView.Indexes {
+		_, found := targetView.IndexByName(sourceIndex.Name)
 		if !found {
-			instructions = append(instructions, &SQLDropIndexInstruction{Name: targetIndex.Name})
+			instructions = append(instructions, &SQLDropIndexInstruction{Name: sourceIndex.Name})
 		}
 	}
 
@@ -1115,8 +1108,8 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 }
 
 func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*PostgresFunction, error) {
-	// The regexp_replace call removes the schema prefix of the header. The source schema
-	// and the target schema hold a different name, and the diff compares the two texts.
+	// The regexp_replace call removes the schema prefix of the header. The target schema
+	// and the source schema hold a different name, and the diff compares the two texts.
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			p.proname,
@@ -1164,10 +1157,6 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 	return functions, nil
 }
 
-// GetTableRules returns the rules of one table. pg_rules writes the name of the schema
-// into the definition, so the query removes the prefix of the current schema. Without that
-// step the statement builds the rule in the source schema.
-//
 // pg_rules reports no _RETURN rule, which is the implicit rule of a view.
 func (d *PostgresDriver) GetTableRules(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresRule, error) {
 	rows, err := db.QueryContext(ctx, `
@@ -1215,37 +1204,37 @@ func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*SectionDiff, erro
 	var additions []Instruction
 	var removals []Instruction
 
-	sourceStatistics, err := d.GetStatistics(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetStatistics, err := d.GetStatistics(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceObject := range sourceStatistics {
-		targetObject, found := lo.Find(targetStatistics, func(object *PostgresStatistics) bool {
-			return object.Name == sourceObject.Name
-		})
-		if !found {
-			additions = append(additions, sourceObject.CreateInstruction())
-			continue
-		}
-
-		if sourceObject.Def != targetObject.Def {
-			additions = append(additions,
-				targetObject.DropInstruction(), sourceObject.CreateInstruction())
-		}
+	sourceStatistics, err := d.GetStatistics(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, targetObject := range targetStatistics {
-		_, found := lo.Find(sourceStatistics, func(object *PostgresStatistics) bool {
+		sourceObject, found := lo.Find(sourceStatistics, func(object *PostgresStatistics) bool {
 			return object.Name == targetObject.Name
 		})
 		if !found {
-			removals = append(removals, targetObject.DropInstruction())
+			additions = append(additions, targetObject.CreateInstruction())
+			continue
+		}
+
+		if targetObject.Def != sourceObject.Def {
+			additions = append(additions,
+				sourceObject.DropInstruction(), targetObject.CreateInstruction())
+		}
+	}
+
+	for _, sourceObject := range sourceStatistics {
+		_, found := lo.Find(targetStatistics, func(object *PostgresStatistics) bool {
+			return object.Name == sourceObject.Name
+		})
+		if !found {
+			removals = append(removals, sourceObject.DropInstruction())
 		}
 	}
 
@@ -1255,9 +1244,6 @@ func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*SectionDiff, erro
 	}, nil
 }
 
-// pg_get_statisticsobjdef writes the name of the schema, so the query removes the prefix of
-// the current schema. Without that step the statement builds the object in the source
-// schema.
 func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*PostgresStatistics, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT
@@ -1310,30 +1296,25 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 
 	var additions []Instruction
 
-	sourceOwners, err := d.GetOwners(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
 	targetOwners, err := d.GetOwners(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceOwner := range sourceOwners {
-		targetOwner, found := lo.Find(targetOwners, func(owner *PostgresOwner) bool {
-			return owner.ObjectName == sourceOwner.ObjectName
+	sourceOwners, err := d.GetOwners(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, targetOwner := range targetOwners {
+		sourceOwner, found := lo.Find(sourceOwners, func(owner *PostgresOwner) bool {
+			return owner.ObjectName == targetOwner.ObjectName
 		})
-		if found && targetOwner.Owner == sourceOwner.Owner {
+		if found && sourceOwner.Owner == targetOwner.Owner {
 			continue
 		}
 
-		additions = append(additions, sourceOwner.SetInstruction())
-	}
-
-	sourcePrivileges, err := d.GetPrivileges(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
+		additions = append(additions, targetOwner.SetInstruction())
 	}
 
 	targetPrivileges, err := d.GetPrivileges(ctx, d.TargetDatabaseConnection)
@@ -1341,35 +1322,40 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		return nil, err
 	}
 
-	for _, sourcePrivilege := range sourcePrivileges {
-		targetPrivilege, found := lo.Find(targetPrivileges, func(privilege *PostgresPrivilege) bool {
-			return privilege.Key() == sourcePrivilege.Key()
-		})
-		if !found {
-			additions = append(additions,
-				sourcePrivilege.GrantInstruction(sourcePrivilege.Privileges))
-
-			continue
-		}
-
-		granted := missingPrivileges(sourcePrivilege.Privileges, targetPrivilege.Privileges)
-		if len(granted) > 0 {
-			additions = append(additions, sourcePrivilege.GrantInstruction(granted))
-		}
-
-		revoked := missingPrivileges(targetPrivilege.Privileges, sourcePrivilege.Privileges)
-		if len(revoked) > 0 {
-			additions = append(additions, sourcePrivilege.RevokeInstruction(revoked))
-		}
+	sourcePrivileges, err := d.GetPrivileges(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, targetPrivilege := range targetPrivileges {
-		_, found := lo.Find(sourcePrivileges, func(privilege *PostgresPrivilege) bool {
+		sourcePrivilege, found := lo.Find(sourcePrivileges, func(privilege *PostgresPrivilege) bool {
 			return privilege.Key() == targetPrivilege.Key()
 		})
 		if !found {
 			additions = append(additions,
-				targetPrivilege.RevokeInstruction(targetPrivilege.Privileges))
+				targetPrivilege.GrantInstruction(targetPrivilege.Privileges))
+
+			continue
+		}
+
+		granted := missingPrivileges(targetPrivilege.Privileges, sourcePrivilege.Privileges)
+		if len(granted) > 0 {
+			additions = append(additions, targetPrivilege.GrantInstruction(granted))
+		}
+
+		revoked := missingPrivileges(sourcePrivilege.Privileges, targetPrivilege.Privileges)
+		if len(revoked) > 0 {
+			additions = append(additions, targetPrivilege.RevokeInstruction(revoked))
+		}
+	}
+
+	for _, sourcePrivilege := range sourcePrivileges {
+		_, found := lo.Find(targetPrivileges, func(privilege *PostgresPrivilege) bool {
+			return privilege.Key() == sourcePrivilege.Key()
+		})
+		if !found {
+			additions = append(additions,
+				sourcePrivilege.RevokeInstruction(sourcePrivilege.Privileges))
 		}
 	}
 
@@ -1387,8 +1373,9 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 			SELECT 1 FROM pg_depend d
 			WHERE d.objid = c.oid AND d.deptype IN ('e', 'a', 'i')
 		)
+		AND c.relname <> $1
 		ORDER BY c.relname
-	`)
+	`, MigrationHistoryTableName)
 	if err != nil {
 		return nil, err
 	}
@@ -1420,8 +1407,7 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 	return owners, nil
 }
 
-// This method reads no privilege of the owner, because PostgreSQL gives those with the
-// object.
+// PostgreSQL gives the privileges of the owner with the object.
 func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT
@@ -1438,9 +1424,10 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 			SELECT 1 FROM pg_depend d
 			WHERE d.objid = c.oid AND d.deptype IN ('e', 'a', 'i')
 		)
+		AND c.relname <> $1
 		GROUP BY c.relname, c.relkind, acl.grantee
 		ORDER BY c.relname, pg_get_userbyid(acl.grantee)
-	`)
+	`, MigrationHistoryTableName)
 	if err != nil {
 		return nil, err
 	}
@@ -1515,8 +1502,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 	return sortViewsByDependency(views), nil
 }
 
-// sortViewsByDependency orders the views so that a view comes after every view that it
-// reads. Two independent views keep the order that the query gives.
+// Two independent views keep the order that the query gives.
 func sortViewsByDependency(views []*PostgresView) []*PostgresView {
 	viewByName := make(map[string]*PostgresView, len(views))
 
@@ -1602,12 +1588,8 @@ func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewNam
 	return columns, nil
 }
 
-// GetTables returns each table of the schema. relkind names a partitioned table with the
-// value p, and relispartition names a partition. The query reads the key of a partitioned
-// table and the bound of a partition, because information_schema reports neither.
-//
-// relreplident names the mode of the replica identity. The mode i names an index, and
-// pg_index reports that index with the flag indisreplident.
+// information_schema reports no partition key, no partition bound, and no replica
+// identity, so the query reads pg_class.
 //
 // pg_inherits names the parent of a partition and the parent of a table of INHERITS, so
 // relispartition separates the two. Without that test a table of INHERITS takes the
@@ -1655,8 +1637,9 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 			SELECT 1 FROM pg_depend d
 			WHERE d.objid = c.oid AND d.deptype = 'e'
 		)
+		AND c.relname <> $1
 		ORDER BY c.relname
-	`)
+	`, MigrationHistoryTableName)
 	if err != nil {
 		return nil, err
 	}
@@ -1721,29 +1704,18 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*PostgresTable, error) {
 	table := &PostgresTable{Name: tableName}
 
-	// information_schema.columns gives the text ARRAY for an array column, and the text
-	// USER-DEFINED for an enum column or a composite column. format_type gives the exact
-	// type name, for example integer[]. It also adds a prefix to a type of another schema,
-	// so the query removes the prefix of the current schema.
+	// format_type gives the exact type name, because information_schema.columns gives ARRAY
+	// for an array column and USER-DEFINED for an enum column. The query removes the prefix
+	// of the current schema from that name.
 	//
-	// The sequence of an identity column holds the options of that column. The query builds
-	// the text of the options that differ from the default of the type, so a column that
-	// keeps every default reads an empty text.
+	// pg_attrdef holds the expression of a stored generated column, and it holds the default
+	// value of every other column. The CASE expressions separate the two, because PostgreSQL
+	// refuses a DEFAULT expression that reads another column.
 	//
-	// pg_attrdef holds the expression of a stored generated column, and it holds the
-	// default value of every other column. The two CASE expressions separate the two, so
-	// a generated column never becomes a column with a default value. PostgreSQL refuses
-	// a DEFAULT expression that reads another column.
-	//
-	// attstorage names the storage mode of the column, and typstorage names the mode that
-	// a CREATE TABLE statement gives. The query gives an empty text when the two are equal,
-	// because such a column needs no statement of the mode.
-	//
-	// attstattarget holds the statistics target. PostgreSQL 16 writes -1 for the default
-	// target, and PostgreSQL 17 writes NULL. The CASE expression gives NULL for both.
-	//
-	// GetSequences excludes the sequence that a serial column owns, so the word of that
-	// column builds it again.
+	// An empty text of the identity options, of the storage mode, or of the statistics source
+	// names a column that keeps the default of its type. PostgreSQL 16 writes -1 for the
+	// default statistics source, and PostgreSQL 17 writes NULL. GetSequences excludes the
+	// sequence of a serial column, so the word of that column builds it again.
 	columnRows, err := db.QueryContext(ctx, `
 			SELECT
 				a.attname,
@@ -1806,7 +1778,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 			AND a.attnum > 0
 			AND NOT a.attisdropped
 			ORDER BY a.attnum
-		`, quoteIdentifier(tableName))
+		`, QuoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
 	}
@@ -1854,6 +1826,9 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
+	// PostgreSQL 18 keeps the NOT NULL flag of a column in pg_constraint too, and the column
+	// holds that flag already. Without this filter a renamed column names one flag with two
+	// names, and the ADD statement fails, because a column holds one not-null constraint only.
 	constraintRows, err := db.QueryContext(ctx, `
 			SELECT
 				conname,
@@ -1862,8 +1837,9 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				coalesce((SELECT relname FROM pg_class WHERE oid = confrelid), '')
 			FROM pg_constraint
 			WHERE conrelid = $1::regclass
+			AND contype <> 'n'
 			ORDER BY conname
-		`, quoteIdentifier(tableName))
+		`, QuoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
 	}
@@ -1893,10 +1869,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	// The regexp_replace call removes the schema prefix of the table. Without it the
-	// statement builds the index in the source schema. It removes the keyword ONLY too.
-	// PostgreSQL writes that keyword for the index of a partitioned table, and a statement
-	// that holds it builds no index on the partitions.
+	// The query removes the keyword ONLY. PostgreSQL writes it for the index of a partitioned
+	// table, and a statement that holds it builds no index on the partitions.
 	indexRows, err := db.QueryContext(ctx, `
 			SELECT
 				indexname,
@@ -1917,7 +1891,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				WHERE child.relname = pg_indexes.indexname
 				AND child.relnamespace = current_schema()::regnamespace
 			)
-		`, tableName, quoteIdentifier(tableName))
+		`, tableName, QuoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
 	}
@@ -1940,11 +1914,8 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 		return nil, err
 	}
 
-	// The regexp_replace call removes the schema prefix of the table. Without it the
-	// statement builds the trigger on the table of the source schema.
-	//
-	// pg_get_triggerdef writes no mode, so the query reads tgenabled apart. The value O
-	// names the mode of every new trigger.
+	// pg_get_triggerdef writes no mode, so the query reads tgenabled apart. The value O names
+	// the mode of every new trigger.
 	triggerRows, err := db.QueryContext(ctx, `
 			SELECT
 				tgname,
@@ -1962,7 +1933,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 				END
 			FROM pg_trigger
 			WHERE tgrelid = $1::regclass AND tgisinternal = false
-		`, quoteIdentifier(tableName))
+		`, QuoteIdentifier(tableName))
 	if err != nil {
 		return nil, err
 	}

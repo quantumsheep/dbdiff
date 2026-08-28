@@ -1,11 +1,8 @@
 package drivers
 
-// A SQLiteCheckConstraint is a CHECK constraint of a table. No PRAGMA statement reports it,
-// so parseTableDefinition reads it from the CREATE TABLE statement.
+// No PRAGMA reports a check, so parseTableDefinition reads it from the CREATE TABLE.
 type SQLiteCheckConstraint struct {
-	Name string
-
-	// Expression holds the check, with the enclosing parentheses.
+	Name       string
 	Expression string
 }
 
@@ -17,12 +14,10 @@ func (c *SQLiteCheckConstraint) Clause() string {
 	return constraintNameClause(c.Name) + "CHECK " + c.Expression
 }
 
-// constraintNameClause returns the CONSTRAINT keyword and the name, with a trailing space.
-// An empty name gives an empty text.
 func constraintNameClause(name string) string {
 	if name == "" {
 		return ""
 	}
 
-	return "CONSTRAINT " + quoteIdentifier(name) + " "
+	return "CONSTRAINT " + QuoteIdentifier(name) + " "
 }

@@ -1,7 +1,7 @@
 package drivers
 
-// A PostgresViewColumn is one column that a view reads. The diff compares these columns,
-// because a type change of such a column keeps the definition text of the view equal.
+// A type change of a column keeps the definition text of the view equal, so the diff
+// compares the columns too.
 type PostgresViewColumn struct {
 	Table  string
 	Column string
@@ -13,8 +13,7 @@ type PostgresView struct {
 	Def     string
 	Columns []*PostgresViewColumn
 
-	// CheckOption holds LOCAL or CASCADED. The query text of the view holds none of it, so
-	// the diff compares this field beside the text.
+	// The query text of the view holds no check option, so the diff compares this field too.
 	CheckOption string
 }
 

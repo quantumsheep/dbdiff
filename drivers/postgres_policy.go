@@ -2,8 +2,8 @@ package drivers
 
 import "slices"
 
-// A PostgresPolicy is one row level security policy of a table. PostgreSQL holds no action
-// that changes a policy, so the diff prints a DROP statement and a CREATE statement.
+// PostgreSQL holds no action that changes a policy, so the diff prints a DROP statement
+// and a CREATE statement.
 type PostgresPolicy struct {
 	Name       string
 	Table      string

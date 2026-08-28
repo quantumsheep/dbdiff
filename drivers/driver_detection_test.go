@@ -10,56 +10,56 @@ import (
 
 func TestDetectDriver(t *testing.T) {
 	t.Run("SQLiteConnectionURL", func(t *testing.T) {
-		name, err := DetectDriver("sqlite://source.db", "sqlite://target.db")
+		name, err := DetectDriver("sqlite://target.db", "sqlite://source.db")
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("PostgresConnectionURL", func(t *testing.T) {
-		name, err := DetectDriver("postgres://user@localhost/source", "postgresql://user@localhost/target")
+		name, err := DetectDriver("postgres://user@localhost/target", "postgresql://user@localhost/source")
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("PostgresKeywordString", func(t *testing.T) {
-		name, err := DetectDriver("host=localhost user=app dbname=source", "host=localhost user=app dbname=target")
+		name, err := DetectDriver("host=localhost user=app dbname=target", "host=localhost user=app dbname=source")
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("DatabaseFilePath", func(t *testing.T) {
-		name, err := DetectDriver("source.db", "./target.sqlite")
+		name, err := DetectDriver("target.db", "./source.sqlite")
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("SQLFileAgainstDatabase", func(t *testing.T) {
-		sourcePath := writeDetectionSQLFile(t, "schema.sql")
+		targetPath := writeDetectionSQLFile(t, "schema.sql")
 
-		name, err := DetectDriver(sourcePath, "postgres://user@localhost/target")
+		name, err := DetectDriver(targetPath, "postgres://user@localhost/source")
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("DatabaseAgainstSQLFile", func(t *testing.T) {
-		targetPath := writeDetectionSQLFile(t, "schema.sql")
+		sourcePath := writeDetectionSQLFile(t, "schema.sql")
 
-		name, err := DetectDriver("target.db", targetPath)
+		name, err := DetectDriver("source.db", sourcePath)
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("TwoSQLFiles", func(t *testing.T) {
-		sourcePath := writeDetectionSQLFile(t, "source.sql")
 		targetPath := writeDetectionSQLFile(t, "target.sql")
+		sourcePath := writeDetectionSQLFile(t, "source.sql")
 
-		_, err := DetectDriver(sourcePath, targetPath)
+		_, err := DetectDriver(targetPath, sourcePath)
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "cannot detect the driver")
@@ -74,14 +74,14 @@ func TestDetectDriver(t *testing.T) {
 	})
 
 	t.Run("UnknownScheme", func(t *testing.T) {
-		_, err := DetectDriver("mysql://user@localhost/source", "mysql://user@localhost/target")
+		_, err := DetectDriver("mysql://user@localhost/target", "mysql://user@localhost/source")
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "cannot detect the driver")
 	})
 
 	t.Run("TwoDifferentEngines", func(t *testing.T) {
-		_, err := DetectDriver("sqlite://source.db", "postgres://user@localhost/target")
+		_, err := DetectDriver("sqlite://target.db", "postgres://user@localhost/source")
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "names the sqlite3 driver")

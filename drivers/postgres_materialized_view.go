@@ -1,7 +1,7 @@
 package drivers
 
-// A PostgresMaterializedView holds a query and the rows of that query. It reads a table, a
-// view, or a second materialized view, so the diff keeps the order of the dependency.
+// A materialized view reads a table, a view, or a second materialized view, so the diff
+// keeps the order of the dependency.
 type PostgresMaterializedView struct {
 	Name    string
 	Def     string
@@ -54,7 +54,6 @@ func (v *PostgresMaterializedView) IndexByName(name string) (*PostgresIndex, boo
 	return nil, false
 }
 
-// Two independent views keep the order that the query gives.
 func sortMaterializedViewsByDependency(views []*PostgresMaterializedView) []*PostgresMaterializedView {
 	viewByName := make(map[string]*PostgresMaterializedView, len(views))
 

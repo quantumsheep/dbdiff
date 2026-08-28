@@ -11,7 +11,7 @@ type PostgresCreateExtensionInstruction struct {
 }
 
 func (i *PostgresCreateExtensionInstruction) String() string {
-	return "CREATE EXTENSION " + quoteIdentifier(i.Name) + ";"
+	return "CREATE EXTENSION " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *PostgresCreateExtensionInstruction) Comment() string {
@@ -25,7 +25,7 @@ type PostgresAlterExtensionInstruction struct {
 
 func (i *PostgresAlterExtensionInstruction) String() string {
 	return fmt.Sprintf("ALTER EXTENSION %s UPDATE TO %s;",
-		quoteIdentifier(i.Name), quoteLiteral(i.NewVersion))
+		QuoteIdentifier(i.Name), quoteLiteral(i.NewVersion))
 }
 
 func (i *PostgresAlterExtensionInstruction) Comment() string {
@@ -37,7 +37,7 @@ type PostgresDropExtensionInstruction struct {
 }
 
 func (i *PostgresDropExtensionInstruction) String() string {
-	return "DROP EXTENSION " + quoteIdentifier(i.Name) + ";"
+	return "DROP EXTENSION " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *PostgresDropExtensionInstruction) Comment() string {
@@ -65,7 +65,7 @@ type PostgresCreateSequenceInstruction struct {
 func (i *PostgresCreateSequenceInstruction) String() string {
 	return fmt.Sprintf(
 		"CREATE SEQUENCE %s AS %s INCREMENT BY %d MINVALUE %d MAXVALUE %d START WITH %d %s;",
-		quoteIdentifier(i.Name),
+		QuoteIdentifier(i.Name),
 		i.DataType,
 		i.Increment,
 		i.Min,
@@ -79,8 +79,6 @@ func (i *PostgresCreateSequenceInstruction) Comment() string {
 	return objectComment("Create", "sequence", i.Name)
 }
 
-// One statement holds every clause that changes. Separate statements can fail, because a
-// new minimum above the current value is invalid.
 type PostgresAlterSequenceInstruction struct {
 	Name      string
 	DataType  sql.NullString
@@ -124,7 +122,7 @@ func (i *PostgresAlterSequenceInstruction) String() string {
 	}
 
 	return fmt.Sprintf("ALTER SEQUENCE %s %s;",
-		quoteIdentifier(i.Name), strings.Join(clauses, " "))
+		QuoteIdentifier(i.Name), strings.Join(clauses, " "))
 }
 
 func (i *PostgresAlterSequenceInstruction) Comment() string {
@@ -136,7 +134,7 @@ type PostgresDropSequenceInstruction struct {
 }
 
 func (i *PostgresDropSequenceInstruction) String() string {
-	return "DROP SEQUENCE " + quoteIdentifier(i.Name) + ";"
+	return "DROP SEQUENCE " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *PostgresDropSequenceInstruction) Comment() string {
@@ -160,7 +158,7 @@ type PostgresDropStatisticsInstruction struct {
 }
 
 func (i *PostgresDropStatisticsInstruction) String() string {
-	return "DROP STATISTICS " + quoteIdentifier(i.Name) + ";"
+	return "DROP STATISTICS " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *PostgresDropStatisticsInstruction) Comment() string {
@@ -177,7 +175,7 @@ type PostgresGrantInstruction struct {
 func (i *PostgresGrantInstruction) String() string {
 	return fmt.Sprintf("GRANT %s ON %s %s TO %s;",
 		joinPrivileges(i.Privileges), i.ObjectType,
-		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
+		QuoteIdentifier(i.ObjectName), QuoteIdentifier(i.Grantee))
 }
 
 func (i *PostgresGrantInstruction) Comment() string {
@@ -194,7 +192,7 @@ type PostgresRevokeInstruction struct {
 func (i *PostgresRevokeInstruction) String() string {
 	return fmt.Sprintf("REVOKE %s ON %s %s FROM %s;",
 		joinPrivileges(i.Privileges), i.ObjectType,
-		quoteIdentifier(i.ObjectName), quoteIdentifier(i.Grantee))
+		QuoteIdentifier(i.ObjectName), QuoteIdentifier(i.Grantee))
 }
 
 func (i *PostgresRevokeInstruction) Comment() string {
@@ -209,7 +207,7 @@ type PostgresSetOwnerInstruction struct {
 
 func (i *PostgresSetOwnerInstruction) String() string {
 	return fmt.Sprintf("ALTER %s %s OWNER TO %s;",
-		i.ObjectType, quoteIdentifier(i.ObjectName), quoteIdentifier(i.Owner))
+		i.ObjectType, QuoteIdentifier(i.ObjectName), QuoteIdentifier(i.Owner))
 }
 
 func (i *PostgresSetOwnerInstruction) Comment() string {

@@ -1,10 +1,8 @@
 package drivers
 
 type PostgresTrigger struct {
-	Name string
-	Def  string
-
-	// PostgreSQL builds every trigger with the mode ENABLE.
+	Name       string
+	Def        string
 	EnableMode string
 }
 

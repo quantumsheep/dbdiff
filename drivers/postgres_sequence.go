@@ -28,10 +28,9 @@ func (s *PostgresSequence) CreateInstruction() *PostgresCreateSequenceInstructio
 	}
 }
 
-// Diff returns one ALTER SEQUENCE instruction with every attribute that changes. Separate
-// statements can fail, because a new minimum above the current value is invalid. A RESTART
-// WITH clause comes only when the current value falls outside the new range, because a
-// restart changes data.
+// Separate statements can fail, because a new minimum above the current value is invalid.
+// A restart changes data, so the RESTART WITH clause comes only when the current value
+// falls outside the new range.
 func (s *PostgresSequence) Diff(other *PostgresSequence) []Instruction {
 	instruction := &PostgresAlterSequenceInstruction{Name: s.Name}
 

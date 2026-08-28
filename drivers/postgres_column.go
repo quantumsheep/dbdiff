@@ -44,7 +44,7 @@ func (c *PostgresColumn) StorageInstructions(tableName string) []Instruction {
 	}}
 }
 
-// A column definition accepts no statistics target, so a separate statement holds it. The
+// A column definition accepts no statistics source, so a separate statement holds it. The
 func (c *PostgresColumn) StatisticsInstructions(tableName string) []Instruction {
 	if !c.StatisticsTarget.Valid {
 		return nil
@@ -54,7 +54,7 @@ func (c *PostgresColumn) StatisticsInstructions(tableName string) []Instruction 
 		Name: tableName,
 		Actions: []AlterTableAction{&PostgresSetStatisticsAction{
 			ColumnName: c.Name,
-			Target:     c.StatisticsTarget.Int64,
+			Source:     c.StatisticsTarget.Int64,
 		}},
 	}}
 }
@@ -77,10 +77,10 @@ func (c *PostgresColumn) Definition() string {
 		dataType = c.Serial
 	}
 
-	value := fmt.Sprintf("%s %s", quoteIdentifier(c.Name), dataType)
+	value := fmt.Sprintf("%s %s", QuoteIdentifier(c.Name), dataType)
 
 	if c.Collation != "" {
-		value += " COLLATE " + quoteIdentifier(c.Collation)
+		value += " COLLATE " + QuoteIdentifier(c.Collation)
 	}
 
 	if c.NotNull {

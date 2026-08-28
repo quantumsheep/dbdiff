@@ -9,8 +9,7 @@ type SQLiteIndex struct {
 	Table string
 	Name  string
 
-	// Keys holds the SQL text of each key part. A key that a column builds holds the quoted
-	// name of the column. A key that an expression builds holds the text of the expression.
+	// A key holds the SQL text of one key part, so an expression key keeps its text.
 	Keys  []string
 	Where string
 
@@ -150,7 +149,6 @@ func indexOfKeyList(definition string) int {
 	return -1
 }
 
-// The text starts after the parenthesis that closes the key list.
 func parseIndexCondition(text string) string {
 	const whereKeyword = "WHERE"
 

@@ -25,13 +25,6 @@ func (d *TestingSQLiteDriver) Close() error {
 	return d.SQLiteDriver.Close()
 }
 
-func (d *TestingSQLiteDriver) ExecOnSource(sqlStatements string) {
-	d.tb.Helper()
-
-	_, err := d.SourceDatabaseConnection.Exec(sqlStatements)
-	require.NoError(d.tb, err)
-}
-
 func (d *TestingSQLiteDriver) ExecOnTarget(sqlStatements string) {
 	d.tb.Helper()
 
@@ -39,8 +32,13 @@ func (d *TestingSQLiteDriver) ExecOnTarget(sqlStatements string) {
 	require.NoError(d.tb, err)
 }
 
-// The SQL text of each kind belongs to instruction_test.go, so this method compares no
-// text. It returns the rendered diff, so the caller applies it to the target.
+func (d *TestingSQLiteDriver) ExecOnSource(sqlStatements string) {
+	d.tb.Helper()
+
+	_, err := d.SourceDatabaseConnection.Exec(sqlStatements)
+	require.NoError(d.tb, err)
+}
+
 func (d *TestingSQLiteDriver) RequireInstructions(expected []Instruction) string {
 	d.tb.Helper()
 
@@ -51,13 +49,13 @@ func (d *TestingSQLiteDriver) RequireInstructions(expected []Instruction) string
 	return RenderInstructions(instructions)
 }
 
-func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules string) []map[string]any {
+func (d *TestingSQLiteDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 
-	columns, err := d.GetTableColumns(d.tb.Context(), d.TargetDatabaseConnection, table)
+	columns, err := d.GetTableColumns(d.tb.Context(), d.SourceDatabaseConnection, table)
 	require.NoError(d.tb, err)
 
-	rows, err := d.TargetDatabaseConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))
+	rows, err := d.SourceDatabaseConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))
 	require.NoError(d.tb, err)
 
 	var results []map[string]any
@@ -90,18 +88,18 @@ func (d *TestingSQLiteDriver) FetchAllFromTarget(table string, additionalRules s
 func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 	tb.Helper()
 
-	sourceDatabasePath := filepath.Join(tb.TempDir(), "source.sqlite")
 	targetDatabasePath := filepath.Join(tb.TempDir(), "target.sqlite")
+	sourceDatabasePath := filepath.Join(tb.TempDir(), "source.sqlite")
 
-	return NewTestSQLiteDriverWithPaths(tb, sourceDatabasePath, targetDatabasePath)
+	return NewTestSQLiteDriverWithPaths(tb, targetDatabasePath, sourceDatabasePath)
 }
 
-func NewTestSQLiteDriverWithPaths(tb testing.TB, sourcePath string, targetPath string) *TestingSQLiteDriver {
+func NewTestSQLiteDriverWithPaths(tb testing.TB, targetPath string, sourcePath string) *TestingSQLiteDriver {
 	tb.Helper()
 
 	driver, err := NewSQLiteDriver(tb.Context(), &SQLLiteDriverConfig{
-		SourceDatabasePath: sourcePath,
 		TargetDatabasePath: targetPath,
+		SourceDatabasePath: sourcePath,
 	})
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
@@ -127,8 +125,6 @@ func WriteSQLFile(tb testing.TB, directory string, name string, content string) 
 
 var errRowIteration = errors.New("row iteration failed")
 
-// failingRows yields a fixed set of rows, then fails. It simulates a connection that
-// breaks in the middle of a read.
 type failingRows struct {
 	columns  []string
 	rows     [][]driver.Value
@@ -180,9 +176,7 @@ type failingConn struct {
 	rows    [][]driver.Value
 }
 
-// GetTableColumns reads the definition of the table first, and it reads PRAGMA table_xinfo
-// second. The definition query answers with one row, so the failure of Next belongs to the
-// PRAGMA alone.
+// The definition query answers with one row, so the failure of Next belongs to the PRAGMA.
 func (c *failingConn) Prepare(query string) (driver.Stmt, error) {
 	if strings.Contains(query, "sqlite_master") {
 		return &failingStmt{
@@ -233,7 +227,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -259,7 +253,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("AddColumn", func(t *testing.T) {
@@ -268,20 +262,19 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				name TEXT NOT NULL,
-				email TEXT
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				email TEXT
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "users",
@@ -294,8 +287,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice", "email": nil},
@@ -309,13 +302,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				name TEXT NOT NULL
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
 				email TEXT
 			);
@@ -323,6 +309,12 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "users",
@@ -332,8 +324,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice"},
@@ -347,19 +339,18 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				full_name TEXT NOT NULL
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				full_name TEXT NOT NULL
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "users",
@@ -370,8 +361,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "full_name": "Alice"},
@@ -385,19 +376,18 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				first_name TEXT,
-				last_name TEXT
+				name_a TEXT,
+				name_b TEXT
 			);
 		`)
 
 		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				name_a TEXT,
-				name_b TEXT
+				first_name TEXT,
+				last_name TEXT
 			);
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name:   "users",
@@ -427,7 +417,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("RenameColumnTakesOneCandidateOnly", func(t *testing.T) {
@@ -436,20 +426,19 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				first_name TEXT,
-				last_name TEXT
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				name_a TEXT
 			);
 
 			INSERT INTO users (id, name_a) VALUES (1, 'Alice');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				first_name TEXT,
+				last_name TEXT
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "users",
@@ -469,8 +458,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "first_name": "Alice", "last_name": nil},
@@ -483,14 +472,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				x TEXT,
-				y INTEGER
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				a TEXT,
 				b INTEGER
 			);
@@ -498,6 +479,13 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, a, b) VALUES (1, 'Alice', 30);
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				x TEXT,
+				y INTEGER
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "users",
@@ -515,8 +503,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "x": "Alice", "y": int64(30)},
@@ -530,20 +518,19 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
-				age INTEGER
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
-				name TEXT NOT NULL,
 				age TEXT
 			);
 
 			INSERT INTO users (id, name, age) VALUES (1, 'Alice', '30'), (2, 'Bob', '25');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				age INTEGER
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -578,8 +565,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice", "age": int64(30)},
@@ -593,19 +580,18 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				name TEXT NOT NULL
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				name TEXT
 			);
 
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -636,8 +622,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice"},
@@ -651,19 +637,18 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				name TEXT
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
 
 			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -693,9 +678,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice"},
@@ -706,7 +691,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateTableWithGeneratedColumns", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE measures (
 				value INTEGER,
 				stored_double INTEGER GENERATED ALWAYS AS (value * 2) STORED,
@@ -738,10 +723,10 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		driver.ExecOnTarget(`INSERT INTO measures (value) VALUES (4);`)
+		driver.ExecOnSource(diff)
+		driver.ExecOnSource(`INSERT INTO measures (value) VALUES (4);`)
 
-		rows := driver.FetchAllFromTarget("measures", "")
+		rows := driver.FetchAllFromSource("measures", "")
 		require.Equal(t, []map[string]any{
 			{
 				"value":          int64(4),
@@ -755,17 +740,16 @@ func TestSQLiteDriver(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
 		driver.ExecOnSource(`
+			CREATE TABLE measures (value INTEGER);
+			INSERT INTO measures (value) VALUES (2);
+		`)
+
+		driver.ExecOnTarget(`
 			CREATE TABLE measures (
 				value INTEGER,
 				triple INTEGER GENERATED ALWAYS AS (value * 3) VIRTUAL
 			);
 		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE measures (value INTEGER);
-			INSERT INTO measures (value) VALUES (2);
-		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "measures",
@@ -779,9 +763,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("measures", "")
+		rows := driver.FetchAllFromSource("measures", "")
 		require.Equal(t, []map[string]any{
 			{
 				"value":  int64(2),
@@ -794,17 +778,16 @@ func TestSQLiteDriver(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
 		driver.ExecOnSource(`
+			CREATE TABLE measures (value INTEGER);
+			INSERT INTO measures (value) VALUES (3);
+		`)
+
+		driver.ExecOnTarget(`
 			CREATE TABLE measures (
 				value INTEGER,
 				double INTEGER GENERATED ALWAYS AS (value * 2) STORED
 			);
 		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE measures (value INTEGER);
-			INSERT INTO measures (value) VALUES (3);
-		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -835,9 +818,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("measures", "")
+		rows := driver.FetchAllFromSource("measures", "")
 		require.Equal(t, []map[string]any{
 			{
 				"value":  int64(3),
@@ -851,14 +834,6 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(`
 			CREATE TABLE measures (
-				label TEXT,
-				value INTEGER,
-				double INTEGER GENERATED ALWAYS AS (value * 2) STORED
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE measures (
 				label INTEGER,
 				value INTEGER,
 				double INTEGER GENERATED ALWAYS AS (value * 2) STORED
@@ -867,6 +842,13 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO measures (label, value) VALUES (7, 5);
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE measures (
+				label TEXT,
+				value INTEGER,
+				double INTEGER GENERATED ALWAYS AS (value * 2) STORED
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -901,9 +883,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("measures", "")
+		rows := driver.FetchAllFromSource("measures", "")
 		require.Equal(t, []map[string]any{
 			{
 				"label":  "7",
@@ -919,19 +901,18 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE measures (
 				value INTEGER,
-				multiple INTEGER GENERATED ALWAYS AS (value * 5) STORED
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE measures (
-				value INTEGER,
 				multiple INTEGER GENERATED ALWAYS AS (value * 2) STORED
 			);
 
 			INSERT INTO measures (value) VALUES (3);
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE measures (
+				value INTEGER,
+				multiple INTEGER GENERATED ALWAYS AS (value * 5) STORED
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -962,9 +943,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("measures", "")
+		rows := driver.FetchAllFromSource("measures", "")
 		require.Equal(t, []map[string]any{
 			{
 				"value":    int64(3),
@@ -976,7 +957,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateTableWithoutRowIDAndStrict", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE sessions (id TEXT PRIMARY KEY, token TEXT) WITHOUT ROWID, STRICT;
 		`)
 
@@ -1001,18 +982,17 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("AddStrictRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE events (id INTEGER, label TEXT) STRICT;`)
-		driver.ExecOnTarget(`
+		driver.ExecOnSource(`
 			CREATE TABLE events (id INTEGER, label TEXT);
 			INSERT INTO events (id, label) VALUES (1, 'start');
 		`)
-
+		driver.ExecOnTarget(`CREATE TABLE events (id INTEGER, label TEXT) STRICT;`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -1042,9 +1022,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("events", "")
+		rows := driver.FetchAllFromSource("events", "")
 		require.Equal(t, []map[string]any{
 			{
 				"id":    int64(1),
@@ -1056,7 +1036,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateTableWithAutoIncrement", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT);`)
+		driver.ExecOnTarget(`CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT);`)
 
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
@@ -1077,13 +1057,13 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreateTableWithCollationAndChecks", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE people (
 				name TEXT COLLATE NOCASE,
 				age INTEGER CHECK (age > 0),
@@ -1113,18 +1093,17 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyColumnCollationRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE people (name TEXT COLLATE NOCASE);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnSource(`
 			CREATE TABLE people (name TEXT);
 			INSERT INTO people (name) VALUES ('Ada');
 		`)
-
+		driver.ExecOnTarget(`CREATE TABLE people (name TEXT COLLATE NOCASE);`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -1150,9 +1129,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("people", "")
+		rows := driver.FetchAllFromSource("people", "")
 		require.Equal(t, []map[string]any{
 			{"name": "Ada"},
 		}, rows)
@@ -1162,14 +1141,13 @@ func TestSQLiteDriver(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
 		driver.ExecOnSource(`
-			CREATE TABLE people (name TEXT, CHECK (length(name) < 100));
-		`)
-
-		driver.ExecOnTarget(`
 			CREATE TABLE people (name TEXT);
 			INSERT INTO people (name) VALUES ('Ada');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE people (name TEXT, CHECK (length(name) < 100));
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -1197,9 +1175,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("people", "")
+		rows := driver.FetchAllFromSource("people", "")
 		require.Equal(t, []map[string]any{
 			{"name": "Ada"},
 		}, rows)
@@ -1208,7 +1186,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateTableWithANamedCheck", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE people (age INTEGER, CONSTRAINT age_is_positive CHECK (age > 0));
 		`)
 
@@ -1231,19 +1209,18 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreateIndexWithDirectionAndCollation", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnSource(`CREATE TABLE items (a INTEGER, b TEXT);`)
+
+		driver.ExecOnTarget(`
 			CREATE TABLE items (a INTEGER, b TEXT);
 			CREATE INDEX items_sorted ON items (a DESC, b COLLATE NOCASE ASC);
 		`)
-
-		driver.ExecOnTarget(`CREATE TABLE items (a INTEGER, b TEXT);`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateIndexInstruction{
 				Name:      "items_sorted",
@@ -1252,7 +1229,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyIndexDirection", func(t *testing.T) {
@@ -1260,14 +1237,13 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(`
 			CREATE TABLE items (a INTEGER);
-			CREATE INDEX items_sorted ON items (a DESC);
+			CREATE INDEX items_sorted ON items (a);
 		`)
 
 		driver.ExecOnTarget(`
 			CREATE TABLE items (a INTEGER);
-			CREATE INDEX items_sorted ON items (a);
+			CREATE INDEX items_sorted ON items (a DESC);
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropIndexInstruction{Name: "items_sorted"},
 			&SQLiteCreateIndexInstruction{
@@ -1277,7 +1253,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("IndexWithExplicitAscMatchesTheDefault", func(t *testing.T) {
@@ -1285,21 +1261,20 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(`
 			CREATE TABLE items (a INTEGER);
-			CREATE INDEX items_sorted ON items (a ASC);
+			CREATE INDEX items_sorted ON items (a);
 		`)
 
 		driver.ExecOnTarget(`
 			CREATE TABLE items (a INTEGER);
-			CREATE INDEX items_sorted ON items (a);
+			CREATE INDEX items_sorted ON items (a ASC);
 		`)
-
 		driver.RequireInstructions(nil)
 	})
 
 	t.Run("CreateTableWithConflictClauses", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE t (
 				id INTEGER PRIMARY KEY ON CONFLICT REPLACE,
 				v TEXT UNIQUE ON CONFLICT IGNORE,
@@ -1334,13 +1309,13 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreateTableWithATableConflictClause", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE u (a INTEGER, b INTEGER, UNIQUE (a, b) ON CONFLICT FAIL);
 		`)
 
@@ -1367,18 +1342,17 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyConflictClauseRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE t (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnSource(`
 			CREATE TABLE t (id INTEGER PRIMARY KEY);
 			INSERT INTO t (id) VALUES (1);
 		`)
-
+		driver.ExecOnTarget(`CREATE TABLE t (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -1405,9 +1379,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("t", "")
+		rows := driver.FetchAllFromSource("t", "")
 		require.Equal(t, []map[string]any{
 			{"id": int64(1)},
 		}, rows)
@@ -1416,7 +1390,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateTableWithADeferredForeignKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE parents (id INTEGER PRIMARY KEY);
 			CREATE TABLE children (
 				id INTEGER PRIMARY KEY,
@@ -1463,7 +1437,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyForeignKeyDeferrable", func(t *testing.T) {
@@ -1473,20 +1447,19 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE parents (id INTEGER PRIMARY KEY);
 			CREATE TABLE children (
 				id INTEGER PRIMARY KEY,
-				parent INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE parents (id INTEGER PRIMARY KEY);
-			CREATE TABLE children (
-				id INTEGER PRIMARY KEY,
 				parent INTEGER REFERENCES parents(id)
 			);
 			INSERT INTO parents (id) VALUES (1);
 			INSERT INTO children (id, parent) VALUES (1, 1);
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				Name: "_children_temp",
@@ -1525,9 +1498,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("children", "")
+		rows := driver.FetchAllFromSource("children", "")
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "parent": int64(1)},
 		}, rows)
@@ -1540,7 +1513,8 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE parents (id INTEGER PRIMARY KEY);
 			CREATE TABLE children (
 				id INTEGER PRIMARY KEY,
-				parent INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
+				parent INTEGER,
+				FOREIGN KEY ("parent") REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
 			);
 		`)
 
@@ -1548,18 +1522,16 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE parents (id INTEGER PRIMARY KEY);
 			CREATE TABLE children (
 				id INTEGER PRIMARY KEY,
-				parent INTEGER,
-				FOREIGN KEY ("parent") REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
+				parent INTEGER REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED
 			);
 		`)
-
 		driver.RequireInstructions(nil)
 	})
 
 	t.Run("CreateTableWithNamedConstraints", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE parents (id INTEGER PRIMARY KEY);
 			CREATE TABLE items (
 				id INTEGER,
@@ -1619,21 +1591,20 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyConstraintNameRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
 		driver.ExecOnSource(`
-			CREATE TABLE items (id INTEGER, CONSTRAINT items_new CHECK (id > 0));
-		`)
-
-		driver.ExecOnTarget(`
 			CREATE TABLE items (id INTEGER, CONSTRAINT items_old CHECK (id > 0));
 			INSERT INTO items (id) VALUES (5);
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE items (id INTEGER, CONSTRAINT items_new CHECK (id > 0));
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -1664,9 +1635,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("items", "")
+		rows := driver.FetchAllFromSource("items", "")
 		require.Equal(t, []map[string]any{
 			{"id": int64(5)},
 		}, rows)
@@ -1682,14 +1653,13 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnTarget(`
 			CREATE TABLE items (id INTEGER, CONSTRAINT items_positive CHECK (id > 0));
 		`)
-
 		driver.RequireInstructions(nil)
 	})
 
 	t.Run("CreateVirtualTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE VIRTUAL TABLE docs USING fts4(title, body);
 			CREATE TABLE plain (id INTEGER);
 		`)
@@ -1710,27 +1680,26 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("DropVirtualTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnTarget(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+		driver.ExecOnSource(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
 
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropTableInstruction{Name: "docs"},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyVirtualTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`CREATE VIRTUAL TABLE docs USING fts4(title, body, tags);`)
-		driver.ExecOnTarget(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
-
+		driver.ExecOnSource(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+		driver.ExecOnTarget(`CREATE VIRTUAL TABLE docs USING fts4(title, body, tags);`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropTableInstruction{Name: "docs"},
 			&SQLiteCreateVirtualTableInstruction{
@@ -1738,7 +1707,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("EqualVirtualTables", func(t *testing.T) {
@@ -1746,14 +1715,13 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
 		driver.ExecOnTarget(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
-
 		driver.RequireInstructions(nil)
 	})
 
 	t.Run("DropTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -1768,7 +1736,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("TableNameThatNeedsQuotes", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE "order ""list""" (
 				id INTEGER PRIMARY KEY,
 				name TEXT
@@ -1799,7 +1767,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreateIndexes", func(t *testing.T) {
@@ -1810,7 +1778,6 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
-			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
 
 		driver.ExecOnTarget(`
@@ -1818,8 +1785,8 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
+			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateIndexInstruction{
 				Unique:    true,
@@ -1829,7 +1796,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("DropIndexes", func(t *testing.T) {
@@ -1840,6 +1807,7 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
+			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
 
 		driver.ExecOnTarget(`
@@ -1847,14 +1815,12 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
-			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropIndexInstruction{Name: "idx_users_name"},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyIndexes", func(t *testing.T) {
@@ -1866,7 +1832,9 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				email TEXT NOT NULL
 			);
-			CREATE UNIQUE INDEX idx_users_name ON users (name, email);
+			CREATE UNIQUE INDEX idx_users_name ON users (name);
+
+			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
 		`)
 
 		driver.ExecOnTarget(`
@@ -1875,11 +1843,8 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				email TEXT NOT NULL
 			);
-			CREATE UNIQUE INDEX idx_users_name ON users (name);
-
-			INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com'), (2, 'Bob', 'bob@example.com');
+			CREATE UNIQUE INDEX idx_users_name ON users (name, email);
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropIndexInstruction{Name: "idx_users_name"},
 			&SQLiteCreateIndexInstruction{
@@ -1890,7 +1855,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreatePartialIndex", func(t *testing.T) {
@@ -1902,7 +1867,6 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				active INTEGER NOT NULL
 			);
-			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
 		`)
 
 		driver.ExecOnTarget(`
@@ -1911,8 +1875,8 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				active INTEGER NOT NULL
 			);
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateIndexInstruction{
 				Name:      "idx_users_active",
@@ -1922,7 +1886,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyPartialIndexCondition", func(t *testing.T) {
@@ -1934,7 +1898,7 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				active INTEGER NOT NULL
 			);
-			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 0;
 		`)
 
 		driver.ExecOnTarget(`
@@ -1943,9 +1907,8 @@ func TestSQLiteDriver(t *testing.T) {
 				name TEXT NOT NULL,
 				active INTEGER NOT NULL
 			);
-			CREATE INDEX idx_users_active ON users (name) WHERE active = 0;
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropIndexInstruction{Name: "idx_users_active"},
 			&SQLiteCreateIndexInstruction{
@@ -1956,7 +1919,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreateExpressionIndex", func(t *testing.T) {
@@ -1967,7 +1930,6 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
-			CREATE UNIQUE INDEX idx_users_name ON users (lower(name), id);
 		`)
 
 		driver.ExecOnTarget(`
@@ -1975,8 +1937,8 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
+			CREATE UNIQUE INDEX idx_users_name ON users (lower(name), id);
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateIndexInstruction{
 				Unique:    true,
@@ -1986,7 +1948,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ModifyExpressionIndex", func(t *testing.T) {
@@ -1997,7 +1959,7 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
-			CREATE INDEX idx_users_name ON users (lower(name));
+			CREATE INDEX idx_users_name ON users (upper(name));
 		`)
 
 		driver.ExecOnTarget(`
@@ -2005,9 +1967,8 @@ func TestSQLiteDriver(t *testing.T) {
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
 			);
-			CREATE INDEX idx_users_name ON users (upper(name));
+			CREATE INDEX idx_users_name ON users (lower(name));
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropIndexInstruction{Name: "idx_users_name"},
 			&SQLiteCreateIndexInstruction{
@@ -2017,22 +1978,13 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("RecreateTableWithPartialIndex", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
 		driver.ExecOnSource(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
-				name TEXT NOT NULL,
-				active INTEGER NOT NULL
-			);
-			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
-		`)
-
-		driver.ExecOnTarget(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT,
@@ -2043,6 +1995,14 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, name, active) VALUES (1, 'Alice', 1), (2, 'Bob', 0);
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				active INTEGER NOT NULL
+			);
+			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2084,8 +2044,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice", "active": int64(1)},
@@ -2102,7 +2062,6 @@ func TestSQLiteDriver(t *testing.T) {
 				email TEXT UNIQUE,
 				name TEXT
 			);
-			CREATE INDEX idx_users_name ON users (name);
 		`)
 
 		driver.ExecOnTarget(`
@@ -2111,8 +2070,8 @@ func TestSQLiteDriver(t *testing.T) {
 				email TEXT UNIQUE,
 				name TEXT
 			);
+			CREATE INDEX idx_users_name ON users (name);
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateIndexInstruction{
 				Name:      "idx_users_name",
@@ -2121,7 +2080,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("RecreateTableWithUniqueColumn", func(t *testing.T) {
@@ -2131,20 +2090,19 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				email TEXT UNIQUE,
-				age INTEGER
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
-				email TEXT UNIQUE,
 				age TEXT
 			);
 
 			INSERT INTO users (id, email, age) VALUES (1, 'alice@example.com', '30'), (2, 'bob@example.com', '25');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT UNIQUE,
+				age INTEGER
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2179,22 +2137,22 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "email": "alice@example.com", "age": int64(30)},
 			{"id": int64(2), "email": "bob@example.com", "age": int64(25)},
 		}, rows)
 
-		_, err := driver.TargetDatabaseConnection.Exec(`INSERT INTO users (id, email, age) VALUES (3, 'alice@example.com', 40);`)
+		_, err := driver.SourceDatabaseConnection.Exec(`INSERT INTO users (id, email, age) VALUES (3, 'alice@example.com', 40);`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: users.email")
 	})
 
 	t.Run("CreateTableWithUniqueConstraint", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE members (
 				id INTEGER PRIMARY KEY,
 				team TEXT NOT NULL,
@@ -2230,10 +2188,10 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		driver.ExecOnTarget(`INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice');`)
+		driver.ExecOnSource(diff)
+		driver.ExecOnSource(`INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice');`)
 
-		_, err := driver.TargetDatabaseConnection.Exec(`INSERT INTO members (id, team, name) VALUES (2, 'red', 'Alice');`)
+		_, err := driver.SourceDatabaseConnection.Exec(`INSERT INTO members (id, team, name) VALUES (2, 'red', 'Alice');`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: members.team, members.name")
 	})
 
@@ -2244,21 +2202,20 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE members (
 				id INTEGER PRIMARY KEY,
 				team TEXT NOT NULL,
-				name TEXT NOT NULL,
-				UNIQUE (team, name)
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE members (
-				id INTEGER PRIMARY KEY,
-				team TEXT NOT NULL,
 				name TEXT NOT NULL
 			);
 
 			INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice'), (2, 'blue', 'Bob');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE members (
+				id INTEGER PRIMARY KEY,
+				team TEXT NOT NULL,
+				name TEXT NOT NULL,
+				UNIQUE (team, name)
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2297,8 +2254,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("members", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("members", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "team": "red", "name": "Alice"},
@@ -2309,7 +2266,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateTableWithCompositePrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE memberships (
 				team TEXT NOT NULL,
 				member TEXT NOT NULL,
@@ -2342,17 +2299,17 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		driver.ExecOnTarget(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');`)
+		driver.ExecOnSource(diff)
+		driver.ExecOnSource(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');`)
 
-		_, err := driver.TargetDatabaseConnection.Exec(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'guest');`)
+		_, err := driver.SourceDatabaseConnection.Exec(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'guest');`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: memberships.member, memberships.team")
 	})
 
 	t.Run("CreateTableWithIntegerPrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE counters (
 				id INTEGER PRIMARY KEY,
 				total INTEGER
@@ -2377,10 +2334,10 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		driver.ExecOnTarget(`INSERT INTO counters (total) VALUES (5);`)
+		driver.ExecOnSource(diff)
+		driver.ExecOnSource(`INSERT INTO counters (total) VALUES (5);`)
 
-		rows := driver.FetchAllFromTarget("counters", "ORDER BY id")
+		rows := driver.FetchAllFromSource("counters", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "total": int64(5)},
@@ -2394,15 +2351,6 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE memberships (
 				team TEXT NOT NULL,
 				member TEXT NOT NULL,
-				level INTEGER,
-				PRIMARY KEY (team, member)
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE memberships (
-				team TEXT NOT NULL,
-				member TEXT NOT NULL,
 				level TEXT,
 				PRIMARY KEY (team, member)
 			);
@@ -2410,6 +2358,14 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO memberships (team, member, level) VALUES ('red', 'Alice', '3'), ('blue', 'Bob', '1');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE memberships (
+				team TEXT NOT NULL,
+				member TEXT NOT NULL,
+				level INTEGER,
+				PRIMARY KEY (team, member)
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2445,8 +2401,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("memberships", "ORDER BY team, member")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("memberships", "ORDER BY team, member")
 
 		require.Equal(t, []map[string]any{
 			{"team": "blue", "member": "Bob", "level": int64(1)},
@@ -2462,8 +2418,10 @@ func TestSQLiteDriver(t *testing.T) {
 				team TEXT NOT NULL,
 				member TEXT NOT NULL,
 				role TEXT NOT NULL,
-				PRIMARY KEY (team, member)
+				PRIMARY KEY (team, role)
 			);
+
+			INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');
 		`)
 
 		driver.ExecOnTarget(`
@@ -2471,12 +2429,9 @@ func TestSQLiteDriver(t *testing.T) {
 				team TEXT NOT NULL,
 				member TEXT NOT NULL,
 				role TEXT NOT NULL,
-				PRIMARY KEY (team, role)
+				PRIMARY KEY (team, member)
 			);
-
-			INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2513,8 +2468,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("memberships", "ORDER BY team, member")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("memberships", "ORDER BY team, member")
 
 		require.Equal(t, []map[string]any{
 			{"team": "red", "member": "Alice", "role": "lead"},
@@ -2527,14 +2482,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				email TEXT PRIMARY KEY,
-				age INTEGER
-			);
-			CREATE INDEX idx_users_age ON users (age);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				email TEXT PRIMARY KEY,
 				age TEXT
 			);
 			CREATE INDEX idx_users_age ON users (age);
@@ -2542,6 +2489,13 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (email, age) VALUES ('alice@example.com', '30'), ('bob@example.com', '25');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				email TEXT PRIMARY KEY,
+				age INTEGER
+			);
+			CREATE INDEX idx_users_age ON users (age);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2576,8 +2530,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY email")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY email")
 
 		require.Equal(t, []map[string]any{
 			{"email": "alice@example.com", "age": int64(30)},
@@ -2591,20 +2545,19 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				age INTEGER
-			);
-			CREATE INDEX idx_users_age ON users (age);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				age TEXT
 			);
 
 			INSERT INTO users (id, age) VALUES (1, '30');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age INTEGER
+			);
+			CREATE INDEX idx_users_age ON users (age);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2639,8 +2592,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "age": int64(30)},
@@ -2653,13 +2606,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				age INTEGER
-			);
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				age TEXT
 			);
 			CREATE INDEX idx_users_age ON users (age);
@@ -2667,6 +2613,12 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, age) VALUES (1, '30');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age INTEGER
+			);
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2696,8 +2648,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "age": int64(30)},
@@ -2710,14 +2662,6 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
-				age INTEGER
-			);
-			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (
-				id INTEGER PRIMARY KEY,
 				age TEXT
 			);
 			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
@@ -2725,6 +2669,13 @@ func TestSQLiteDriver(t *testing.T) {
 			INSERT INTO users (id, age) VALUES (1, '30');
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				age INTEGER
+			);
+			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				ForeignKeys: []*SQLiteForeignKey{},
@@ -2757,9 +2708,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		triggers, err := driver.GetTriggers(t.Context(), driver.TargetDatabaseConnection, "users")
+		triggers, err := driver.GetTriggers(t.Context(), driver.SourceDatabaseConnection, "users")
 		require.NoError(t, err)
 		require.Len(t, triggers, 1)
 		require.Equal(t, "users_insert", triggers[0].Name)
@@ -2770,18 +2721,17 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
-			CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
-			CREATE TRIGGER users_delete AFTER DELETE ON users BEGIN SELECT 3; END;
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 999; END;
 			CREATE TRIGGER users_delete AFTER DELETE ON users BEGIN SELECT 3; END;
 			CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN SELECT 4; END;
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+			CREATE TRIGGER users_update AFTER UPDATE ON users BEGIN SELECT 2; END;
+			CREATE TRIGGER users_delete AFTER DELETE ON users BEGIN SELECT 3; END;
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTriggerInstruction{
 				Definition: "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END",
@@ -2793,13 +2743,13 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLiteDropTriggerInstruction{Name: "users_audit"},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreateTableWithTriggers", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 		`)
@@ -2825,7 +2775,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("Views", func(t *testing.T) {
@@ -2833,16 +2783,15 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-			CREATE VIEW users_view AS SELECT name FROM users;
-			CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin';
-		`)
-
-		driver.ExecOnTarget(`
-			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT id, name FROM users;
 			CREATE VIEW old_view AS SELECT id FROM users;
 		`)
 
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE VIEW users_view AS SELECT name FROM users;
+			CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin';
+		`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateViewInstruction{
 				Definition: "CREATE VIEW admins_view AS SELECT name FROM users WHERE name = 'admin'",
@@ -2854,7 +2803,7 @@ func TestSQLiteDriver(t *testing.T) {
 			&SQLDropViewInstruction{Name: "old_view"},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("CreateViewTrigger", func(t *testing.T) {
@@ -2863,15 +2812,14 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT id, name FROM users;
-			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
-				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
 		`)
 
 		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTriggerInstruction{
 				Definition: `CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
@@ -2879,11 +2827,11 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		driver.ExecOnTarget(`INSERT INTO users_view (id, name) VALUES (1, 'alice');`)
+		driver.ExecOnSource(`INSERT INTO users_view (id, name) VALUES (1, 'alice');`)
 
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "alice"},
@@ -2896,20 +2844,19 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
+				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
 		`)
 
 		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT id, name FROM users;
-			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
-				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteDropTriggerInstruction{Name: "users_view_insert"},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("RecreateViewWithTrigger", func(t *testing.T) {
@@ -2917,18 +2864,17 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-			CREATE VIEW users_view AS SELECT name, id FROM users;
+			CREATE VIEW users_view AS SELECT id, name FROM users;
 			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
 				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
 		`)
 
 		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
-			CREATE VIEW users_view AS SELECT id, name FROM users;
+			CREATE VIEW users_view AS SELECT name, id FROM users;
 			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
 				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLDropViewInstruction{Name: "users_view"},
 			&SQLiteCreateViewInstruction{
@@ -2940,11 +2886,11 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		driver.ExecOnTarget(`INSERT INTO users_view (id, name) VALUES (2, 'bob');`)
+		driver.ExecOnSource(`INSERT INTO users_view (id, name) VALUES (2, 'bob');`)
 
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(2), "name": "bob"},
@@ -2954,15 +2900,14 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("CreateViewWithTrigger", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnSource(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`)
+
+		driver.ExecOnTarget(`
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 			CREATE VIEW users_view AS SELECT id, name FROM users;
 			CREATE TRIGGER users_view_insert INSTEAD OF INSERT ON users_view
 				BEGIN INSERT INTO users (id, name) VALUES (NEW.id, NEW.name); END;
 		`)
-
-		driver.ExecOnTarget(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateViewInstruction{
 				Definition: "CREATE VIEW users_view AS SELECT id, name FROM users",
@@ -2973,7 +2918,7 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("ForeignKeys", func(t *testing.T) {
@@ -2984,9 +2929,10 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE posts (
 				id INTEGER PRIMARY KEY,
 				user_id INTEGER,
-				title TEXT,
-				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+				title TEXT
 			);
+
+			INSERT INTO posts (id, user_id, title) VALUES (1, 1, 'First Post'), (2, 1, 'Second Post');
 		`)
 
 		driver.ExecOnTarget(`
@@ -2994,12 +2940,10 @@ func TestSQLiteDriver(t *testing.T) {
 			CREATE TABLE posts (
 				id INTEGER PRIMARY KEY,
 				user_id INTEGER,
-				title TEXT
+				title TEXT,
+				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 			);
-
-			INSERT INTO posts (id, user_id, title) VALUES (1, 1, 'First Post'), (2, 1, 'Second Post');
 		`)
-
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
 				Name: "_posts_temp",
@@ -3041,8 +2985,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("posts", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("posts", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "user_id": int64(1), "title": "First Post"},
@@ -3057,11 +3001,10 @@ func TestSQLiteDriver(t *testing.T) {
 		schema := `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`
 
 		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Robert'), (3, 'Carol');`)
+		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');`)
 
 		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');`)
-
+		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Robert'), (3, 'Carol');`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLInsertInstruction{
 				TableName:   "users",
@@ -3098,9 +3041,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice"},
@@ -3116,20 +3059,19 @@ func TestSQLiteDriver(t *testing.T) {
 		schema := `CREATE TABLE logs (message TEXT);`
 
 		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO logs (message) VALUES ('start');`)
+		driver.ExecOnSource(`INSERT INTO logs (message) VALUES ('stop');`)
 
 		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO logs (message) VALUES ('stop');`)
-
+		driver.ExecOnTarget(`INSERT INTO logs (message) VALUES ('start');`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLCommentInstruction{
 				Text: `The table "logs" holds no primary key, so dbdiff compares no row of it.`,
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("logs", "")
+		rows := driver.FetchAllFromSource("logs", "")
 
 		require.Equal(t, []map[string]any{
 			{"message": "stop"},
@@ -3143,11 +3085,10 @@ func TestSQLiteDriver(t *testing.T) {
 		schema := `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT);`
 
 		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO notes (id, body) VALUES (1, 'it''s a note'), (2, NULL), (3, NULL);`)
+		driver.ExecOnSource(`INSERT INTO notes (id, body) VALUES (1, 'plain'), (2, 'not empty');`)
 
 		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO notes (id, body) VALUES (1, 'plain'), (2, 'not empty');`)
-
+		driver.ExecOnTarget(`INSERT INTO notes (id, body) VALUES (1, 'it''s a note'), (2, NULL), (3, NULL);`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLInsertInstruction{
 				TableName:   "notes",
@@ -3190,9 +3131,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("notes", "ORDER BY id")
+		rows := driver.FetchAllFromSource("notes", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "body": "it's a note"},
@@ -3205,12 +3146,11 @@ func TestSQLiteDriver(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true
 
-		driver.ExecOnSource(`CREATE TABLE items (code INTEGER PRIMARY KEY, label TEXT);`)
-		driver.ExecOnSource(`INSERT INTO items (code, label) VALUES (1, 'first');`)
+		driver.ExecOnSource(`CREATE TABLE items (identifier INTEGER PRIMARY KEY, label TEXT);`)
+		driver.ExecOnSource(`INSERT INTO items (identifier, label) VALUES (1, 'old');`)
 
-		driver.ExecOnTarget(`CREATE TABLE items (identifier INTEGER PRIMARY KEY, label TEXT);`)
-		driver.ExecOnTarget(`INSERT INTO items (identifier, label) VALUES (1, 'old');`)
-
+		driver.ExecOnTarget(`CREATE TABLE items (code INTEGER PRIMARY KEY, label TEXT);`)
+		driver.ExecOnTarget(`INSERT INTO items (code, label) VALUES (1, 'first');`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
 				Name: "items",
@@ -3220,13 +3160,13 @@ func TestSQLiteDriver(t *testing.T) {
 				},
 			},
 			&SQLCommentInstruction{
-				Text: `The table "items" holds another primary key in the target, so dbdiff compares no row of it.`,
+				Text: `The table "items" holds another primary key in the source, so dbdiff compares no row of it.`,
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("items", "ORDER BY code")
+		rows := driver.FetchAllFromSource("items", "ORDER BY code")
 
 		require.Equal(t, []map[string]any{
 			{"code": int64(1), "label": "old"},
@@ -3240,11 +3180,10 @@ func TestSQLiteDriver(t *testing.T) {
 		schema := `CREATE TABLE users (email TEXT PRIMARY KEY, name TEXT);`
 
 		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO users (email, name) VALUES (NULL, 'Alice');`)
+		driver.ExecOnSource(`INSERT INTO users (email, name) VALUES (NULL, 'Bob');`)
 
 		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO users (email, name) VALUES (NULL, 'Bob');`)
-
+		driver.ExecOnTarget(`INSERT INTO users (email, name) VALUES (NULL, 'Alice');`)
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLUpdateInstruction{
 				TableName: "users",
@@ -3260,9 +3199,9 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("users", "")
+		rows := driver.FetchAllFromSource("users", "")
 
 		require.Equal(t, []map[string]any{{"email": nil, "name": "Alice"}}, rows)
 	})
@@ -3273,16 +3212,15 @@ func TestSQLiteDriver(t *testing.T) {
 		schema := `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`
 
 		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
+		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (2, 'Bob');`)
 
 		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (2, 'Bob');`)
-
+		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
 		diff := driver.RequireInstructions(nil)
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(2), "name": "Bob"},
@@ -3301,8 +3239,8 @@ func TestSQLiteDriver(t *testing.T) {
 		require.ErrorIs(t, err, errRowIteration)
 	})
 
-	t.Run("SQLFileSource", func(t *testing.T) {
-		sourcePath := WriteSQLFile(t, t.TempDir(), "schema.sql", `
+	t.Run("SQLFileTarget", func(t *testing.T) {
+		targetPath := WriteSQLFile(t, t.TempDir(), "schema.sql", `
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -3310,11 +3248,11 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
 
-		driver := NewTestSQLiteDriverWithPaths(t, sourcePath, targetPath)
+		driver := NewTestSQLiteDriverWithPaths(t, targetPath, sourcePath)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnSource(`
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -3335,8 +3273,8 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(diff)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice", "email": nil},
@@ -3363,9 +3301,9 @@ func TestSQLiteDriver(t *testing.T) {
 		`)
 		WriteSQLFile(t, migrationsDirectory, "notes.txt", `This file holds no SQL.`)
 
-		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
 
-		driver := NewTestSQLiteDriverWithPaths(t, migrationsDirectory, targetPath)
+		driver := NewTestSQLiteDriverWithPaths(t, migrationsDirectory, sourcePath)
 
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteCreateTableInstruction{
@@ -3395,18 +3333,18 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 
-		driver.ExecOnTarget(`INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');`)
-		rows := driver.FetchAllFromTarget("users", "ORDER BY id")
+		driver.ExecOnSource(`INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');`)
+		rows := driver.FetchAllFromSource("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice", "email": "alice@example.com"},
 		}, rows)
 	})
 
-	t.Run("SQLFileSourceOnBothSides", func(t *testing.T) {
-		sourcePath := WriteSQLFile(t, t.TempDir(), "source.sql", `
+	t.Run("SQLFileTargetOnBothSides", func(t *testing.T) {
+		targetPath := WriteSQLFile(t, t.TempDir(), "target.sql", `
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL,
@@ -3414,7 +3352,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		targetPath := WriteSQLFile(t, t.TempDir(), "target.sql", `
+		sourcePath := WriteSQLFile(t, t.TempDir(), "source.sql", `
 			CREATE TABLE users (
 				id INTEGER PRIMARY KEY,
 				name TEXT NOT NULL
@@ -3425,7 +3363,7 @@ func TestSQLiteDriver(t *testing.T) {
 			);
 		`)
 
-		driver := NewTestSQLiteDriverWithPaths(t, sourcePath, targetPath)
+		driver := NewTestSQLiteDriverWithPaths(t, targetPath, sourcePath)
 
 		diff := driver.RequireInstructions([]Instruction{
 			&SQLiteAlterTableInstruction{
@@ -3442,28 +3380,46 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnTarget(diff)
+		driver.ExecOnSource(diff)
 	})
 
-	t.Run("EmptyDirectorySource", func(t *testing.T) {
-		emptyDirectory := t.TempDir()
-		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	t.Run("EmptyDirectoryTarget", func(t *testing.T) {
+		sourcePath := WriteSQLFile(t, t.TempDir(), "source.sql", `
+			CREATE TABLE users (id INTEGER PRIMARY KEY);
+		`)
 
-		_, err := NewSQLiteDriver(t.Context(), &SQLLiteDriverConfig{
-			SourceDatabasePath: emptyDirectory,
-			TargetDatabasePath: targetPath,
+		driver := NewTestSQLiteDriverWithPaths(t, t.TempDir(), sourcePath)
+
+		driver.RequireInstructions([]Instruction{
+			&SQLDropTableInstruction{
+				Name: "users",
+			},
 		})
-		require.ErrorContains(t, err, "holds no .sql file")
 	})
 
-	t.Run("InvalidSQLFileSource", func(t *testing.T) {
-		sourcePath := WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (;`)
-		targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	t.Run("InvalidSQLFileTarget", func(t *testing.T) {
+		targetPath := WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (;`)
+		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
 
 		_, err := NewSQLiteDriver(t.Context(), &SQLLiteDriverConfig{
-			SourceDatabasePath: sourcePath,
 			TargetDatabasePath: targetPath,
+			SourceDatabasePath: sourcePath,
 		})
 		require.ErrorContains(t, err, "schema.sql")
+	})
+
+	t.Run("HistoryTableStaysOutOfTheDiff", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE dbdiff_migrations (
+				version TEXT NOT NULL PRIMARY KEY,
+				name TEXT NOT NULL,
+				checksum TEXT NOT NULL,
+				applied_at TEXT NOT NULL
+			);
+		`)
+
+		driver.RequireInstructions(nil)
 	})
 }

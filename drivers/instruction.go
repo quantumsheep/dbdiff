@@ -43,7 +43,7 @@ type SQLEqualityCondition struct {
 }
 
 func (c *SQLEqualityCondition) ConditionClause() string {
-	return fmt.Sprintf("%s = %s", quoteIdentifier(c.ColumnName), c.Expression)
+	return fmt.Sprintf("%s = %s", QuoteIdentifier(c.ColumnName), c.Expression)
 }
 
 type SQLIsNullCondition struct {
@@ -51,7 +51,7 @@ type SQLIsNullCondition struct {
 }
 
 func (c *SQLIsNullCondition) ConditionClause() string {
-	return fmt.Sprintf("%s IS NULL", quoteIdentifier(c.ColumnName))
+	return fmt.Sprintf("%s IS NULL", QuoteIdentifier(c.ColumnName))
 }
 
 type SQLConjunctionCondition struct {
@@ -80,7 +80,7 @@ type SQLSetClause struct {
 }
 
 func (c *SQLSetClause) Clause() string {
-	return fmt.Sprintf("%s = %s", quoteIdentifier(c.ColumnName), c.Expression)
+	return fmt.Sprintf("%s = %s", QuoteIdentifier(c.ColumnName), c.Expression)
 }
 
 type SQLInsertInstruction struct {
@@ -91,8 +91,8 @@ type SQLInsertInstruction struct {
 
 func (i *SQLInsertInstruction) String() string {
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
-		quoteIdentifier(i.TableName),
-		strings.Join(quoteIdentifiers(i.ColumnNames), ", "),
+		QuoteIdentifier(i.TableName),
+		strings.Join(QuoteIdentifiers(i.ColumnNames), ", "),
 		strings.Join(i.Expressions, ", "))
 }
 
@@ -109,10 +109,10 @@ type SQLInsertSelectInstruction struct {
 
 func (i *SQLInsertSelectInstruction) String() string {
 	return fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM %s;",
-		quoteIdentifier(i.TableName),
-		strings.Join(quoteIdentifiers(i.ColumnNames), ", "),
+		QuoteIdentifier(i.TableName),
+		strings.Join(QuoteIdentifiers(i.ColumnNames), ", "),
 		strings.Join(i.SelectExpressions, ", "),
-		quoteIdentifier(i.SourceTableName))
+		QuoteIdentifier(i.SourceTableName))
 }
 
 func (i *SQLInsertSelectInstruction) Comment() string {
@@ -131,7 +131,7 @@ func (i *SQLUpdateInstruction) String() string {
 	})
 
 	statement := fmt.Sprintf("UPDATE %s SET %s",
-		quoteIdentifier(i.TableName), strings.Join(clauses, ", "))
+		QuoteIdentifier(i.TableName), strings.Join(clauses, ", "))
 
 	if i.Condition != nil {
 		statement += " WHERE " + i.Condition.ConditionClause()
@@ -150,7 +150,7 @@ type SQLDeleteInstruction struct {
 }
 
 func (i *SQLDeleteInstruction) String() string {
-	statement := "DELETE FROM " + quoteIdentifier(i.TableName)
+	statement := "DELETE FROM " + QuoteIdentifier(i.TableName)
 
 	if i.Condition != nil {
 		statement += " WHERE " + i.Condition.ConditionClause()
@@ -168,7 +168,7 @@ type SQLDropTableInstruction struct {
 }
 
 func (i *SQLDropTableInstruction) String() string {
-	return "DROP TABLE " + quoteIdentifier(i.Name) + ";"
+	return "DROP TABLE " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *SQLDropTableInstruction) Comment() string {
@@ -180,7 +180,7 @@ type SQLDropViewInstruction struct {
 }
 
 func (i *SQLDropViewInstruction) String() string {
-	return "DROP VIEW " + quoteIdentifier(i.Name) + ";"
+	return "DROP VIEW " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *SQLDropViewInstruction) Comment() string {
@@ -192,7 +192,7 @@ type SQLDropIndexInstruction struct {
 }
 
 func (i *SQLDropIndexInstruction) String() string {
-	return "DROP INDEX " + quoteIdentifier(i.Name) + ";"
+	return "DROP INDEX " + QuoteIdentifier(i.Name) + ";"
 }
 
 func (i *SQLDropIndexInstruction) Comment() string {
@@ -219,7 +219,7 @@ type SQLDropColumnAction struct {
 }
 
 func (a *SQLDropColumnAction) TableActionClause() string {
-	return "DROP COLUMN " + quoteIdentifier(a.ColumnName)
+	return "DROP COLUMN " + QuoteIdentifier(a.ColumnName)
 }
 
 type SQLRenameColumnAction struct {
@@ -229,7 +229,7 @@ type SQLRenameColumnAction struct {
 
 func (a *SQLRenameColumnAction) TableActionClause() string {
 	return fmt.Sprintf("RENAME COLUMN %s TO %s",
-		quoteIdentifier(a.ColumnName), quoteIdentifier(a.NewColumnName))
+		QuoteIdentifier(a.ColumnName), QuoteIdentifier(a.NewColumnName))
 }
 
 type SQLRenameTableAction struct {
@@ -237,7 +237,7 @@ type SQLRenameTableAction struct {
 }
 
 func (a *SQLRenameTableAction) TableActionClause() string {
-	return "RENAME TO " + quoteIdentifier(a.NewName)
+	return "RENAME TO " + QuoteIdentifier(a.NewName)
 }
 
 // A NULL value needs IS NULL, because a comparison with NULL matches no row.

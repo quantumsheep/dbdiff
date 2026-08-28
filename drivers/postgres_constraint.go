@@ -13,5 +13,5 @@ func (c *PostgresConstraint) IsForeignKey() bool {
 }
 
 func (c *PostgresConstraint) Clause() string {
-	return fmt.Sprintf("CONSTRAINT %s %s", quoteIdentifier(c.Name), c.Def)
+	return fmt.Sprintf("CONSTRAINT %s %s", QuoteIdentifier(c.Name), c.Def)
 }

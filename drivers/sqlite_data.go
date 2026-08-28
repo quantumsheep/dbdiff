@@ -13,8 +13,6 @@ import (
 	"github.com/samber/lo"
 )
 
-// A key joins the SQL literals of the primary key columns of one row. A row maps a column
-// name to the SQL literal of its value.
 type SQLiteTableData struct {
 	Keys []string
 	Rows map[string]map[string]string
@@ -36,30 +34,29 @@ func (t *SQLiteTable) PrimaryKeyColumnNames() []string {
 	return names
 }
 
-// The comparison covers a table that both databases hold. The schema section already
-// creates or drops the other tables.
+// The schema section already creates or drops the other tables.
 func (d *SQLiteDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
-
-	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
 
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, sourceTable := range sourceTables {
-		targetTable, found := lo.Find(targetTables, func(table *SQLiteTable) bool {
-			return table.Name == sourceTable.Name
+	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, targetTable := range targetTables {
+		sourceTable, found := lo.Find(sourceTables, func(table *SQLiteTable) bool {
+			return table.Name == targetTable.Name
 		})
 		if !found {
 			continue
 		}
 
-		subInstructions, err := d.DiffTableData(ctx, sourceTable, targetTable)
+		subInstructions, err := d.DiffTableData(ctx, targetTable, sourceTable)
 		if err != nil {
 			return nil, err
 		}
@@ -70,47 +67,47 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 	return instructions, nil
 }
 
-func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTable, targetTable *SQLiteTable) ([]Instruction, error) {
-	primaryKeyColumnNames := sourceTable.PrimaryKeyColumnNames()
+func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTable, sourceTable *SQLiteTable) ([]Instruction, error) {
+	primaryKeyColumnNames := targetTable.PrimaryKeyColumnNames()
 	if len(primaryKeyColumnNames) == 0 {
 		comment := &SQLCommentInstruction{
 			Text: fmt.Sprintf("The table %s holds no primary key, so dbdiff compares no row of it.",
-				quoteIdentifier(sourceTable.Name)),
+				QuoteIdentifier(targetTable.Name)),
 		}
 
 		return []Instruction{comment}, nil
 	}
-
-	sourceColumnNames := lo.Map(sourceTable.Columns, func(column *SQLiteColumn, _ int) string {
-		return column.Name
-	})
 
 	targetColumnNames := lo.Map(targetTable.Columns, func(column *SQLiteColumn, _ int) string {
 		return column.Name
 	})
 
+	sourceColumnNames := lo.Map(sourceTable.Columns, func(column *SQLiteColumn, _ int) string {
+		return column.Name
+	})
+
 	holdsEveryKeyColumn := lo.EveryBy(primaryKeyColumnNames, func(name string) bool {
-		return slices.Contains(targetColumnNames, name)
+		return slices.Contains(sourceColumnNames, name)
 	})
 	if !holdsEveryKeyColumn {
 		comment := &SQLCommentInstruction{
-			Text: fmt.Sprintf("The table %s holds another primary key in the target, so dbdiff compares no row of it.",
-				quoteIdentifier(sourceTable.Name)),
+			Text: fmt.Sprintf("The table %s holds another primary key in the source, so dbdiff compares no row of it.",
+				QuoteIdentifier(targetTable.Name)),
 		}
 
 		return []Instruction{comment}, nil
 	}
 
-	commonColumnNames := lo.Filter(sourceColumnNames, func(name string, _ int) bool {
-		return slices.Contains(targetColumnNames, name)
+	commonColumnNames := lo.Filter(targetColumnNames, func(name string, _ int) bool {
+		return slices.Contains(sourceColumnNames, name)
 	})
 
-	sourceData, err := d.GetTableData(ctx, d.SourceDatabaseConnection, sourceTable.Name, sourceColumnNames, primaryKeyColumnNames)
+	targetData, err := d.GetTableData(ctx, d.TargetDatabaseConnection, targetTable.Name, targetColumnNames, primaryKeyColumnNames)
 	if err != nil {
 		return nil, err
 	}
 
-	targetData, err := d.GetTableData(ctx, d.TargetDatabaseConnection, targetTable.Name, commonColumnNames, primaryKeyColumnNames)
+	sourceData, err := d.GetTableData(ctx, d.SourceDatabaseConnection, sourceTable.Name, commonColumnNames, primaryKeyColumnNames)
 	if err != nil {
 		return nil, err
 	}
@@ -119,18 +116,18 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 	var modifications []Instruction
 	var removals []Instruction
 
-	for _, key := range sourceData.Keys {
-		sourceRow := sourceData.Rows[key]
+	for _, key := range targetData.Keys {
+		targetRow := targetData.Rows[key]
 
-		targetRow, found := targetData.Rows[key]
+		sourceRow, found := sourceData.Rows[key]
 		if !found {
-			values := lo.Map(sourceColumnNames, func(name string, _ int) string {
-				return sourceRow[name]
+			values := lo.Map(targetColumnNames, func(name string, _ int) string {
+				return targetRow[name]
 			})
 
 			insertions = append(insertions, &SQLInsertInstruction{
-				TableName:   sourceTable.Name,
-				ColumnNames: sourceColumnNames,
+				TableName:   targetTable.Name,
+				ColumnNames: targetColumnNames,
 				Expressions: values,
 			})
 
@@ -140,10 +137,10 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 		var setClauses []*SQLSetClause
 
 		for _, name := range commonColumnNames {
-			if sourceRow[name] != targetRow[name] {
+			if targetRow[name] != sourceRow[name] {
 				setClauses = append(setClauses, &SQLSetClause{
 					ColumnName: name,
-					Expression: sourceRow[name],
+					Expression: targetRow[name],
 				})
 			}
 		}
@@ -153,21 +150,21 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 		}
 
 		modifications = append(modifications, &SQLUpdateInstruction{
-			TableName:  sourceTable.Name,
+			TableName:  targetTable.Name,
 			SetClauses: setClauses,
-			Condition:  rowKeyCondition(primaryKeyColumnNames, sourceRow),
+			Condition:  rowKeyCondition(primaryKeyColumnNames, targetRow),
 		})
 	}
 
-	for _, key := range targetData.Keys {
-		_, found := sourceData.Rows[key]
+	for _, key := range sourceData.Keys {
+		_, found := targetData.Rows[key]
 		if found {
 			continue
 		}
 
 		removals = append(removals, &SQLDeleteInstruction{
-			TableName: targetTable.Name,
-			Condition: rowKeyCondition(primaryKeyColumnNames, targetData.Rows[key]),
+			TableName: sourceTable.Name,
+			Condition: rowKeyCondition(primaryKeyColumnNames, sourceData.Rows[key]),
 		})
 	}
 
@@ -176,13 +173,12 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, sourceTable *SQLiteTab
 	return instructions, nil
 }
 
-// GetTableData sorts the rows by the primary key, because SQLite gives no stable order.
-// Without that sort the output changes between two runs.
+// SQLite gives no stable order, so this sort keeps the output equal between two runs.
 func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName string, columnNames []string, primaryKeyColumnNames []string) (*SQLiteTableData, error) {
 	statement := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s;",
-		strings.Join(quoteIdentifiers(columnNames), ", "),
-		quoteIdentifier(tableName),
-		strings.Join(quoteIdentifiers(primaryKeyColumnNames), ", "))
+		strings.Join(QuoteIdentifiers(columnNames), ", "),
+		QuoteIdentifier(tableName),
+		strings.Join(QuoteIdentifiers(primaryKeyColumnNames), ", "))
 
 	rows, err := db.QueryContext(ctx, statement)
 	if err != nil {
