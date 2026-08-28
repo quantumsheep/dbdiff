@@ -67,13 +67,14 @@ type PostgresCreateAggregateInstruction struct {
 
 func (i *PostgresCreateAggregateInstruction) String() string {
 	options := []string{
-		fmt.Sprintf("SFUNC = %s", QuoteIdentifier(i.TransitionFunction)),
+		// The value comes from a regproc cast, which quotes and qualifies the name.
+		fmt.Sprintf("SFUNC = %s", i.TransitionFunction),
 		fmt.Sprintf("STYPE = %s", i.StateType),
 	}
 
 	if i.FinalFunction.Valid {
 		options = append(options,
-			fmt.Sprintf("FINALFUNC = %s", QuoteIdentifier(i.FinalFunction.String)))
+			fmt.Sprintf("FINALFUNC = %s", i.FinalFunction.String))
 	}
 
 	if i.InitialCondition.Valid {

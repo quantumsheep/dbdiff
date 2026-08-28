@@ -1512,7 +1512,7 @@ func TestInstructions(t *testing.T) {
 		}
 
 		require.Equal(t,
-			`CREATE AGGREGATE "total"(integer) (SFUNC = "int4pl", STYPE = integer);`,
+			`CREATE AGGREGATE "total"(integer) (SFUNC = int4pl, STYPE = integer);`,
 			instruction.String())
 	})
 
@@ -1533,7 +1533,7 @@ func TestInstructions(t *testing.T) {
 		}
 
 		require.Equal(t,
-			`CREATE AGGREGATE "total"(integer) (SFUNC = "int4pl", STYPE = integer, FINALFUNC = "int4out", INITCOND = '0');`,
+			`CREATE AGGREGATE "total"(integer) (SFUNC = int4pl, STYPE = integer, FINALFUNC = int4out, INITCOND = '0');`,
 			instruction.String())
 	})
 
