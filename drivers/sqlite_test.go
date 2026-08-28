@@ -94,8 +94,20 @@ func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 	return NewTestSQLiteDriverWithPaths(tb, targetDatabasePath, sourceDatabasePath)
 }
 
+// The driver refuses a database file that is absent, so the constructor creates each
+// empty file first. A SQL source builds its own database.
 func NewTestSQLiteDriverWithPaths(tb testing.TB, targetPath string, sourcePath string) *TestingSQLiteDriver {
 	tb.Helper()
+
+	for _, path := range []string{targetPath, sourcePath} {
+		if IsSQLSource(path) {
+			continue
+		}
+
+		file, err := os.OpenFile(TrimSQLitePrefix(path), os.O_CREATE, 0o600)
+		require.NoError(tb, err)
+		require.NoError(tb, file.Close())
+	}
 
 	driver, err := NewSQLiteDriver(tb.Context(), &SQLiteDriverConfig{
 		TargetDatabasePath: targetPath,

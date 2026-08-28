@@ -125,13 +125,32 @@ func TestDbdiffCommand(t *testing.T) {
 
 	t.Run("DiffTwoDatabases", func(t *testing.T) {
 		directory := t.TempDir()
+
 		currentPath := filepath.Join(directory, "current.sqlite")
+		clitest.WriteSQLiteDatabase(t, currentPath, "")
+
 		finalPath := filepath.Join(directory, "final.sqlite")
+		clitest.WriteSQLiteDatabase(t, finalPath, "")
 
 		result := clitest.Run(t, binaryPath, currentPath, finalPath)
 
 		require.Equal(t, 0, result.ExitCode)
 		require.Empty(t, result.Stderr)
+	})
+
+	t.Run("DiffADatabaseThatDoesNotExist", func(t *testing.T) {
+		directory := t.TempDir()
+
+		currentPath := filepath.Join(directory, "current.sqlite")
+		clitest.WriteSQLiteDatabase(t, currentPath, "")
+
+		finalPath := filepath.Join(directory, "absent.sqlite")
+
+		result := clitest.Run(t, binaryPath, currentPath, finalPath)
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "does not exist")
+		require.NoFileExists(t, finalPath)
 	})
 
 	t.Run("DataFlag", func(t *testing.T) {
