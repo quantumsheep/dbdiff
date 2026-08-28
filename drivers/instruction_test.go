@@ -89,6 +89,18 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresInsertOverriding", func(t *testing.T) {
+		instruction := &PostgresInsertOverridingInstruction{
+			TableName:   "users",
+			ColumnNames: []string{"id", "name"},
+			Expressions: []string{"1", "'Alice'"},
+		}
+
+		require.Equal(t,
+			`INSERT INTO "users" ("id", "name") OVERRIDING SYSTEM VALUE VALUES (1, 'Alice');`,
+			instruction.String())
+	})
+
 	t.Run("InsertSelect", func(t *testing.T) {
 		instruction := &SQLInsertSelectInstruction{
 			TableName:         "_users_temp",

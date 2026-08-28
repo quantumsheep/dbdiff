@@ -66,13 +66,8 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 		return []Instruction{comment}, nil
 	}
 
-	targetColumnNames := lo.Map(targetTable.Columns, func(column *PostgresColumn, _ int) string {
-		return column.Name
-	})
-
-	sourceColumnNames := lo.Map(sourceTable.Columns, func(column *PostgresColumn, _ int) string {
-		return column.Name
-	})
+	targetColumnNames := writablePostgresColumnNames(targetTable.Columns)
+	sourceColumnNames := writablePostgresColumnNames(sourceTable.Columns)
 
 	holdsEveryKeyColumn := lo.EveryBy(primaryKeyColumnNames, func(name string) bool {
 		return slices.Contains(sourceColumnNames, name)
@@ -113,11 +108,20 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 				return targetRow[name]
 			})
 
-			insertions = append(insertions, &SQLInsertInstruction{
-				TableName:   targetTable.Name,
-				ColumnNames: targetColumnNames,
-				Expressions: values,
-			})
+			// PostgreSQL refuses a plain value for a GENERATED ALWAYS identity column.
+			if holdsAlwaysIdentityColumn(targetTable, targetColumnNames) {
+				insertions = append(insertions, &PostgresInsertOverridingInstruction{
+					TableName:   targetTable.Name,
+					ColumnNames: targetColumnNames,
+					Expressions: values,
+				})
+			} else {
+				insertions = append(insertions, &SQLInsertInstruction{
+					TableName:   targetTable.Name,
+					ColumnNames: targetColumnNames,
+					Expressions: values,
+				})
+			}
 
 			continue
 		}
@@ -125,12 +129,19 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 		var setClauses []*SQLSetClause
 
 		for _, name := range commonColumnNames {
-			if targetRow[name] != sourceRow[name] {
-				setClauses = append(setClauses, &SQLSetClause{
-					ColumnName: name,
-					Expression: targetRow[name],
-				})
+			if targetRow[name] == sourceRow[name] {
+				continue
 			}
+
+			// PostgreSQL refuses an UPDATE of a GENERATED ALWAYS identity column.
+			if holdsAlwaysIdentityColumn(targetTable, []string{name}) {
+				continue
+			}
+
+			setClauses = append(setClauses, &SQLSetClause{
+				ColumnName: name,
+				Expression: targetRow[name],
+			})
 		}
 
 		if len(setClauses) == 0 {
@@ -159,6 +170,25 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 	instructions := slices.Concat(insertions, modifications, removals)
 
 	return instructions, nil
+}
+
+// PostgreSQL computes a generated column, and it refuses a value for that column.
+func writablePostgresColumnNames(columns []*PostgresColumn) []string {
+	writable := lo.Filter(columns, func(column *PostgresColumn, _ int) bool {
+		return column.GeneratedExpression == ""
+	})
+
+	return lo.Map(writable, func(column *PostgresColumn, _ int) string {
+		return column.Name
+	})
+}
+
+func holdsAlwaysIdentityColumn(table *PostgresTable, columnNames []string) bool {
+	return lo.SomeBy(columnNames, func(name string) bool {
+		column, found := table.ColumnByName(name)
+
+		return found && column.Identity == "ALWAYS"
+	})
 }
 
 func (d *PostgresDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {

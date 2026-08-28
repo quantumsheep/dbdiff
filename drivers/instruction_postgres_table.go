@@ -500,3 +500,20 @@ func (i *PostgresCreateViewInstruction) String() string {
 func (i *PostgresCreateViewInstruction) Comment() string {
 	return objectComment("Create", "view", i.Name)
 }
+
+type PostgresInsertOverridingInstruction struct {
+	TableName   string
+	ColumnNames []string
+	Expressions []string
+}
+
+func (i *PostgresInsertOverridingInstruction) String() string {
+	return fmt.Sprintf("INSERT INTO %s (%s) OVERRIDING SYSTEM VALUE VALUES (%s);",
+		QuoteIdentifier(i.TableName),
+		strings.Join(QuoteIdentifiers(i.ColumnNames), ", "),
+		strings.Join(i.Expressions, ", "))
+}
+
+func (i *PostgresInsertOverridingInstruction) Comment() string {
+	return ownedObjectComment("Change", "rows", "table", i.TableName)
+}

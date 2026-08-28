@@ -21,6 +21,14 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, `Change the rows of the table "users"`, instruction.Comment())
 	})
 
+	t.Run("PostgresInsertOverriding", func(t *testing.T) {
+		instruction := &PostgresInsertOverridingInstruction{
+			TableName: "users",
+		}
+
+		require.Equal(t, `Change the rows of the table "users"`, instruction.Comment())
+	})
+
 	t.Run("InsertSelect", func(t *testing.T) {
 		instruction := &SQLInsertSelectInstruction{
 			TableName:       "_users_temp",

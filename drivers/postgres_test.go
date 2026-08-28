@@ -3606,6 +3606,62 @@ func TestPostgresDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsWithAGeneratedColumnAndAnIdentityColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		schema := `
+			CREATE TABLE items (
+				id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				price integer,
+				total integer GENERATED ALWAYS AS (price * 2) STORED
+			);
+		`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO items (id, price) OVERRIDING SYSTEM VALUE VALUES (1, 10), (2, 20);`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO items (id, price) OVERRIDING SYSTEM VALUE VALUES (1, 15), (3, 30);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresInsertOverridingInstruction{
+				TableName:   "items",
+				ColumnNames: []string{"id", "price"},
+				Expressions: []string{"3", "30"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "items",
+				SetClauses: []*SQLSetClause{
+					{
+						ColumnName: "price",
+						Expression: "15",
+					},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+			&SQLDeleteInstruction{
+				TableName: "items",
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CompareRowsOfATableWithoutAPrimaryKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true
