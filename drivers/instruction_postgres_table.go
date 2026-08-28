@@ -134,9 +134,45 @@ type PostgresSetIdentityOptionsAction struct {
 	Options    string
 }
 
+// PostgreSQL takes one SET for each sequence option of the identity.
 func (a *PostgresSetIdentityOptionsAction) TableActionClause() string {
-	return fmt.Sprintf("ALTER COLUMN %s SET %s",
-		QuoteIdentifier(a.ColumnName), a.Options)
+	clauses := lo.Map(splitSequenceOptions(a.Options), func(option string, _ int) string {
+		return "SET " + option
+	})
+
+	return fmt.Sprintf("ALTER COLUMN %s %s",
+		QuoteIdentifier(a.ColumnName), strings.Join(clauses, " "))
+}
+
+func splitSequenceOptions(options string) []string {
+	var parts []string
+	var part []string
+
+	for _, token := range strings.Fields(options) {
+		lastIsNo := len(part) > 0 && strings.EqualFold(part[len(part)-1], "NO")
+
+		if isSequenceOptionStart(token) && len(part) > 0 && !lastIsNo {
+			parts = append(parts, strings.Join(part, " "))
+			part = nil
+		}
+
+		part = append(part, token)
+	}
+
+	if len(part) > 0 {
+		parts = append(parts, strings.Join(part, " "))
+	}
+
+	return parts
+}
+
+func isSequenceOptionStart(token string) bool {
+	switch strings.ToUpper(token) {
+	case "START", "INCREMENT", "MINVALUE", "MAXVALUE", "CACHE", "CYCLE", "NO", "RESTART":
+		return true
+	}
+
+	return false
 }
 
 type PostgresDropIdentityAction struct {

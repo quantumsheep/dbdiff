@@ -873,6 +873,22 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresAlterTableSetIdentityOptions", func(t *testing.T) {
+		instruction := &PostgresAlterTableInstruction{
+			Name: "users",
+			Actions: []AlterTableAction{
+				&PostgresSetIdentityOptionsAction{
+					ColumnName: "id",
+					Options:    "START WITH 100 INCREMENT BY 5 NO CYCLE",
+				},
+			},
+		}
+
+		require.Equal(t,
+			`ALTER TABLE "users" ALTER COLUMN "id" SET START WITH 100 SET INCREMENT BY 5 SET NO CYCLE;`,
+			instruction.String())
+	})
+
 	t.Run("PostgresCreateTableWithIdentityOptions", func(t *testing.T) {
 		instruction := &PostgresCreateTableInstruction{
 			Name: "users",

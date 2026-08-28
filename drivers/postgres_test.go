@@ -1520,6 +1520,31 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("AlterTwoIdentityOptions", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY (START WITH 100 INCREMENT BY 5));
+		`)
+		diff := driver.RequireInstructions([]Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []AlterTableAction{
+					&PostgresSetIdentityOptionsAction{
+						ColumnName: "id",
+						Options:    "START WITH 100 INCREMENT BY 5",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("AlterIdentityOptions", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
