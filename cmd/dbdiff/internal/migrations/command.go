@@ -65,7 +65,7 @@ func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 
 	migrator, err := coremigrations.NewMigrator(ctx, config.Driver, config.Target, config.Schema)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("failed to open the target database: %w", err)
 	}
 
 	set, err := LoadMigrationSet(ctx, migrator, config.Source)

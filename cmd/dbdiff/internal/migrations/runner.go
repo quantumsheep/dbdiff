@@ -18,12 +18,12 @@ import (
 func LoadMigrationSet(ctx context.Context, migrator coremigrations.Migrator, directory string) (*coremigrations.MigrationSet, error) {
 	files, err := coremigrations.ReadMigrationDirectory(directory)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read the migrations directory: %w", err)
 	}
 
 	applied, err := migrator.AppliedMigrations(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read the history table: %w", err)
 	}
 
 	return coremigrations.NewMigrationSet(files, applied), nil
@@ -110,7 +110,7 @@ func RunMigrationPreview(ctx context.Context, migrator coremigrations.Migrator, 
 
 	transaction, err := migrator.Begin(ctx, true)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open the preview transaction: %w", err)
 	}
 
 	defer func() { _ = transaction.Rollback() }()
@@ -178,7 +178,7 @@ func applyPendingMigrations(ctx context.Context, migrator coremigrations.Migrato
 
 	err = migrator.EnsureHistoryTable(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create the history table: %w", err)
 	}
 
 	set, err = reloadMigrationSet(ctx, migrator, set)
@@ -271,7 +271,7 @@ func applyOneMigration(ctx context.Context, migrator coremigrations.Migrator, en
 
 	transaction, err := migrator.Begin(ctx, true)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open the transaction of %s: %w", entry.FileName(), err)
 	}
 
 	err = transaction.Apply(ctx, content)
