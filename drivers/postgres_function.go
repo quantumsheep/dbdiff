@@ -3,15 +3,20 @@ package drivers
 import "fmt"
 
 type PostgresFunction struct {
-	Name       string
-	Arguments  string
-	ReturnType string
-	Kind       string
-	Def        string
+	Name          string
+	Arguments     string
+	ArgumentTypes string
+	ReturnType    string
+	Kind          string
+	Def           string
 }
 
 func (f *PostgresFunction) Signature() string {
 	return fmt.Sprintf("%s(%s)", f.Name, f.Arguments)
+}
+
+func (f *PostgresFunction) MatchKey() string {
+	return fmt.Sprintf("%s %s(%s)", f.Kind, f.Name, f.ArgumentTypes)
 }
 
 func (f *PostgresFunction) CreateInstruction() Instruction {

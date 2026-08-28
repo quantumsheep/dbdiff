@@ -373,11 +373,13 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 		return nil, err
 	}
 
-	// CREATE OR REPLACE FUNCTION covers a new function and a modified function. PostgreSQL
-	// refuses that statement when the return type changes.
+	// The match key holds the argument types and no argument names, so a rename of a
+	// parameter stays one function. CREATE OR REPLACE FUNCTION covers a new function and
+	// a modified function. PostgreSQL refuses that statement when the return type or the
+	// name of a parameter changes.
 	for _, targetFunction := range targetFunctions {
 		sourceFunction, found := lo.Find(sourceFunctions, func(function *PostgresFunction) bool {
-			return function.Signature() == targetFunction.Signature()
+			return function.MatchKey() == targetFunction.MatchKey()
 		})
 		if !found {
 			additions = append(additions, targetFunction.CreateInstruction())
@@ -385,7 +387,8 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 		}
 
 		if targetFunction.Def != sourceFunction.Def {
-			if targetFunction.ReturnType != sourceFunction.ReturnType {
+			if targetFunction.ReturnType != sourceFunction.ReturnType ||
+				targetFunction.Arguments != sourceFunction.Arguments {
 				additions = append(additions, sourceFunction.DropInstruction())
 			}
 
@@ -395,7 +398,7 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 
 	for _, sourceFunction := range sourceFunctions {
 		_, found := lo.Find(targetFunctions, func(function *PostgresFunction) bool {
-			return function.Signature() == sourceFunction.Signature()
+			return function.MatchKey() == sourceFunction.MatchKey()
 		})
 		if !found {
 			removals = append(removals, sourceFunction.DropInstruction())
@@ -1116,6 +1119,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 		SELECT
 			p.proname,
 			pg_get_function_identity_arguments(p.oid),
+			oidvectortypes(p.proargtypes),
 			coalesce(pg_get_function_result(p.oid), ''),
 			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
 			regexp_replace(
@@ -1142,7 +1146,8 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 	for rows.Next() {
 		function := &PostgresFunction{}
 
-		err := rows.Scan(&function.Name, &function.Arguments, &function.ReturnType, &function.Kind, &function.Def)
+		err := rows.Scan(&function.Name, &function.Arguments, &function.ArgumentTypes,
+			&function.ReturnType, &function.Kind, &function.Def)
 		if err != nil {
 			return nil, err
 		}
