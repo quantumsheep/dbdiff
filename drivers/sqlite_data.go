@@ -78,13 +78,8 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 		return []Instruction{comment}, nil
 	}
 
-	targetColumnNames := lo.Map(targetTable.Columns, func(column *SQLiteColumn, _ int) string {
-		return column.Name
-	})
-
-	sourceColumnNames := lo.Map(sourceTable.Columns, func(column *SQLiteColumn, _ int) string {
-		return column.Name
-	})
+	targetColumnNames := writableSQLiteColumnNames(targetTable.Columns)
+	sourceColumnNames := writableSQLiteColumnNames(sourceTable.Columns)
 
 	holdsEveryKeyColumn := lo.EveryBy(primaryKeyColumnNames, func(name string) bool {
 		return slices.Contains(sourceColumnNames, name)
@@ -174,6 +169,17 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 }
 
 // SQLite gives no stable order, so this sort keeps the output equal between two runs.
+// SQLite computes a generated column, and it refuses a value for that column.
+func writableSQLiteColumnNames(columns []*SQLiteColumn) []string {
+	writable := lo.Filter(columns, func(column *SQLiteColumn, _ int) bool {
+		return !column.IsGenerated()
+	})
+
+	return lo.Map(writable, func(column *SQLiteColumn, _ int) string {
+		return column.Name
+	})
+}
+
 func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName string, columnNames []string, primaryKeyColumnNames []string) (*SQLiteTableData, error) {
 	statement := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s;",
 		strings.Join(QuoteIdentifiers(columnNames), ", "),

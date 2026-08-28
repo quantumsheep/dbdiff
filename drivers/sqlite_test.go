@@ -3174,6 +3174,69 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsWithAGeneratedColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `
+			CREATE TABLE items (
+				id INTEGER PRIMARY KEY,
+				price INTEGER,
+				total INTEGER GENERATED ALWAYS AS (price * 2) VIRTUAL
+			);
+		`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO items (id, price) VALUES (1, 10), (2, 20);`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO items (id, price) VALUES (1, 15), (3, 30);`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "items",
+				ColumnNames: []string{"id", "price"},
+				Expressions: []string{"3", "30"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "items",
+				SetClauses: []*SQLSetClause{
+					{
+						ColumnName: "price",
+						Expression: "15",
+					},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+			&SQLDeleteInstruction{
+				TableName: "items",
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+
+		rows := driver.FetchAllFromSource("items", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "price": int64(15), "total": int64(30)},
+			{"id": int64(3), "price": int64(30), "total": int64(60)},
+		}, rows)
+	})
+
 	t.Run("CompareRowsOfATableWithoutAPrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true
