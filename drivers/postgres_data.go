@@ -21,6 +21,7 @@ type PostgresTableData struct {
 // The schema section already creates or drops the other tables.
 func (d *PostgresDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
+	var removalsPerTable [][]Instruction
 
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
@@ -46,21 +47,27 @@ func (d *PostgresDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 			continue
 		}
 
-		subInstructions, err := d.DiffTableData(ctx, targetTable, sourceTable)
+		additions, removals, err := d.DiffTableData(ctx, targetTable, sourceTable)
 		if err != nil {
 			return nil, err
 		}
 
-		instructions = append(instructions, subInstructions...)
+		instructions = append(instructions, additions...)
+		removalsPerTable = append(removalsPerTable, removals)
+	}
+
+	// A DELETE of a child row comes before the DELETE of the parent row that it names.
+	for _, removals := range slices.Backward(removalsPerTable) {
+		instructions = append(instructions, removals...)
 	}
 
 	return instructions, nil
 }
 
-func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *PostgresTable, sourceTable *PostgresTable) ([]Instruction, error) {
+func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *PostgresTable, sourceTable *PostgresTable) ([]Instruction, []Instruction, error) {
 	primaryKeyColumnNames, err := d.GetTablePrimaryKey(ctx, d.TargetDatabaseConnection, targetTable.Name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if len(primaryKeyColumnNames) == 0 {
@@ -69,7 +76,7 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 				QuoteIdentifier(targetTable.Name)),
 		}
 
-		return []Instruction{comment}, nil
+		return []Instruction{comment}, nil, nil
 	}
 
 	targetColumnNames := writablePostgresColumnNames(targetTable.Columns)
@@ -84,7 +91,7 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 				QuoteIdentifier(targetTable.Name)),
 		}
 
-		return []Instruction{comment}, nil
+		return []Instruction{comment}, nil, nil
 	}
 
 	commonColumnNames := lo.Filter(targetColumnNames, func(name string, _ int) bool {
@@ -93,12 +100,12 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 
 	targetData, err := d.GetTableData(ctx, d.TargetDatabaseConnection, targetTable.Name, targetColumnNames, primaryKeyColumnNames)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sourceData, err := d.GetTableData(ctx, d.SourceDatabaseConnection, sourceTable.Name, commonColumnNames, primaryKeyColumnNames)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var insertions []Instruction
@@ -173,9 +180,7 @@ func (d *PostgresDriver) DiffTableData(ctx context.Context, targetTable *Postgre
 		})
 	}
 
-	instructions := slices.Concat(insertions, modifications, removals)
-
-	return instructions, nil
+	return slices.Concat(insertions, modifications), removals, nil
 }
 
 // PostgreSQL computes a generated column, and it refuses a value for that column.

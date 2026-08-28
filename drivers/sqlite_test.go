@@ -3296,6 +3296,53 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
+	t.Run("CompareRowsDeletesAChildRowFirst", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents(id)
+			);
+		`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`
+			INSERT INTO parents (id) VALUES (1);
+			INSERT INTO children (id, parent) VALUES (10, 1);
+		`)
+
+		driver.ExecOnTarget(schema)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLDeleteInstruction{
+				TableName: "children",
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "10",
+						},
+					},
+				},
+			},
+			&SQLDeleteInstruction{
+				TableName: "parents",
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CompareRowsOfATableWithoutAPrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true

@@ -36,6 +36,7 @@ func (t *SQLiteTable) PrimaryKeyColumnNames() []string {
 // The schema section already creates or drops the other tables.
 func (d *SQLiteDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 	var instructions []Instruction
+	var removalsPerTable [][]Instruction
 
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
@@ -55,18 +56,24 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]Instruction, error) {
 			continue
 		}
 
-		subInstructions, err := d.DiffTableData(ctx, targetTable, sourceTable)
+		additions, removals, err := d.DiffTableData(ctx, targetTable, sourceTable)
 		if err != nil {
 			return nil, err
 		}
 
-		instructions = append(instructions, subInstructions...)
+		instructions = append(instructions, additions...)
+		removalsPerTable = append(removalsPerTable, removals)
+	}
+
+	// A DELETE of a child row comes before the DELETE of the parent row that it names.
+	for _, removals := range slices.Backward(removalsPerTable) {
+		instructions = append(instructions, removals...)
 	}
 
 	return instructions, nil
 }
 
-func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTable, sourceTable *SQLiteTable) ([]Instruction, error) {
+func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTable, sourceTable *SQLiteTable) ([]Instruction, []Instruction, error) {
 	primaryKeyColumnNames := targetTable.PrimaryKeyColumnNames()
 	if len(primaryKeyColumnNames) == 0 {
 		comment := &SQLCommentInstruction{
@@ -74,7 +81,7 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 				QuoteIdentifier(targetTable.Name)),
 		}
 
-		return []Instruction{comment}, nil
+		return []Instruction{comment}, nil, nil
 	}
 
 	targetColumnNames := writableSQLiteColumnNames(targetTable.Columns)
@@ -89,7 +96,7 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 				QuoteIdentifier(targetTable.Name)),
 		}
 
-		return []Instruction{comment}, nil
+		return []Instruction{comment}, nil, nil
 	}
 
 	commonColumnNames := lo.Filter(targetColumnNames, func(name string, _ int) bool {
@@ -98,12 +105,12 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 
 	targetData, err := d.GetTableData(ctx, d.TargetDatabaseConnection, targetTable.Name, targetColumnNames, primaryKeyColumnNames)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	sourceData, err := d.GetTableData(ctx, d.SourceDatabaseConnection, sourceTable.Name, commonColumnNames, primaryKeyColumnNames)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var insertions []Instruction
@@ -162,9 +169,7 @@ func (d *SQLiteDriver) DiffTableData(ctx context.Context, targetTable *SQLiteTab
 		})
 	}
 
-	instructions := slices.Concat(insertions, modifications, removals)
-
-	return instructions, nil
+	return slices.Concat(insertions, modifications), removals, nil
 }
 
 // SQLite gives no stable order, so this sort keeps the output equal between two runs.
