@@ -356,7 +356,10 @@ func formatPostgresValue(value any, databaseTypeName string) string {
 
 	timeValue, isTime := value.(time.Time)
 	if isTime {
-		return quoteLiteral(timeValue.Format(postgresTimeLayout))
+		// The TimeZone setting of each session names the offset of the text form, and
+		// the two sides can hold two settings. The UTC form keeps one instant equal to
+		// itself.
+		return quoteLiteral(timeValue.UTC().Format(postgresTimeLayout))
 	}
 
 	return quoteLiteral(fmt.Sprintf("%v", value))

@@ -4226,6 +4226,28 @@ func TestPostgresDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsWithATimestampValue", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE events (id integer PRIMARY KEY, at timestamptz);`
+
+		driver.ExecOnSource(schema)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO events (id, at) VALUES (1, '2024-01-01T05:00:00+02:00');`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "events",
+				ColumnNames: []string{"id", "at"},
+				Expressions: []string{"1", "'2024-01-01 03:00:00+00:00'"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CompareRowsWithSpecialFloatValues", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true
