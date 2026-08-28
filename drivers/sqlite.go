@@ -878,7 +878,10 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 
 	for rows.Next() {
 		var foreignKeyID, keyPosition int
-		var table, from, to, onUpdate, onDelete, match string
+		var table, from, onUpdate, onDelete, match string
+
+		// PRAGMA foreign_key_list gives a NULL parent column when the key names no parent column.
+		var to sql.NullString
 
 		err := rows.Scan(&foreignKeyID, &keyPosition, &table, &from, &to, &onUpdate, &onDelete, &match)
 		if err != nil {
@@ -898,7 +901,10 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 		}
 
 		foreignKey.From = append(foreignKey.From, from)
-		foreignKey.To = append(foreignKey.To, to)
+
+		if to.Valid {
+			foreignKey.To = append(foreignKey.To, to.String)
+		}
 	}
 
 	err = rows.Err()

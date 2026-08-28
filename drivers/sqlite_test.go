@@ -1440,6 +1440,57 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CreateTableWithAForeignKeyWithoutParentColumns", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE children (
+				id INTEGER PRIMARY KEY,
+				parent INTEGER REFERENCES parents
+			);
+		`)
+
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "parents",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+				},
+			},
+			&SQLiteCreateTableInstruction{
+				Name: "children",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "parent",
+						Type: "INTEGER",
+					},
+				},
+				ForeignKeys: []*SQLiteForeignKey{
+					{
+						Table:    "parents",
+						From:     []string{"parent"},
+						To:       []string{},
+						OnUpdate: "NO ACTION",
+						OnDelete: "NO ACTION",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("ModifyForeignKeyDeferrable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

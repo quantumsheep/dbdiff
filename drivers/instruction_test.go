@@ -321,6 +321,29 @@ func TestInstructions(t *testing.T) {
 );`, instruction.String())
 	})
 
+	t.Run("SQLiteCreateTableWithAForeignKeyWithoutParentColumns", func(t *testing.T) {
+		instruction := &SQLiteCreateTableInstruction{
+			Name: "children",
+			Columns: []*SQLiteColumn{
+				{
+					Name: "parent",
+					Type: "INTEGER",
+				},
+			},
+			ForeignKeys: []*SQLiteForeignKey{
+				{
+					Table: "parents",
+					From:  []string{"parent"},
+				},
+			},
+		}
+
+		require.Equal(t, `CREATE TABLE "children" (
+	"parent" INTEGER,
+	FOREIGN KEY ("parent") REFERENCES "parents"
+);`, instruction.String())
+	})
+
 	t.Run("SQLiteCreateIndex", func(t *testing.T) {
 		instruction := &SQLiteCreateIndexInstruction{
 			Name:      "idx_users_name",
