@@ -48,6 +48,20 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Contains(t, result.Stdout, `CREATE TABLE "users"`)
 	})
 
+	t.Run("EmptyDriverFlagStartsTheDetection", func(t *testing.T) {
+		directory := t.TempDir()
+
+		currentPath := filepath.Join(directory, "current.sqlite")
+		clitest.WriteSQLiteDatabase(t, currentPath, "")
+
+		finalPath := filepath.Join(directory, "final.sqlite")
+		clitest.WriteSQLiteDatabase(t, finalPath, "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+
+		result := clitest.Run(t, binaryPath, "--driver", "", currentPath, finalPath)
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+		require.Contains(t, result.Stdout, `CREATE TABLE "users"`)
+	})
+
 	t.Run("FlagBeforeTheCommandName", func(t *testing.T) {
 		directory := t.TempDir()
 

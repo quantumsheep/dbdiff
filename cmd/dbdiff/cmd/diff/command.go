@@ -13,7 +13,7 @@ import (
 func Command() *cli.Command {
 	return &cli.Command{
 		Name:         "diff",
-		Usage:        "Compare two schemas and print the statements that change the target",
+		Usage:        "Compare two schemas and print the statements that change the source",
 		UsageText:    "dbdiff diff [options] <source> <target>",
 		Action:       action,
 		OnUsageError: helpers.OnUsageError,

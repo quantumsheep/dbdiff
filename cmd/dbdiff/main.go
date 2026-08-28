@@ -26,8 +26,9 @@ func main() {
 			&cli.StringFlag{
 				Name:  "driver",
 				Usage: "Database driver to use. Supported drivers: sqlite3, postgres. The default is the driver of the source and the target",
+				// An empty value starts the detection of DetectDriver.
 				Validator: func(s string) error {
-					if slices.Contains(drivers.SupportedDriverNames, s) {
+					if s == "" || slices.Contains(drivers.SupportedDriverNames, s) {
 						return nil
 					}
 
