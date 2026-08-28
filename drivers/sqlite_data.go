@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/samber/lo"
 )
@@ -181,8 +180,15 @@ func writableSQLiteColumnNames(columns []*SQLiteColumn) []string {
 }
 
 func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName string, columnNames []string, primaryKeyColumnNames []string) (*SQLiteTableData, error) {
+	// go-sqlite3 reads a column of the declared type DATE as a time value, and it
+	// returns the zero time for a text that it cannot parse. The plus sign removes the
+	// declared type of the result column, so the driver returns the stored value.
+	selectExpressions := lo.Map(columnNames, func(name string, _ int) string {
+		return "+" + QuoteIdentifier(name)
+	})
+
 	statement := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s;",
-		strings.Join(QuoteIdentifiers(columnNames), ", "),
+		strings.Join(selectExpressions, ", "),
 		QuoteIdentifier(tableName),
 		strings.Join(QuoteIdentifiers(primaryKeyColumnNames), ", "))
 
@@ -230,8 +236,6 @@ func (d *SQLiteDriver) GetTableData(ctx context.Context, db *sql.DB, tableName s
 	return data, nil
 }
 
-const sqliteTimeLayout = "2006-01-02 15:04:05.999999999-07:00"
-
 // The diff compares two rows through these literals, so NULL never equals the text 'NULL'.
 func formatSQLiteValue(value any) string {
 	if value == nil {
@@ -265,11 +269,6 @@ func formatSQLiteValue(value any) string {
 	blobValue, isBlob := value.([]byte)
 	if isBlob {
 		return "X'" + hex.EncodeToString(blobValue) + "'"
-	}
-
-	timeValue, isTime := value.(time.Time)
-	if isTime {
-		return quoteLiteral(timeValue.Format(sqliteTimeLayout))
 	}
 
 	return quoteLiteral(fmt.Sprintf("%v", value))

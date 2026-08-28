@@ -3237,6 +3237,46 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsWithADateColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE events (id INTEGER PRIMARY KEY, at DATE);`
+
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO events (id, at) VALUES (1, 'alpha');`)
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO events (id, at) VALUES (1, 'omega'), (2, '2024-01-01');`)
+		diff := driver.RequireInstructions([]Instruction{
+			&SQLInsertInstruction{
+				TableName:   "events",
+				ColumnNames: []string{"id", "at"},
+				Expressions: []string{"2", "'2024-01-01'"},
+			},
+			&SQLUpdateInstruction{
+				TableName: "events",
+				SetClauses: []*SQLSetClause{
+					{
+						ColumnName: "at",
+						Expression: "'omega'",
+					},
+				},
+				Condition: &SQLConjunctionCondition{
+					Conditions: []Condition{
+						&SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CompareRowsOfATableWithoutAPrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true
