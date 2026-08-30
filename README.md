@@ -48,6 +48,7 @@ go install github.com/quantumsheep/dbdiff/cmd/dbdiff@latest
 | `dbdiff migrate step`            | Apply every pending migration, and ask before each file           |
 | `dbdiff migrate verify`          | Compare the database against the replay of the applied migrations |
 | `dbdiff migrate repair`          | Make the history table agree with the migration files             |
+| `dbdiff migrate baseline`        | Record every migration file as applied, and run no file           |
 
 
 The source holds the current schema. The target holds the final schema. The output changes the source into the target.
@@ -129,7 +130,7 @@ $ dbdiff migrate generate add_created_at
 migrations/20260822143000_add_created_at.sql
 ```
 
-The six other commands change or read a database, and they name that database with the `--target` flag. Do not put a production connection string in a file that goes into git. Give the flag, or set the `DBDIFF_TARGET` variable:
+The seven other commands change or read a database, and they name that database with the `--target` flag. Do not put a production connection string in a file that goes into git. Give the flag, or set the `DBDIFF_TARGET` variable:
 
 ```bash
 export DBDIFF_TARGET=postgres://user:password@localhost:5432/production
@@ -137,6 +138,8 @@ dbdiff migrate up
 ```
 
 `migrate up` applies each pending file in its own transaction and records it in the table `dbdiff_migrations`. On MySQL a transaction rolls no DDL statement back, so `migrate up` marks each file with a dirty row instead. If a file fails halfway, repair the database, then run `migrate repair`. A checksum detects a file that changed after its migration ran. `migrate up` also accepts `--to <version>`, which stops the run after that version. `migrate preview` accepts `--run`, which applies every pending file in one transaction and rolls it back. `migrate preview --run` refuses the mysql driver, because MySQL commits every DDL statement at once.
+
+`migrate baseline` records every migration file as applied, and it runs no file. Use it to adopt dbdiff on a database that already holds the schema of the files.
 
 A file that holds the line `-- dbdiff:no-transaction` runs outside a transaction, one call per statement.
 

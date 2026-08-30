@@ -12,6 +12,7 @@ import (
 	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 func LoadMigrationSet(ctx context.Context, migrator Migrator, directory string) (*MigrationSet, error) {
@@ -328,6 +329,73 @@ func RunMigrationRepair(ctx context.Context, migrator Migrator, set *MigrationSe
 
 	if repaired == 0 {
 		_, _ = fmt.Fprintln(output, "The record needs no repair.")
+	}
+
+	return nil
+}
+
+// RunMigrationBaseline records every file that the history table does not hold, and it
+// runs no file. A baseline adopts a database that already holds the schema of the files.
+func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *MigrationSet,
+	output io.Writer) error {
+	err := set.RecordError()
+	if err != nil {
+		return err
+	}
+
+	err = migrator.Lock(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to take the migration lock: %w", err)
+	}
+
+	defer func() { _ = migrator.Unlock(ctx) }()
+
+	err = migrator.EnsureHistoryTable(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create the history table: %w", err)
+	}
+
+	set, err = reloadMigrationSet(ctx, migrator, set)
+	if err != nil {
+		return err
+	}
+
+	err = set.RecordError()
+	if err != nil {
+		return err
+	}
+
+	unrecorded := lo.Filter(set.Entries, func(entry *MigrationEntry, _ int) bool {
+		return entry.State == MigrationPending || entry.State == MigrationOutOfOrder
+	})
+
+	if len(unrecorded) == 0 {
+		_, _ = fmt.Fprintln(output, "The record holds every file.")
+
+		return nil
+	}
+
+	transaction, err := migrator.Begin(ctx, true)
+	if err != nil {
+		return fmt.Errorf("failed to open the baseline transaction: %w", err)
+	}
+
+	for _, entry := range unrecorded {
+		err = transaction.Record(ctx, entry.Migration)
+		if err != nil {
+			_ = transaction.Rollback()
+
+			return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+		}
+	}
+
+	err = transaction.Commit()
+	if err != nil {
+		return fmt.Errorf("failed to record the baseline: %w", err)
+	}
+
+	for _, entry := range unrecorded {
+		_, _ = fmt.Fprintf(output, "Recorded %s.\n", entry.FileName())
 	}
 
 	return nil

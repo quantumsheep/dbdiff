@@ -406,6 +406,137 @@ func TestApplyMigrations(t *testing.T) {
 	})
 }
 
+func TestRunMigrationBaseline(t *testing.T) {
+	t.Run("RecordsEveryFileAndRunsNoFile", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
+			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		var output bytes.Buffer
+
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
+		require.Contains(t, output.String(), "Recorded 20260822143000_notes.")
+		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 2)
+		require.False(t, applied[0].Dirty)
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, MigrationApplied, set.Entries[0].State)
+		require.Equal(t, MigrationApplied, set.Entries[1].State)
+	})
+
+	t.Run("SkipsAnAppliedFile", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+
+		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
+			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		var output bytes.Buffer
+
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.NotContains(t, output.String(), "20260814101500_init")
+		require.Contains(t, output.String(), "Recorded 20260822143000_notes.")
+		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 2)
+	})
+
+	t.Run("RecordsAnOutOfOrderFile", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
+			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, MigrationOutOfOrder, set.Entries[0].State)
+
+		var output bytes.Buffer
+
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, MigrationApplied, set.Entries[0].State)
+	})
+
+	t.Run("WithNoUnrecordedFile", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		var output bytes.Buffer
+
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.Contains(t, output.String(), "The record holds every file.")
+	})
+
+	t.Run("RefusesAChangedFile", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		path := sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+
+		require.NoError(t, os.WriteFile(path,
+			[]byte("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n"), 0o600))
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		err = RunMigrationBaseline(t.Context(), migrator, set, io.Discard)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "changed")
+	})
+}
+
 func TestRunMigrationRepair(t *testing.T) {
 	t.Run("AChangedFileTakesTheChecksumOfTheFile", func(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)

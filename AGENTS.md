@@ -26,7 +26,7 @@ Read this section before you write any code.
 | `cmd/dbdiff/`                     | `main.go` builds the root command. `main_test.go` runs the binary.                                   |
 | `cmd/dbdiff/cmd/`                 | One package per command: `<command>/command.go`, with a `command_test.go` beside it.                 |
 | `cmd/dbdiff/internal/helpers/`    | Version and the usage error handler                                                                  |
-| `cmd/dbdiff/internal/migrations/` | The flag and configuration reading of the seven migrate commands                                     |
+| `cmd/dbdiff/internal/migrations/` | The flag and configuration reading of the eight migrate commands                                     |
 | `cmd/dbdiff/internal/clitest/`    | The helpers that build the binary and run it                                                         |
 | `internal/sqltest/`               | The writer of a `.sql` file, shared by the driver tests, the migrations tests, and `clitest`         |
 | `internal/drivers/`               | One file, `new_driver.go`. It holds `NewDriver`, the one driver switch of the program.               |
@@ -77,7 +77,7 @@ The `dbdiff` command holds `--driver` and `--schema`, with `Local` false, so eve
 | `migrate preview`      | The three flags above, and `--run`                    |
 | `migrate up`           | The three flags above, and `--to`                     |
 
-Each subcommand of `migrate` writes its flags in its own `Command` function, because each command needs its own flag instances. A change of the text of one of the three migration flags touches each of the seven files.
+Each subcommand of `migrate` writes its flags in its own `Command` function, because each command needs its own flag instances. A change of the text of one of the three migration flags touches each of the eight files.
 
 The SQLite driver needs CGO. If a build fails with an undefined symbol, set `CGO_ENABLED=1` before the build.
 

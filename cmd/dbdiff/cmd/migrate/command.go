@@ -1,6 +1,7 @@
 package cmdmigrate
 
 import (
+	cmdmigratebaseline "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/migrate/cmd/baseline"
 	cmdmigrategenerate "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/migrate/cmd/generate"
 	cmdmigratepreview "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/migrate/cmd/preview"
 	cmdmigraterepair "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/migrate/cmd/repair"
@@ -25,6 +26,7 @@ func Command() *cli.Command {
 			cmdmigratestep.Command(),
 			cmdmigrateverify.Command(),
 			cmdmigraterepair.Command(),
+			cmdmigratebaseline.Command(),
 		},
 	}
 }
