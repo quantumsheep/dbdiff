@@ -95,10 +95,24 @@ func TestDetectDriver(t *testing.T) {
 	})
 
 	t.Run("UnknownScheme", func(t *testing.T) {
-		_, err := DetectDriver("mysql://user@localhost/target", "mysql://user@localhost/source")
+		_, err := DetectDriver("oracle://user@localhost/target", "oracle://user@localhost/source")
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "cannot detect the driver")
+	})
+
+	t.Run("MySQLScheme", func(t *testing.T) {
+		driverName, err := DetectDriver("mysql://user@localhost/target", "mysql://user@localhost/source")
+
+		require.NoError(t, err)
+		require.Equal(t, MySQLDriverName, driverName)
+	})
+
+	t.Run("MariaDBScheme", func(t *testing.T) {
+		driverName, err := DetectDriver("mariadb://user@localhost/target", "")
+
+		require.NoError(t, err)
+		require.Equal(t, MySQLDriverName, driverName)
 	})
 
 	t.Run("TwoDifferentEngines", func(t *testing.T) {

@@ -19,7 +19,7 @@ DROP TABLE "audit";
 CREATE VIEW active_users AS SELECT id, email FROM users;
 ```
 
-- **Two engines.** dbdiff supports SQLite and PostgreSQL.
+- **Three engines.** dbdiff supports SQLite, PostgreSQL, and MySQL with MariaDB.
 - **Databases and files.** Each side is a database, a `.sql` file, or a directory of `.sql` migration files.
 - **Write on request.** `dbdiff diff` prints the statements and changes no database. `dbdiff migrate up` applies migration files to a database.
 - **Rows.** The `--data` flag adds the comparison of the rows.
@@ -59,6 +59,9 @@ dbdiff diff current.sqlite ./migrations
 dbdiff diff --driver postgres --schema app \
   postgres://user:password@localhost:5432/source \
   postgres://user:password@localhost:5432/target
+dbdiff diff \
+  mysql://user:password@localhost:3306/source \
+  mysql://user:password@localhost:3306/target
 ```
 
 dbdiff writes one SQL statement per line to the standard output. It changes no database. To apply the statements, send them to the client of the engine:
@@ -73,25 +76,27 @@ dbdiff diff current.sqlite final.sqlite | sqlite3 current.sqlite
 ### Flags of `diff`
 
 
-| Flag           | Value                   | Purpose                                                                                       |
-| -------------- | ----------------------- | --------------------------------------------------------------------------------------------- |
-| `--driver`     | `sqlite3` or `postgres` | Select the database engine. The default value comes from the arguments.                       |
-| `--schema`     | A schema name           | Name the schema that the postgres driver reads. The default is the schema of the search path. |
-| `--data`       | none                    | Add the comparison of the rows.                                                               |
-| `--comments`   | none                    | Print a comment before each object that the output changes.                                   |
-| `--privileges` | none                    | Add the comparison of the owner and the privileges (postgres only).                           |
-| `--exit-code`  | none                    | Exit with the code 1 when the schemas differ, like `diff(1)`.                                 |
+| Flag           | Value                             | Purpose                                                                                       |
+| -------------- | --------------------------------- | --------------------------------------------------------------------------------------------- |
+| `--driver`     | `sqlite3`, `postgres`, or `mysql` | Select the database engine. The default value comes from the arguments.                       |
+| `--schema`     | A schema name                     | Name the schema that the postgres driver reads. The default is the schema of the search path. |
+| `--data`       | none                              | Add the comparison of the rows.                                                               |
+| `--comments`   | none                              | Print a comment before each object that the output changes.                                   |
+| `--privileges` | none                              | Add the comparison of the owner and the privileges (postgres and mysql).                      |
+| `--exit-code`  | none                              | Exit with the code 1 when the schemas differ, like `diff(1)`.                                 |
 
 
 ### Driver detection
 
-If you give no `--driver` flag, dbdiff reads the engine from the arguments. A `postgres://` URL or a keyword connection string selects `postgres`. A plain path or a `sqlite://` path selects `sqlite3`. A `.sql` file or a directory takes the engine of the other side. If both sides name SQL text, or if the two sides name different engines, give the `--driver` flag.
+If you give no `--driver` flag, dbdiff reads the engine from the arguments. A `postgres://` URL or a keyword connection string selects `postgres`. A `mysql://` URL or a `mariadb://` URL selects `mysql`. A plain path or a `sqlite://` path selects `sqlite3`. A `.sql` file or a directory takes the engine of the other side. If both sides name SQL text, or if the two sides name different engines, give the `--driver` flag.
 
 ## SQL files
 
 An argument names SQL text when the path ends in `.sql`, or when the path is a directory. dbdiff applies the SQL to a temporary database, and then it compares that database. A directory gives its top-level `.sql` files in the order of the names, without the `.down.sql` files. A directory that holds no `.sql` file gives an empty schema.
 
 With the postgres driver, the temporary server downloads on the first run. It takes the major version of the database of the other side, or the `version` key of `dbdiff.yaml`.
+
+With the mysql driver, dbdiff builds the temporary database on the server of the other side, so that other side must be a database. The connection needs the privilege to create and to drop a database.
 
 dbdiff applies each file in one call. PostgreSQL refuses `CREATE INDEX CONCURRENTLY` and other statements of that kind inside such a call. Write the line `-- dbdiff:no-transaction` in such a file. dbdiff then runs one call for each statement. The line `-- atlas:txmode none` of Atlas gives the same result.
 
@@ -131,7 +136,7 @@ export DBDIFF_TARGET=postgres://user:password@localhost:5432/production
 dbdiff migrate up
 ```
 
-`migrate up` applies each pending file in its own transaction and records it in the table `dbdiff_migrations`. A checksum detects a file that changed after its migration ran. `migrate up` also accepts `--to <version>`, which stops the run after that version. `migrate preview` accepts `--run`, which applies every pending file in one transaction and rolls it back.
+`migrate up` applies each pending file in its own transaction and records it in the table `dbdiff_migrations`. A checksum detects a file that changed after its migration ran. `migrate up` also accepts `--to <version>`, which stops the run after that version. `migrate preview` accepts `--run`, which applies every pending file in one transaction and rolls it back. `migrate preview --run` refuses the mysql driver, because MySQL commits every DDL statement at once.
 
 A file that holds the line `-- dbdiff:no-transaction` runs outside a transaction, one call per statement.
 
@@ -165,43 +170,49 @@ err := migrations.Up(ctx,
 ## Supported objects
 
 
-| Object                        | SQLite                                         | PostgreSQL             |
-| ----------------------------- | ---------------------------------------------- | ---------------------- |
-| Tables                        | ✅                                              | ✅                      |
-| Identity columns              | ➖                                              | ✅                      |
-| Table options                 | ✅ (WITHOUT ROWID, STRICT)                      | ✅ (storage parameters) |
-| Virtual tables                | ✅                                              | ➖                      |
-| Generated columns             | ✅                                              | ✅                      |
-| Column storage and statistics | ➖                                              | ✅                      |
-| Indexes                       | ✅                                              | ✅                      |
-| Constraints                   | ✅ (foreign keys, primary keys, unique, checks) | ✅                      |
-| Triggers                      | ✅ (of a table and of a view)                   | ✅ (with the mode)      |
-| Views                         | ✅                                              | ✅                      |
-| Materialized views            | ➖                                              | ✅                      |
-| Rules                         | ➖                                              | ✅                      |
-| Extended statistics           | ➖                                              | ✅                      |
-| Partitioned tables            | ➖                                              | ✅                      |
-| Replica identity              | ➖                                              | ✅                      |
-| Sequences                     | ➖                                              | ✅                      |
-| Enum types                    | ➖                                              | ✅                      |
-| Domains                       | ➖                                              | ✅                      |
-| Composite types               | ➖                                              | ✅                      |
-| Functions                     | ➖                                              | ✅                      |
-| Procedures                    | ➖                                              | ✅                      |
-| Aggregates                    | ➖                                              | ✅                      |
-| Operators                     | ➖                                              | ✅                      |
-| Extensions                    | ➖                                              | ✅                      |
-| Comments                      | ➖                                              | ✅                      |
-| Row level security            | ➖                                              | ✅                      |
-| Privileges                    | ➖                                              | ✅ (`--privileges`)     |
-| Data                          | ✅                                              | ✅                      |
+| Object                        | SQLite                                         | PostgreSQL             | MySQL / MariaDB                                |
+| ----------------------------- | ---------------------------------------------- | ---------------------- | ---------------------------------------------- |
+| Tables                        | ✅                                              | ✅                      | ✅                                              |
+| Identity columns              | ➖                                              | ✅                      | ➖                                              |
+| Table options                 | ✅ (WITHOUT ROWID, STRICT)                      | ✅ (storage parameters) | ✅ (ENGINE, collation)                          |
+| Virtual tables                | ✅                                              | ➖                      | ➖                                              |
+| Generated columns             | ✅                                              | ✅                      | ✅                                              |
+| Column storage and statistics | ➖                                              | ✅                      | ➖                                              |
+| Indexes                       | ✅                                              | ✅                      | ✅                                              |
+| Constraints                   | ✅ (foreign keys, primary keys, unique, checks) | ✅                      | ✅ (foreign keys, primary keys, unique, checks) |
+| Triggers                      | ✅ (of a table and of a view)                   | ✅ (with the mode)      | ✅                                              |
+| Views                         | ✅                                              | ✅                      | ✅                                              |
+| Materialized views            | ➖                                              | ✅                      | ➖                                              |
+| Rules                         | ➖                                              | ✅                      | ➖                                              |
+| Extended statistics           | ➖                                              | ✅                      | ➖                                              |
+| Partitioned tables            | ➖                                              | ✅                      | ✅                                              |
+| Replica identity              | ➖                                              | ✅                      | ➖                                              |
+| Sequences                     | ➖                                              | ✅                      | ✅ (MariaDB)                                    |
+| Enum types                    | ➖                                              | ✅                      | ➖ (the column type covers it)                  |
+| Domains                       | ➖                                              | ✅                      | ➖                                              |
+| Composite types               | ➖                                              | ✅                      | ➖                                              |
+| Functions                     | ➖                                              | ✅                      | ✅                                              |
+| Procedures                    | ➖                                              | ✅                      | ✅                                              |
+| Events                        | ➖                                              | ➖                      | ✅                                              |
+| Aggregates                    | ➖                                              | ✅                      | ➖                                              |
+| Operators                     | ➖                                              | ✅                      | ➖                                              |
+| Extensions                    | ➖                                              | ✅                      | ➖                                              |
+| Comments                      | ➖                                              | ✅                      | ✅ (of a column)                                |
+| Row level security            | ➖                                              | ✅                      | ➖                                              |
+| Privileges                    | ➖                                              | ✅ (`--privileges`)     | ✅ (`--privileges`)                             |
+| Data                          | ✅                                              | ✅                      | ✅                                              |
 
 
-✅ dbdiff compares this object. ➖ the engine holds no such object. A table covers its columns. dbdiff does not support MySQL.
+✅ dbdiff compares this object. ➖ the engine holds no such object. A table covers its columns. The mysql driver covers MySQL and MariaDB.
 
 ## Limits
 
 - The PostgreSQL driver compares one schema per run. It prints no `CREATE SCHEMA` statement, and it detects no object that moved between schemas.
+- The MySQL driver compares one database per run, and the connection URL names that database.
+- With the MySQL driver, a diff of two SQL sources does not work. One side must be a database, because dbdiff builds a SQL source on the server of that side.
+- The body of a trigger, a procedure, or a function holds semicolons. The `mysql` client splits its input at each semicolon, so give such a diff to the client with a `DELIMITER` command, or apply it with `dbdiff migrate up`.
+- The `--privileges` flag of the mysql driver covers the grants of the database and of its tables. It reads no global grant, no column grant, and no routine grant, and it creates no user.
+- The mysql driver ignores the STARTS clause when it compares two events, because MySQL writes the creation time into an event without that clause.
 - The `--privileges` flag covers tables, views, materialized views, and sequences. It reads no default privilege of `ALTER DEFAULT PRIVILEGES`.
 - dbdiff generates no down migration. Use an up migration as a down migration.
 - The name `dbdiff_migrations` is reserved. `dbdiff diff` hides a table with that name.
@@ -210,15 +221,15 @@ err := migrations.Up(ctx,
 ## Development
 
 ```bash
-docker compose up -d                      # Start PostgreSQL on port 5432
+docker compose up -d                      # Start PostgreSQL, MySQL, and MariaDB
 go build -o ./bin/dbdiff ./cmd/dbdiff     # Build the binary
 go test ./...                             # Run the tests
 ```
 
-To run the tests without the PostgreSQL container:
+To run the tests without the containers:
 
 ```bash
-DBDIFF_TEST_SKIP_POSTGRES=1 go test -short ./...
+DBDIFF_TEST_SKIP_POSTGRES=1 DBDIFF_TEST_SKIP_MYSQL=1 go test -short ./...
 ```
 
 ## License

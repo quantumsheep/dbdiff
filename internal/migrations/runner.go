@@ -107,6 +107,10 @@ func RunMigrationPreview(ctx context.Context, migrator Migrator, set *MigrationS
 		return nil
 	}
 
+	if !migrator.SupportsTransactionalDDL() {
+		return fmt.Errorf("the target engine commits every DDL statement at once, so preview cannot roll the pending files back")
+	}
+
 	transaction, err := migrator.Begin(ctx, true)
 	if err != nil {
 		return fmt.Errorf("failed to open the preview transaction: %w", err)

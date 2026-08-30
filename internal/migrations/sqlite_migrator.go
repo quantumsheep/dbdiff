@@ -35,6 +35,10 @@ func (m *SQLiteMigrator) Close() error {
 	return m.Connection.Close()
 }
 
+func (m *SQLiteMigrator) SupportsTransactionalDDL() bool {
+	return true
+}
+
 func (m *SQLiteMigrator) EnsureHistoryTable(ctx context.Context) error {
 	statement := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (

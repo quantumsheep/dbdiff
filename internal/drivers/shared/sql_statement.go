@@ -24,9 +24,10 @@ func FileUsesTransaction(content string) bool {
 // for each statement for that reason, and every other file runs in one call.
 //
 // A semicolon splits nothing inside parentheses, because the actions of CREATE RULE sit
-// there. It splits nothing inside BEGIN ... END, because the body of a trigger of SQLite
-// and the body of BEGIN ATOMIC hold whole statements. A CASE expression ends with END
-// too, so the block counter reads CASE as an opener.
+// there. It splits nothing inside BEGIN ... END, because the body of a trigger, of a
+// MySQL routine, and of BEGIN ATOMIC holds whole statements. A CASE expression ends with
+// END too, so the block counter reads CASE as an opener. A bare BEGIN opens a block only
+// in a statement that owns a body, because BEGIN alone starts a transaction.
 func SplitSQLStatements(content string) []string {
 	var statements []string
 
@@ -35,7 +36,7 @@ func SplitSQLStatements(content string) []string {
 
 	parenthesisDepth := 0
 	blockDepth := 0
-	triggerStatement := false
+	statementOwnsBody := false
 
 	for index < len(content) {
 		rest := content[index:]
@@ -45,7 +46,7 @@ func SplitSQLStatements(content string) []string {
 			index = endOfLineComment(content, index)
 		case strings.HasPrefix(rest, "/*"):
 			index = endOfBlockComment(content, index)
-		case content[index] == '\'' || content[index] == '"':
+		case content[index] == '\'' || content[index] == '"' || content[index] == '`':
 			index = endOfQuotedText(content, index)
 		case content[index] == '$':
 			index = endOfDollarQuotedText(content, index)
@@ -59,10 +60,10 @@ func SplitSQLStatements(content string) []string {
 			word, end := readSQLWord(content, index)
 
 			switch {
-			case word == "trigger" && blockDepth == 0:
-				triggerStatement = true
+			case isBodyOwnerKeyword(word) && blockDepth == 0:
+				statementOwnsBody = true
 			case word == "begin" && blockDepth == 0 &&
-				(triggerStatement || nextSQLWord(content, end) == "atomic"):
+				(statementOwnsBody || nextSQLWord(content, end) == "atomic"):
 				blockDepth++
 			case word == "case" && blockDepth > 0:
 				blockDepth++
@@ -75,13 +76,17 @@ func SplitSQLStatements(content string) []string {
 			statements = appendStatement(statements, content[start:index])
 			index++
 			start = index
-			triggerStatement = false
+			statementOwnsBody = false
 		default:
 			index++
 		}
 	}
 
 	return appendStatement(statements, content[start:])
+}
+
+func isBodyOwnerKeyword(word string) bool {
+	return word == "trigger" || word == "procedure" || word == "function" || word == "event"
 }
 
 func isSQLWordStart(letter byte) bool {

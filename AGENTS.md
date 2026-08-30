@@ -2,7 +2,7 @@
 
 ## What dbdiff is
 
-dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the source schema equal to the target schema. The source holds the current schema that the output changes. The target holds the wanted schema. Every diff walks the target objects first, and it prints the statements that change the source. dbdiff supports SQLite and PostgreSQL. An argument names a database, a `.sql` file, or a directory of `.sql` files.
+dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the source schema equal to the target schema. The source holds the current schema that the output changes. The target holds the wanted schema. Every diff walks the target objects first, and it prints the statements that change the source. dbdiff supports SQLite, PostgreSQL, and MySQL with MariaDB. An argument names a database, a `.sql` file, or a directory of `.sql` files.
 
 ## The rules that matter most
 
@@ -33,6 +33,7 @@ Read this section before you write any code.
 | `internal/drivers/shared/`        | The engine-free core: `Driver`, the `SQL` instruction types, quoting, the SQL sources, the statement splitter, the comment builders, `DetectDriver`, `DiffByKey`, and `DiffData` |
 | `internal/drivers/sqlite/`        | The SQLite driver: the schema models, the `SQLite` instruction types, and the data comparison        |
 | `internal/drivers/postgres/`      | The PostgreSQL driver, with the same shape                                                           |
+| `internal/drivers/mysql/`         | The MySQL driver, with the same shape. It covers MariaDB too.                                        |
 | `internal/migrations/`            | The model of a migration and the migrator of each engine. It knows no command and no flag.           |
 | `drivers/`                        | The public package that runs a diff from a Go program. Its types stay stable.                        |
 | `migrations/`                     | The public package that applies the migrations from a Go program. Its types stay stable.             |
@@ -41,11 +42,11 @@ An engine package uses one file per schema object, with the name `<engine>_<obje
 
 Do not add a package for a schema object. Add a file to the engine package. A new engine adds one package under `internal/drivers/`, one case to `NewDriver`, one case to `NewMigrator`, one name to `SupportedDriverNames`, and one branch to `DetectDriver`.
 
-A subpackage of `internal/drivers` never imports its parent. `driverssqlite` and `driverspostgres` import `driversshared` only.
+A subpackage of `internal/drivers` never imports its parent. `driverssqlite`, `driverspostgres`, and `driversmysql` import `driversshared` only.
 
 ## Package names
 
-A command package takes the name of its path, with no separator: `cmd/dbdiff/cmd/diff` holds `package cmddiff`, and `cmd/dbdiff/cmd/migrate/cmd/generate` holds `package cmdmigrategenerate`. The driver packages follow the same rule: `driversshared`, `driverssqlite`, and `driverspostgres`. The name differs from the directory, so every import writes the name:
+A command package takes the name of its path, with no separator: `cmd/dbdiff/cmd/diff` holds `package cmddiff`, and `cmd/dbdiff/cmd/migrate/cmd/generate` holds `package cmdmigrategenerate`. The driver packages follow the same rule: `driversshared`, `driverssqlite`, `driverspostgres`, and `driversmysql`. The name differs from the directory, so every import writes the name:
 
 ```go
 driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -175,11 +176,21 @@ Three rules keep the output free of noise:
 
 An object with no `ALTER` action, for example a policy or a rule, prints a `DROP` and `CREATE` pair, and that pair stays one modification in `Additions`. The code comments of the package hold the order rules of the tables section.
 
+## The MySQL driver
+
+The driver reads the information_schema tables with the connected database as the schema, and it covers MySQL and MariaDB. Give every catalog query a stable `ORDER BY`. The driver quotes an identifier with its own `QuoteIdentifier`, because MySQL uses the backtick. The shared instruction types quote with the double quote, so the mysql package holds its own instruction types.
+
+The driver reads `SELECT VERSION()` per side and branches on MariaDB where the catalog differs: the STATISTICS table of MariaDB holds no EXPRESSION column, the CHECK_CONSTRAINTS table of MariaDB holds the table name, MariaDB stores every column default as an expression, and the sequences exist on MariaDB only. MySQL escapes a quote and a backslash in a catalog expression text, and `unescapeCatalogText` removes that escape.
+
+MySQL gives no creation order for the tables, so a diff that creates or drops a table with a foreign key, or that adds a key to a table that another instruction creates, wraps the output in a `SET FOREIGN_KEY_CHECKS` pair. MySQL builds an index with the name of a foreign key, so the table creation and the index additions skip a CREATE INDEX statement with that name. The code comments of the package hold the other engine rules and the order rules of `DiffTable`.
+
+`Diff` prints the sections in this order: sequences, tables with their triggers, routines, views, events, privileges, data. A routine, an event, and the partition clause of a table come from `SHOW CREATE`, with the DEFINER clause and the final semicolon removed. The event comparison also removes the STARTS clause, because MySQL writes the creation time into an event without one. The engine and the collation of a table compare through a default flag, so two databases with two different defaults compare as equal. The data comparison gives the shared `DiffData` a backtick `Quote` hook and its own statement types, because the shared types quote with the double quote.
+
 ## SQL sources
 
 An argument names SQL text when the path ends in `.sql`, or when the path is a directory. A path that holds `://` never names SQL text. A directory gives its top-level `.sql` files in the order of the names, without the `.down.sql` files.
 
-Each engine materializes a source as a temporary database: SQLite as a file, and PostgreSQL as a scratch server from `fergusstrange/embedded-postgres`. The scratch server takes the major version of the database of the other side, or the `version` key of `dbdiff.yaml`. Do not name a version in the code. Four settings of the scratch server matter. Keep them:
+Each engine materializes a source as a temporary database: SQLite as a file, PostgreSQL as a scratch server from `fergusstrange/embedded-postgres`, and MySQL as a scratch database on the server of the other side. The mysql driver refuses two SQL sources, because it then holds no server. The scratch server takes the major version of the database of the other side, or the `version` key of `dbdiff.yaml`. Do not name a version in the code. Four settings of the scratch server matter. Keep them:
 
 - The logger is `io.Discard`, because the default logger writes to the stream that holds the diff.
 - The port comes from a free-port lookup, because a real server holds the default port 5432.
@@ -217,16 +228,16 @@ Every test lives beside the code. There is no `tests` folder. The tests use `git
 ## Run the tests
 
 ```bash
-docker compose up -d    # PostgreSQL on port 5432, needed by the PostgreSQL tests
+docker compose up -d    # PostgreSQL on 5432, MySQL on 3306, and MariaDB on 3307
 go test ./...
 go test -run TestSQLiteDriver/RenameColumn ./internal/drivers/sqlite
 ```
 
-The PostgreSQL tests need the database at `postgres://user:password@localhost:5432/dbdiff`. `DBDIFF_TEST_SKIP_POSTGRES=1` stops `TestPostgresDriver`. The CI gives that variable and the `-short` flag to macOS and to Windows. Keep the variable empty on Linux, because a silent skip hides a server failure there.
+The PostgreSQL tests need the database at `postgres://user:password@localhost:5432/dbdiff`. The MySQL tests need `root:password@tcp(localhost:3306)/dbdiff`, and the MariaDB tests need the same on the port 3307. `DBDIFF_TEST_SKIP_POSTGRES=1` stops `TestPostgresDriver`, and `DBDIFF_TEST_SKIP_MYSQL=1` stops `TestMySQLDriver` and `TestMariaDBDriver`. The CI gives the two variables and the `-short` flag to macOS and to Windows. Keep the variables empty on Linux, because a silent skip hides a server failure there.
 
 ## Structure
 
-One engine gets one top-level function for each type under test: `TestSQLiteDriver` and `TestSQLiteMigrator`, `TestPostgresDriver` and `TestPostgresMigrator`. Each behavior gets one `t.Run` subtest, named with a short noun phrase in CamelCase, for example `AddColumn`.
+One engine gets one top-level function for each type under test: `TestSQLiteDriver` and `TestSQLiteMigrator`, `TestPostgresDriver` and `TestPostgresMigrator`, `TestMySQLDriver` and `TestMySQLMigrator`. `TestMariaDBDriver` runs the MariaDB branches of the mysql driver. Each behavior gets one `t.Run` subtest, named with a short noun phrase in CamelCase, for example `AddColumn`.
 
 `TestingSQLiteDriver` and `TestingPostgresDriver` embed the driver and hold the `testing.TB` value. The constructor builds the databases and registers the cleanup with `tb.Cleanup`. The PostgreSQL harness creates one source schema and one target schema in one database, drops both in the cleanup, and checks each drop with `require.NoError`. Keep the connection of the harness open until the cleanup ends. Every harness method calls `d.tb.Helper()` on its first line.
 

@@ -141,4 +141,38 @@ func TestSplitSQLStatements(t *testing.T) {
 			"COMMIT",
 		}, SplitSQLStatements("BEGIN;\nSELECT 1;\nCOMMIT;"))
 	})
+
+	t.Run("AProcedureBodyHoldsSemicolons", func(t *testing.T) {
+		content := "CREATE PROCEDURE prune() BEGIN DELETE FROM a; DELETE FROM b; END;\nSELECT 1;"
+
+		require.Equal(t, []string{
+			"CREATE PROCEDURE prune() BEGIN DELETE FROM a; DELETE FROM b; END",
+			"SELECT 1",
+		}, SplitSQLStatements(content))
+	})
+
+	t.Run("AMySQLFunctionBodyHoldsSemicolons", func(t *testing.T) {
+		content := "CREATE FUNCTION f(x int) RETURNS int BEGIN RETURN x; END;\nSELECT 1;"
+
+		require.Equal(t, []string{
+			"CREATE FUNCTION f(x int) RETURNS int BEGIN RETURN x; END",
+			"SELECT 1",
+		}, SplitSQLStatements(content))
+	})
+
+	t.Run("AnEventBodyHoldsSemicolons", func(t *testing.T) {
+		content := "CREATE EVENT e ON SCHEDULE EVERY 1 DAY DO BEGIN SET @a = 1; SET @b = 2; END;\nSELECT 1;"
+
+		require.Equal(t, []string{
+			"CREATE EVENT e ON SCHEDULE EVERY 1 DAY DO BEGIN SET @a = 1; SET @b = 2; END",
+			"SELECT 1",
+		}, SplitSQLStatements(content))
+	})
+
+	t.Run("ABacktickIdentifierHoldsASemicolon", func(t *testing.T) {
+		require.Equal(t, []string{
+			"SELECT `a;b` FROM t",
+			"SELECT 2",
+		}, SplitSQLStatements("SELECT `a;b` FROM t;\nSELECT 2;"))
+	})
 }

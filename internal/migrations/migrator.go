@@ -19,6 +19,9 @@ type AppliedMigration struct {
 
 type Migrator interface {
 	Close() error
+	// A false value names an engine that commits every DDL statement at once. The command
+	// preview refuses such an engine, because its rollback rolls no schema change back.
+	SupportsTransactionalDDL() bool
 	EnsureHistoryTable(ctx context.Context) error
 	AppliedMigrations(ctx context.Context) ([]AppliedMigration, error)
 	Lock(ctx context.Context) error
@@ -58,6 +61,8 @@ func NewMigrator(ctx context.Context, driverName driversshared.DriverName, targe
 		return NewSQLiteMigrator(target)
 	case driversshared.PostgresDriverName:
 		return NewPostgresMigrator(ctx, target, schema)
+	case driversshared.MySQLDriverName:
+		return NewMySQLMigrator(ctx, target)
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)
 	}

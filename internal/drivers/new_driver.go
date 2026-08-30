@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	driversmysql "github.com/quantumsheep/dbdiff/internal/drivers/mysql"
 	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
@@ -28,7 +29,7 @@ func NewDriver(ctx context.Context, driverName driversshared.DriverName, current
 		}
 
 		if comparePrivileges {
-			return nil, fmt.Errorf("the --privileges flag applies to the postgres driver only")
+			return nil, fmt.Errorf("the --privileges flag applies to the postgres driver and to the mysql driver")
 		}
 
 		if scratchVersion != "" {
@@ -39,6 +40,21 @@ func NewDriver(ctx context.Context, driverName driversshared.DriverName, current
 			SourceDatabasePath: currentSchema,
 			TargetDatabasePath: finalSchema,
 			CompareData:        compareData,
+		})
+	case driversshared.MySQLDriverName:
+		if schema != "" {
+			return nil, fmt.Errorf("the --schema flag applies to the postgres driver only")
+		}
+
+		if scratchVersion != "" {
+			return nil, fmt.Errorf("the version key of dbdiff.yaml applies to the postgres driver only")
+		}
+
+		return driversmysql.NewMySQLDriver(ctx, &driversmysql.MySQLDriverConfig{
+			SourceConnectionString: currentSchema,
+			TargetConnectionString: finalSchema,
+			CompareData:            compareData,
+			ComparePrivileges:      comparePrivileges,
 		})
 	case driversshared.PostgresDriverName:
 		return driverspostgres.NewPostgresDriver(ctx, &driverspostgres.PostgresDriverConfig{

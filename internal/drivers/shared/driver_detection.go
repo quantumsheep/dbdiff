@@ -11,9 +11,10 @@ type DriverName string
 const (
 	SQLiteDriverName   DriverName = "sqlite3"
 	PostgresDriverName DriverName = "postgres"
+	MySQLDriverName    DriverName = "mysql"
 )
 
-var SupportedDriverNames = []DriverName{SQLiteDriverName, PostgresDriverName}
+var SupportedDriverNames = []DriverName{SQLiteDriverName, PostgresDriverName, MySQLDriverName}
 
 func DetectDriver(source string, target string) (DriverName, error) {
 	sourceDriverName := detectDriverOfArgument(source)
@@ -45,6 +46,10 @@ func detectDriverOfArgument(argument string) DriverName {
 
 	if strings.HasPrefix(argument, "postgres://") || strings.HasPrefix(argument, "postgresql://") {
 		return PostgresDriverName
+	}
+
+	if strings.HasPrefix(argument, "mysql://") || strings.HasPrefix(argument, "mariadb://") {
+		return MySQLDriverName
 	}
 
 	if strings.Contains(argument, "://") {

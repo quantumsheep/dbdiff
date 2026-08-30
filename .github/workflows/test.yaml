@@ -69,6 +69,30 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: dbdiff
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -ppassword"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: password
+          MARIADB_DATABASE: dbdiff
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v5
 
@@ -94,9 +118,10 @@ jobs:
         run: go tool cover -func=coverage.out
 
   # A runner of macOS and a runner of Windows start no service container, so these two
-  # platforms run every test that needs no PostgreSQL server. The -short flag stops the
-  # tests of the temporary server, and DBDIFF_TEST_SKIP_POSTGRES stops the tests of the
-  # postgres driver. The job of Linux above covers both groups.
+  # platforms run every test that needs no database server. The -short flag stops the
+  # tests of the temporary server, DBDIFF_TEST_SKIP_POSTGRES stops the tests of the
+  # postgres driver, and DBDIFF_TEST_SKIP_MYSQL stops the tests of the mysql driver. The
+  # job of Linux above covers every group.
   test-without-a-server:
     strategy:
       matrix:
@@ -120,5 +145,6 @@ jobs:
         env:
           CGO_ENABLED: ${{ runner.os == 'Windows' && '' || '1' }}
           DBDIFF_TEST_SKIP_POSTGRES: 1
+          DBDIFF_TEST_SKIP_MYSQL: 1
         run: go test -v -short ./...
 

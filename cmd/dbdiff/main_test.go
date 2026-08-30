@@ -80,7 +80,7 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "diff", "--privileges", "a.sqlite", "b.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "the --privileges flag applies to the postgres driver only")
+		require.Contains(t, result.Stderr, "the --privileges flag applies to the postgres driver and to the mysql driver")
 	})
 
 	t.Run("ArgumentWithNoCommandName", func(t *testing.T) {
@@ -98,11 +98,11 @@ func TestDbdiffCommand(t *testing.T) {
 	})
 
 	t.Run("UnsupportedDriver", func(t *testing.T) {
-		result := clitest.Run(t, binaryPath, "diff", "--driver", "mysql", "source.sqlite", "target.sqlite")
+		result := clitest.Run(t, binaryPath, "diff", "--driver", "oracle", "source.sqlite", "target.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "unsupported driver: mysql")
-		require.Equal(t, 1, strings.Count(result.Stderr, "unsupported driver: mysql"))
+		require.Contains(t, result.Stderr, "unsupported driver: oracle")
+		require.Equal(t, 1, strings.Count(result.Stderr, "unsupported driver: oracle"))
 	})
 
 	t.Run("SchemaFlagWithSQLiteDriver", func(t *testing.T) {

@@ -13,6 +13,7 @@ type DriverName = driversshared.DriverName
 const (
 	SQLiteDriverName   DriverName = driversshared.SQLiteDriverName
 	PostgresDriverName DriverName = driversshared.PostgresDriverName
+	MySQLDriverName    DriverName = driversshared.MySQLDriverName
 )
 
 type diffOptions struct {

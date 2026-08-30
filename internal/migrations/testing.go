@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
+	driversmysql "github.com/quantumsheep/dbdiff/internal/drivers/mysql"
 	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 	"github.com/stretchr/testify/require"
 )
@@ -66,6 +67,89 @@ func (m *TestingSQLiteMigrator) TableNames() []string {
 }
 
 const PostgresTestConnectionString = "postgres://user:password@localhost:5432/dbdiff?sslmode=disable"
+
+const MySQLTestConnectionString = "root:password@tcp(localhost:3306)/dbdiff"
+
+type TestingMySQLMigrator struct {
+	*MySQLMigrator
+
+	tb       testing.TB
+	database string
+}
+
+func NewTestMySQLMigrator(tb testing.TB) *TestingMySQLMigrator {
+	tb.Helper()
+
+	if os.Getenv("DBDIFF_TEST_SKIP_MYSQL") != "" {
+		tb.Skip("DBDIFF_TEST_SKIP_MYSQL names no server")
+	}
+
+	adminConnection, err := driversmysql.OpenMySQLConnection(MySQLTestConnectionString)
+	require.NoError(tb, err)
+
+	err = adminConnection.PingContext(tb.Context())
+	require.NoError(tb, err)
+
+	database := fmt.Sprintf("migrator_%d", time.Now().UnixNano())
+
+	_, err = adminConnection.ExecContext(tb.Context(),
+		"CREATE DATABASE "+driversmysql.QuoteIdentifier(database))
+	require.NoError(tb, err)
+
+	tb.Cleanup(func() {
+		_, err := adminConnection.ExecContext(context.Background(),
+			"DROP DATABASE "+driversmysql.QuoteIdentifier(database))
+		require.NoError(tb, err)
+
+		require.NoError(tb, adminConnection.Close())
+	})
+
+	config, err := driversmysql.ParseMySQLConnectionString(MySQLTestConnectionString)
+	require.NoError(tb, err)
+
+	config.DBName = database
+
+	migrator, err := NewMySQLMigrator(tb.Context(), config.FormatDSN())
+	require.NoError(tb, err)
+	tb.Cleanup(func() {
+		require.NoError(tb, migrator.Close())
+	})
+
+	return &TestingMySQLMigrator{
+		MySQLMigrator: migrator,
+		tb:            tb,
+		database:      database,
+	}
+}
+
+func (m *TestingMySQLMigrator) TableNames() []string {
+	m.tb.Helper()
+
+	rows, err := m.Connection.QueryContext(m.tb.Context(), `
+		SELECT TABLE_NAME
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		ORDER BY TABLE_NAME;
+	`)
+	require.NoError(m.tb, err)
+
+	defer func() { require.NoError(m.tb, rows.Close()) }()
+
+	var names []string
+
+	for rows.Next() {
+		var name string
+
+		err := rows.Scan(&name)
+		require.NoError(m.tb, err)
+
+		names = append(names, name)
+	}
+
+	require.NoError(m.tb, rows.Err())
+
+	return names
+}
 
 type TestingPostgresMigrator struct {
 	*PostgresMigrator

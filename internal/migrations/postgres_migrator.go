@@ -49,6 +49,10 @@ func (m *PostgresMigrator) Close() error {
 	return driversshared.FirstError(connectionError, databaseError)
 }
 
+func (m *PostgresMigrator) SupportsTransactionalDDL() bool {
+	return true
+}
+
 func (m *PostgresMigrator) EnsureHistoryTable(ctx context.Context) error {
 	statement := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (

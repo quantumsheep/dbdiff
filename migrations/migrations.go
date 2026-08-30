@@ -61,8 +61,8 @@ func (apply upOption) applyUp(target *upOptions) {
 }
 
 // WithDatabase names the database that receives the migrations. An empty driver value
-// starts the detection of the engine from the url value, which holds a SQLite path or a
-// PostgreSQL connection string.
+// starts the detection of the engine from the url value, which holds a SQLite path, a
+// PostgreSQL connection string, or a MySQL URL.
 func WithDatabase(driver dbdiffdrivers.DriverName, url string) Option {
 	return commonOption(func(target *commonOptions) {
 		target.driver = driver
