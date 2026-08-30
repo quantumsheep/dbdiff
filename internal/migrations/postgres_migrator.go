@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
 // This value is a constant of dbdiff. Every dbdiff process takes the same lock, and no
@@ -21,7 +22,7 @@ type PostgresMigrator struct {
 // pg_advisory_lock holds a lock of the session, so every statement runs on one connection.
 // A lock that one pooled connection takes, and that another releases, does nothing.
 func NewPostgresMigrator(ctx context.Context, connectionString string, schema string) (*PostgresMigrator, error) {
-	database, err := drivers.OpenPostgresConnection(connectionString, schema)
+	database, err := driverspostgres.OpenPostgresConnection(connectionString, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func (m *PostgresMigrator) Close() error {
 	connectionError := m.Connection.Close()
 	databaseError := m.Database.Close()
 
-	return drivers.FirstError(connectionError, databaseError)
+	return driversshared.FirstError(connectionError, databaseError)
 }
 
 func (m *PostgresMigrator) EnsureHistoryTable(ctx context.Context) error {
@@ -57,7 +58,7 @@ func (m *PostgresMigrator) EnsureHistoryTable(ctx context.Context) error {
 			"applied_at" timestamptz NOT NULL DEFAULT now(),
 			"dirty"      boolean     NOT NULL DEFAULT false
 		);
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement)
 	if err != nil {
@@ -66,7 +67,7 @@ func (m *PostgresMigrator) EnsureHistoryTable(ctx context.Context) error {
 
 	// An older dbdiff created the table without the dirty column.
 	statement = fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS "dirty" boolean NOT NULL DEFAULT false;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err = m.Connection.ExecContext(ctx, statement)
 
@@ -102,7 +103,7 @@ func (m *PostgresMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigr
 		SELECT "version", "name", "checksum", "applied_at", %s
 		FROM %s
 		ORDER BY "version";
-	`, dirtyColumn, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, dirtyColumn, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	rows, err := m.Connection.QueryContext(ctx, statement)
 	if err != nil {
@@ -139,7 +140,7 @@ func (m *PostgresMigrator) historyTableExists(ctx context.Context) (bool, error)
 			WHERE relnamespace = current_schema()::regnamespace
 			AND relkind = 'r' AND relname = $1
 		);
-	`, drivers.MigrationHistoryTableName)
+	`, driversshared.MigrationHistoryTableName)
 
 	found := false
 
@@ -160,7 +161,7 @@ func (m *PostgresMigrator) dirtyColumnExists(ctx context.Context) (bool, error) 
 			AND c.relname = $1
 			AND a.attname = 'dirty' AND NOT a.attisdropped
 		);
-	`, drivers.MigrationHistoryTableName)
+	`, driversshared.MigrationHistoryTableName)
 
 	found := false
 
@@ -176,7 +177,7 @@ func (m *PostgresMigrator) RecordDirty(ctx context.Context, migration *Migration
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at", "dirty")
 		VALUES ($1, $2, $3, $4, true);
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement,
 		migration.Version, migration.Name, migration.Checksum, time.Now().UTC())
@@ -186,7 +187,7 @@ func (m *PostgresMigrator) RecordDirty(ctx context.Context, migration *Migration
 
 func (m *PostgresMigrator) ClearDirty(ctx context.Context, migration *Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "dirty" = false WHERE "version" = $1;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, migration.Version)
 
@@ -195,7 +196,7 @@ func (m *PostgresMigrator) ClearDirty(ctx context.Context, migration *Migration)
 
 func (m *PostgresMigrator) UpdateChecksum(ctx context.Context, migration *Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "checksum" = $1 WHERE "version" = $2;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, migration.Checksum, migration.Version)
 
@@ -204,7 +205,7 @@ func (m *PostgresMigrator) UpdateChecksum(ctx context.Context, migration *Migrat
 
 func (m *PostgresMigrator) DeleteRecord(ctx context.Context, version string) error {
 	statement := fmt.Sprintf(`DELETE FROM %s WHERE "version" = $1;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, version)
 
@@ -272,7 +273,7 @@ func (t *PostgresMigrationTransaction) Record(ctx context.Context, migration *Mi
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at")
 		VALUES ($1, $2, $3, $4);
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := t.Executor.ExecContext(ctx, statement,
 		migration.Version, migration.Name, migration.Checksum, time.Now().UTC())

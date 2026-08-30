@@ -1,0 +1,414 @@
+package driverssqlite
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
+)
+
+// The slice holds a pointer, so slices.Equal compares the address and never the check.
+// The parser fills the list in the order of the CREATE TABLE text, and a new order of
+// two equal checks changes nothing, so the comparison sorts the two lists first.
+func equalCheckConstraints(first []*SQLiteCheckConstraint, second []*SQLiteCheckConstraint) bool {
+	return slices.EqualFunc(sortedCheckConstraints(first), sortedCheckConstraints(second),
+		func(firstCheck *SQLiteCheckConstraint, secondCheck *SQLiteCheckConstraint) bool {
+			return firstCheck.Equal(secondCheck)
+		})
+}
+
+func sortedCheckConstraints(constraints []*SQLiteCheckConstraint) []*SQLiteCheckConstraint {
+	sorted := slices.Clone(constraints)
+
+	slices.SortFunc(sorted, func(first *SQLiteCheckConstraint, second *SQLiteCheckConstraint) int {
+		if first.Name != second.Name {
+			return strings.Compare(first.Name, second.Name)
+		}
+
+		return strings.Compare(first.Expression, second.Expression)
+	})
+
+	return sorted
+}
+
+func equalUniqueConstraints(first []*SQLiteUniqueConstraint, second []*SQLiteUniqueConstraint) bool {
+	return slices.EqualFunc(first, second,
+		func(firstConstraint *SQLiteUniqueConstraint, secondConstraint *SQLiteUniqueConstraint) bool {
+			return firstConstraint.Equal(secondConstraint)
+		})
+}
+
+type SQLiteTable struct {
+	Name    string
+	Columns []*SQLiteColumn
+
+	// These two fields hold a key or a constraint of two or more columns only.
+	PrimaryKey         []string
+	PrimaryKeyName     string
+	PrimaryKeyConflict string
+	UniqueConstraints  []*SQLiteUniqueConstraint
+
+	// A key clause holds the quoted column name with its COLLATE clause and its DESC
+	// keyword, which no PRAGMA reports.
+	PrimaryKeyKeys []string
+
+	Indexes     []*SQLiteIndex
+	Triggers    []*SQLiteTrigger
+	ForeignKeys []*SQLiteForeignKey
+
+	CheckConstraints []*SQLiteCheckConstraint
+
+	WithoutRowID bool
+	Strict       bool
+}
+
+func (t *SQLiteTable) Copy() *SQLiteTable {
+	tableCopy := *t
+	return &tableCopy
+}
+
+func (t *SQLiteTable) ColumnByName(name string) (*SQLiteColumn, bool) {
+	for _, column := range t.Columns {
+		if column.Name == name {
+			return column, true
+		}
+	}
+
+	return nil, false
+}
+
+func (t *SQLiteTable) CreateTableInstruction() *SQLiteCreateTableInstruction {
+	return &SQLiteCreateTableInstruction{
+		Name:               t.Name,
+		Columns:            t.Columns,
+		PrimaryKey:         t.PrimaryKey,
+		PrimaryKeyName:     t.PrimaryKeyName,
+		PrimaryKeyConflict: t.PrimaryKeyConflict,
+		PrimaryKeyKeys:     t.PrimaryKeyKeys,
+		UniqueConstraints:  t.UniqueConstraints,
+		ForeignKeys:        t.ForeignKeys,
+		CheckConstraints:   t.CheckConstraints,
+		WithoutRowID:       t.WithoutRowID,
+		Strict:             t.Strict,
+	}
+}
+
+func (t *SQLiteTable) IndexInstructions() []driversshared.Instruction {
+	return lo.Map(t.Indexes, func(index *SQLiteIndex, _ int) driversshared.Instruction {
+		return index.CreateInstruction()
+	})
+}
+
+func (t *SQLiteTable) TriggerInstructions() []driversshared.Instruction {
+	return lo.Map(t.Triggers, func(trigger *SQLiteTrigger, _ int) driversshared.Instruction {
+		return &SQLiteCreateTriggerInstruction{Definition: trigger.SQL}
+	})
+}
+
+func (t *SQLiteTable) Instructions() []driversshared.Instruction {
+	instructions := []driversshared.Instruction{t.CreateTableInstruction()}
+	instructions = append(instructions, t.IndexInstructions()...)
+	instructions = append(instructions, t.TriggerInstructions()...)
+
+	return instructions
+}
+
+type SQLiteTableColumnsDiff struct {
+	Added    []string
+	Modified []string
+	Removed  []string
+	Renamed  map[string]string
+
+	ForeignKeysChanged  bool
+	ConstraintsChanged  bool
+	TableOptionsChanged bool
+	ColumnOrderChanged  bool
+
+	AddsStoredGeneratedColumn bool
+}
+
+// SQLite supports no ALTER COLUMN, so a modified column, a changed foreign key, a changed
+// table constraint, or a changed table option needs a new table. SQLite also refuses an ADD
+// COLUMN action that holds a STORED generated column.
+func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
+	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged ||
+		d.TableOptionsChanged || d.AddsStoredGeneratedColumn || d.ColumnOrderChanged
+}
+
+// A SELECT * statement and an INSERT statement without column names read the order of
+// the columns, so a new order needs a recreation.
+func columnOrderChanged(target *SQLiteTable, source *SQLiteTable) bool {
+	return !slices.Equal(
+		commonColumnNamesInOrder(target, source),
+		commonColumnNamesInOrder(source, target))
+}
+
+func commonColumnNamesInOrder(first *SQLiteTable, second *SQLiteTable) []string {
+	var names []string
+
+	for _, column := range first.Columns {
+		_, found := second.ColumnByName(column.Name)
+		if found {
+			names = append(names, column.Name)
+		}
+	}
+
+	return names
+}
+
+func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
+	diff := &SQLiteTableColumnsDiff{
+		Added:              []string{},
+		Modified:           []string{},
+		Removed:            []string{},
+		Renamed:            make(map[string]string),
+		ForeignKeysChanged: false,
+		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) ||
+			t.PrimaryKeyName != other.PrimaryKeyName ||
+			t.PrimaryKeyConflict != other.PrimaryKeyConflict ||
+			!slices.Equal(t.PrimaryKeyKeys, other.PrimaryKeyKeys) ||
+			!equalUniqueConstraints(t.UniqueConstraints, other.UniqueConstraints),
+		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||
+			!equalCheckConstraints(t.CheckConstraints, other.CheckConstraints),
+		ColumnOrderChanged: columnOrderChanged(t, other),
+	}
+
+	for _, targetColumn := range t.Columns {
+		sourceColumn, found := other.ColumnByName(targetColumn.Name)
+		if !found {
+			candidates := lo.Filter(other.Columns, func(column *SQLiteColumn, _ int) bool {
+				_, existsInTargetTable := t.ColumnByName(column.Name)
+				_, alreadyRenamed := diff.Renamed[column.Name]
+				return !existsInTargetTable && !alreadyRenamed && column.HasEqualAttributes(targetColumn)
+			})
+
+			// A rename is a guess. Two candidates make the guess unsafe, so the column
+			// becomes an addition and the old columns become removals.
+			if len(candidates) == 1 {
+				diff.Renamed[candidates[0].Name] = targetColumn.Name
+				continue
+			}
+
+			diff.Added = append(diff.Added, targetColumn.Name)
+
+			if targetColumn.IsGenerated() && targetColumn.GeneratedStored {
+				diff.AddsStoredGeneratedColumn = true
+			}
+
+			continue
+		}
+
+		if *targetColumn == *sourceColumn {
+			continue
+		}
+
+		if targetColumn.Type != sourceColumn.Type {
+			if targetColumn.IsTypeChangeCompatible(sourceColumn) {
+				diff.Modified = append(diff.Modified, targetColumn.Name)
+				continue
+			}
+
+			diff.Removed = append(diff.Removed, sourceColumn.Name)
+			diff.Added = append(diff.Added, targetColumn.Name)
+			continue
+		}
+
+		diff.Modified = append(diff.Modified, targetColumn.Name)
+	}
+
+	for _, sourceColumn := range other.Columns {
+		_, found := t.ColumnByName(sourceColumn.Name)
+		_, renamed := diff.Renamed[sourceColumn.Name]
+		if !found && !renamed {
+			diff.Removed = append(diff.Removed, sourceColumn.Name)
+		}
+	}
+
+	if len(t.ForeignKeys) != len(other.ForeignKeys) {
+		diff.ForeignKeysChanged = true
+	} else {
+		for _, targetForeignKey := range t.ForeignKeys {
+			found := lo.SomeBy(other.ForeignKeys, func(foreignKey *SQLiteForeignKey) bool {
+				return foreignKey.Equal(targetForeignKey)
+			})
+			if !found {
+				diff.ForeignKeysChanged = true
+				break
+			}
+		}
+	}
+
+	return diff
+}
+
+func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]driversshared.Instruction, error) {
+	columnsDiff := t.DiffColumns(other)
+
+	var instructions []driversshared.Instruction
+
+	if columnsDiff.NeedsRecreation() {
+		tempTable := t.Copy()
+		tempTable.Name = "_" + t.Name + "_temp"
+
+		recreation := []driversshared.Instruction{tempTable.CreateTableInstruction()}
+
+		newToOld := lo.Invert(columnsDiff.Renamed)
+
+		var insertColumns []string
+		var selectColumns []string
+
+		for _, newColumn := range t.Columns {
+			// SQLite computes a generated column, and it refuses a value for that column.
+			if newColumn.IsGenerated() {
+				continue
+			}
+
+			insertColumns = append(insertColumns, newColumn.Name)
+
+			_, ok := other.ColumnByName(newColumn.Name)
+			if ok {
+				selectColumns = append(selectColumns, driversshared.QuoteIdentifier(newColumn.Name))
+				continue
+			}
+
+			oldName, ok := newToOld[newColumn.Name]
+			if ok {
+				selectColumns = append(selectColumns, driversshared.QuoteIdentifier(oldName))
+				continue
+			}
+
+			if newColumn.Default.Valid {
+				selectColumns = append(selectColumns, newColumn.Default.String)
+			} else {
+				selectColumns = append(selectColumns, "NULL")
+			}
+		}
+
+		recreation = append(recreation, &driversshared.SQLInsertSelectInstruction{
+			TableName:         tempTable.Name,
+			ColumnNames:       insertColumns,
+			SelectExpressions: selectColumns,
+			SourceTableName:   t.Name,
+		})
+
+		recreation = append(recreation, &driversshared.SQLDropTableInstruction{Name: t.Name})
+
+		recreation = append(recreation, &SQLiteAlterTableInstruction{
+			Name:   tempTable.Name,
+			Action: &driversshared.SQLRenameTableAction{NewName: t.Name},
+		})
+
+		// The DROP TABLE statement removes each index and each trigger of the table. The
+		// recreation builds every one of them again from the target, so the index diff and
+		// the trigger diff below compare a source that is not there.
+		recreation = append(recreation, t.IndexInstructions()...)
+		recreation = append(recreation, t.TriggerInstructions()...)
+
+		for _, instruction := range recreation {
+			instructions = append(instructions, &SQLiteTableRecreationInstruction{
+				Instruction: instruction,
+				TableName:   t.Name,
+			})
+		}
+
+		return instructions, nil
+	}
+
+	// The map gives no stable order. The loop walks the target columns instead, so the
+	// rename statements follow the shape of the target table on every run.
+	newNameToOldName := lo.Invert(columnsDiff.Renamed)
+
+	for _, column := range t.Columns {
+		oldName, renamed := newNameToOldName[column.Name]
+		if !renamed {
+			continue
+		}
+
+		instructions = append(instructions, &SQLiteAlterTableInstruction{
+			Name: t.Name,
+			Action: &driversshared.SQLRenameColumnAction{
+				ColumnName:    oldName,
+				NewColumnName: column.Name,
+			},
+		})
+	}
+
+	for _, columnName := range columnsDiff.Removed {
+		instructions = append(instructions, &SQLiteAlterTableInstruction{
+			Name:   t.Name,
+			Action: &driversshared.SQLDropColumnAction{ColumnName: columnName},
+		})
+	}
+
+	for _, columnName := range columnsDiff.Added {
+		column, ok := t.ColumnByName(columnName)
+		if !ok {
+			return nil, fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
+		}
+
+		instructions = append(instructions, &SQLiteAlterTableInstruction{
+			Name:   t.Name,
+			Action: &SQLiteAddColumnAction{Column: column},
+		})
+	}
+
+	indexInstructions, err := t.DiffIndexes(other)
+	if err != nil {
+		return nil, err
+	}
+
+	instructions = append(instructions, indexInstructions...)
+
+	triggerInstructions, err := t.DiffTriggers(other)
+	if err != nil {
+		return nil, err
+	}
+
+	instructions = append(instructions, triggerInstructions...)
+
+	return instructions, nil
+}
+
+func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) ([]driversshared.Instruction, error) {
+	additions, removals, err := driversshared.DiffByKey(t.Triggers, other.Triggers, diffTriggerRules())
+	if err != nil {
+		return nil, err
+	}
+
+	return append(additions, removals...), nil
+}
+
+func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) ([]driversshared.Instruction, error) {
+	additions, removals, err := driversshared.DiffByKey(t.Indexes, other.Indexes, driversshared.DiffRules[*SQLiteIndex]{
+		Key: func(index *SQLiteIndex) string {
+			return index.Name
+		},
+		Create: func(index *SQLiteIndex) []driversshared.Instruction {
+			return []driversshared.Instruction{index.CreateInstruction()}
+		},
+		Change: func(target *SQLiteIndex, source *SQLiteIndex) ([]driversshared.Instruction, error) {
+			if target.Equal(source) {
+				return nil, nil
+			}
+
+			return []driversshared.Instruction{
+				&driversshared.SQLDropIndexInstruction{
+					Name: source.Name,
+				},
+				target.CreateInstruction(),
+			}, nil
+		},
+		Drop: func(index *SQLiteIndex) []driversshared.Instruction {
+			return []driversshared.Instruction{&driversshared.SQLDropIndexInstruction{
+				Name: index.Name,
+			}}
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return append(additions, removals...), nil
+}

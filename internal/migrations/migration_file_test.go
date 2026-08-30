@@ -7,7 +7,9 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +17,7 @@ func TestGenerateMigration(t *testing.T) {
 	t.Run("WriteTheFirstMigration", func(t *testing.T) {
 		directory := t.TempDir()
 
-		target := WriteSQLFile(t, directory, "schema.sql",
+		target := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);")
 
 		migrations := filepath.Join(directory, "migrations")
@@ -36,11 +38,11 @@ func TestGenerateMigration(t *testing.T) {
 		moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
 
 		first, err := WriteMigrationFiles(directory, "one", moment, "test",
-			[]drivers.Instruction{&drivers.SQLDropTableInstruction{Name: "users"}})
+			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "users"}})
 		require.NoError(t, err)
 
 		second, err := WriteMigrationFiles(directory, "two", moment, "test",
-			[]drivers.Instruction{&drivers.SQLDropTableInstruction{Name: "notes"}})
+			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "notes"}})
 		require.NoError(t, err)
 
 		require.Equal(t, filepath.Join(directory, "20260822143000_one.sql"), first[0])
@@ -50,13 +52,13 @@ func TestGenerateMigration(t *testing.T) {
 	t.Run("WriteNoFileWhenTheSchemaMatches", func(t *testing.T) {
 		directory := t.TempDir()
 
-		target := WriteSQLFile(t, directory, "schema.sql",
+		target := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		WriteSQLFile(t, migrations, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
 		paths := GenerateSQLiteMigration(t, target, migrations)
@@ -70,13 +72,13 @@ func TestGenerateMigration(t *testing.T) {
 	t.Run("TheSecondMigrationHoldsTheChangeAlone", func(t *testing.T) {
 		directory := t.TempDir()
 
-		target := WriteSQLFile(t, directory, "schema.sql",
+		target := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);")
 
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		WriteSQLFile(t, migrations, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
 		paths := GenerateSQLiteMigration(t, target, migrations)
@@ -91,8 +93,8 @@ func TestGenerateMigration(t *testing.T) {
 
 func TestSplitMigrationInstructions(t *testing.T) {
 	t.Run("OneGroupWithNoEnumValue", func(t *testing.T) {
-		instructions := []drivers.Instruction{
-			&drivers.SQLCommentInstruction{
+		instructions := []driversshared.Instruction{
+			&driversshared.SQLCommentInstruction{
 				Text: "a",
 			},
 		}
@@ -102,18 +104,18 @@ func TestSplitMigrationInstructions(t *testing.T) {
 	})
 
 	t.Run("TheEnumValuesTakeTheFirstGroup", func(t *testing.T) {
-		enumValue := &drivers.PostgresAlterTypeAddValueInstruction{
+		enumValue := &driverspostgres.PostgresAlterTypeAddValueInstruction{
 			Name:  "mood",
 			Value: "'happy'",
 		}
 
-		other := &drivers.SQLCommentInstruction{
+		other := &driversshared.SQLCommentInstruction{
 			Text: "a",
 		}
 
-		groups := splitMigrationInstructions([]drivers.Instruction{other, enumValue})
+		groups := splitMigrationInstructions([]driversshared.Instruction{other, enumValue})
 		require.Len(t, groups, 2)
-		require.Equal(t, []drivers.Instruction{enumValue}, groups[0])
-		require.Equal(t, []drivers.Instruction{other}, groups[1])
+		require.Equal(t, []driversshared.Instruction{enumValue}, groups[0])
+		require.Equal(t, []driversshared.Instruction{other}, groups[1])
 	})
 }

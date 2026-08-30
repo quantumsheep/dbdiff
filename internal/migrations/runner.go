@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
 func LoadMigrationSet(ctx context.Context, migrator Migrator, directory string) (*MigrationSet, error) {
@@ -120,7 +120,7 @@ func RunMigrationPreview(ctx context.Context, migrator Migrator, set *MigrationS
 			return err
 		}
 
-		if !drivers.FileUsesTransaction(content) {
+		if !driversshared.FileUsesTransaction(content) {
 			_, _ = fmt.Fprintf(output, "%s runs outside a transaction, so preview does not run it.\n",
 				entry.FileName())
 
@@ -361,7 +361,7 @@ func applyOneMigration(ctx context.Context, migrator Migrator, entry *MigrationE
 		return err
 	}
 
-	if !drivers.FileUsesTransaction(content) {
+	if !driversshared.FileUsesTransaction(content) {
 		return applyOneMigrationWithoutTransaction(ctx, migrator, entry, content, output)
 	}
 
@@ -408,7 +408,7 @@ func applyOneMigrationWithoutTransaction(ctx context.Context, migrator Migrator,
 		return err
 	}
 
-	for _, statement := range drivers.SplitSQLStatements(content) {
+	for _, statement := range driversshared.SplitSQLStatements(content) {
 		err = transaction.Apply(ctx, statement)
 		if err != nil {
 			return fmt.Errorf("%s failed, and the statements before the failure stay applied. "+

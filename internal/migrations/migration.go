@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/samber/lo"
 )
 
@@ -102,7 +102,7 @@ func ReadMigrationDirectory(directory string) ([]*Migration, error) {
 	var migrations []*Migration
 
 	for _, entry := range entries {
-		if entry.IsDir() || !drivers.HasSQLExtension(entry.Name()) || drivers.IsDownMigration(entry.Name()) {
+		if entry.IsDir() || !driversshared.HasSQLExtension(entry.Name()) || driversshared.IsDownMigration(entry.Name()) {
 			continue
 		}
 

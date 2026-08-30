@@ -7,6 +7,7 @@ import (
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/migrations"
 	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
@@ -81,7 +82,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return nil
 	}
 
-	fmt.Println(drivers.RenderInstructions(instructions))
+	fmt.Println(driversshared.RenderInstructions(instructions))
 
 	return fmt.Errorf("the database holds %s that no migration made", changeCountText(len(instructions)))
 }

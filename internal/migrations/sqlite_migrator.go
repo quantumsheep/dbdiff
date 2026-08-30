@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 )
 
 type SQLiteMigrator struct {
@@ -16,7 +17,7 @@ type SQLiteMigrator struct {
 func NewSQLiteMigrator(path string) (*SQLiteMigrator, error) {
 	// The name holds no _foreign_keys parameter. A recreation of a table drops one table
 	// and renames another table, and PRAGMA foreign_keys does nothing inside a transaction.
-	connection, err := sql.Open("sqlite3", drivers.TrimSQLitePrefix(path))
+	connection, err := sql.Open("sqlite3", driverssqlite.TrimSQLitePrefix(path))
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +44,7 @@ func (m *SQLiteMigrator) EnsureHistoryTable(ctx context.Context) error {
 			"applied_at" TEXT NOT NULL,
 			"dirty"      INTEGER NOT NULL DEFAULT 0
 		);
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement)
 	if err != nil {
@@ -65,7 +66,7 @@ func (m *SQLiteMigrator) ensureDirtyColumn(ctx context.Context) error {
 	}
 
 	statement := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN "dirty" INTEGER NOT NULL DEFAULT 0;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err = m.Connection.ExecContext(ctx, statement)
 
@@ -75,7 +76,7 @@ func (m *SQLiteMigrator) ensureDirtyColumn(ctx context.Context) error {
 func (m *SQLiteMigrator) dirtyColumnExists(ctx context.Context) (bool, error) {
 	row := m.Connection.QueryRowContext(ctx,
 		`SELECT EXISTS (SELECT 1 FROM pragma_table_info(?) WHERE name = 'dirty');`,
-		drivers.MigrationHistoryTableName)
+		driversshared.MigrationHistoryTableName)
 
 	found := false
 
@@ -114,7 +115,7 @@ func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrat
 		SELECT "version", "name", "checksum", "applied_at", %s
 		FROM %s
 		ORDER BY "version";
-	`, dirtyColumn, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, dirtyColumn, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	rows, err := m.Connection.QueryContext(ctx, statement)
 	if err != nil {
@@ -153,7 +154,7 @@ func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrat
 func (m *SQLiteMigrator) historyTableExists(ctx context.Context) (bool, error) {
 	row := m.Connection.QueryRowContext(ctx,
 		`SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?);`,
-		drivers.MigrationHistoryTableName)
+		driversshared.MigrationHistoryTableName)
 
 	found := false
 
@@ -213,7 +214,7 @@ func (t *SQLiteMigrationTransaction) Record(ctx context.Context, migration *Migr
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at")
 		VALUES (?, ?, ?, ?);
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := t.Executor.ExecContext(ctx, statement,
 		migration.Version, migration.Name, migration.Checksum, time.Now().UTC().Format(time.RFC3339))
@@ -225,7 +226,7 @@ func (m *SQLiteMigrator) RecordDirty(ctx context.Context, migration *Migration) 
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at", "dirty")
 		VALUES (?, ?, ?, ?, 1);
-	`, drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+	`, driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement,
 		migration.Version, migration.Name, migration.Checksum, time.Now().UTC().Format(time.RFC3339))
@@ -235,7 +236,7 @@ func (m *SQLiteMigrator) RecordDirty(ctx context.Context, migration *Migration) 
 
 func (m *SQLiteMigrator) ClearDirty(ctx context.Context, migration *Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "dirty" = 0 WHERE "version" = ?;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, migration.Version)
 
@@ -244,7 +245,7 @@ func (m *SQLiteMigrator) ClearDirty(ctx context.Context, migration *Migration) e
 
 func (m *SQLiteMigrator) UpdateChecksum(ctx context.Context, migration *Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "checksum" = ? WHERE "version" = ?;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, migration.Checksum, migration.Version)
 
@@ -253,7 +254,7 @@ func (m *SQLiteMigrator) UpdateChecksum(ctx context.Context, migration *Migratio
 
 func (m *SQLiteMigrator) DeleteRecord(ctx context.Context, version string) error {
 	statement := fmt.Sprintf(`DELETE FROM %s WHERE "version" = ?;`,
-		drivers.QuoteIdentifier(drivers.MigrationHistoryTableName))
+		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, version)
 

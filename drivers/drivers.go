@@ -4,14 +4,15 @@ import (
 	"context"
 
 	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
 // DriverName names a database engine.
-type DriverName = internaldrivers.DriverName
+type DriverName = driversshared.DriverName
 
 const (
-	SQLiteDriverName   DriverName = internaldrivers.SQLiteDriverName
-	PostgresDriverName DriverName = internaldrivers.PostgresDriverName
+	SQLiteDriverName   DriverName = driversshared.SQLiteDriverName
+	PostgresDriverName DriverName = driversshared.PostgresDriverName
 )
 
 type diffOptions struct {

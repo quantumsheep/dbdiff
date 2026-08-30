@@ -11,7 +11,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -146,23 +146,12 @@ func (m *TestingPostgresMigrator) TableNames() []string {
 	return names
 }
 
-func WriteSQLFile(tb testing.TB, directory string, name string, content string) string {
-	tb.Helper()
-
-	path := filepath.Join(directory, name)
-
-	err := os.WriteFile(path, []byte(content), 0o600)
-	require.NoError(tb, err)
-
-	return path
-}
-
 func GenerateSQLiteMigration(tb testing.TB, target string, migrations string) []string {
 	tb.Helper()
 
 	require.NoError(tb, os.MkdirAll(migrations, 0o750))
 
-	driver, err := drivers.NewSQLiteDriver(tb.Context(), &drivers.SQLiteDriverConfig{
+	driver, err := driverssqlite.NewSQLiteDriver(tb.Context(), &driverssqlite.SQLiteDriverConfig{
 		TargetDatabasePath: target,
 		SourceDatabasePath: migrations,
 	})

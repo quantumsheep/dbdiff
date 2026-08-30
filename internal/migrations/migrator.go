@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
 type AppliedMigration struct {
@@ -42,10 +42,10 @@ type MigrationTransaction interface {
 	Rollback() error
 }
 
-func NewMigrator(ctx context.Context, driverName drivers.DriverName, target string,
+func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target string,
 	schema string) (Migrator, error) {
 	if driverName == "" {
-		detected, err := drivers.DetectDriver(target, target)
+		detected, err := driversshared.DetectDriver(target, target)
 		if err != nil {
 			return nil, err
 		}
@@ -54,9 +54,9 @@ func NewMigrator(ctx context.Context, driverName drivers.DriverName, target stri
 	}
 
 	switch driverName {
-	case drivers.SQLiteDriverName:
+	case driversshared.SQLiteDriverName:
 		return NewSQLiteMigrator(target)
-	case drivers.PostgresDriverName:
+	case driversshared.PostgresDriverName:
 		return NewPostgresMigrator(ctx, target, schema)
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)

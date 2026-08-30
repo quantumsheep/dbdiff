@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,14 +65,7 @@ func Run(tb testing.TB, binaryPath string, args ...string) Result {
 }
 
 func WriteSQLFile(tb testing.TB, directory string, name string, content string) string {
-	tb.Helper()
-
-	path := filepath.Join(directory, name)
-
-	err := os.WriteFile(path, []byte(content), 0o600)
-	require.NoError(tb, err)
-
-	return path
+	return sqltest.WriteSQLFile(tb, directory, name, content)
 }
 
 func WriteSQLiteDatabase(tb testing.TB, path string, sqlStatements string) {

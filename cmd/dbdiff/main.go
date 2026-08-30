@@ -10,7 +10,7 @@ import (
 	cmddiff "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/diff"
 	cmdmigrate "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/migrate"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/urfave/cli/v3"
 )
 
@@ -28,7 +28,7 @@ func main() {
 				Usage: "Database driver to use. Supported drivers: sqlite3, postgres. The default is the driver of the source and the target",
 				// An empty value starts the detection of DetectDriver.
 				Validator: func(s string) error {
-					if s == "" || slices.Contains(drivers.SupportedDriverNames, drivers.DriverName(s)) {
+					if s == "" || slices.Contains(driversshared.SupportedDriverNames, driversshared.DriverName(s)) {
 						return nil
 					}
 

@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
-func RenderMigrationFile(toolVersion string, generatedAt time.Time, instructions []drivers.Instruction) string {
+func RenderMigrationFile(toolVersion string, generatedAt time.Time, instructions []driversshared.Instruction) string {
 	var builder strings.Builder
 
 	builder.WriteString("-- dbdiff ")
@@ -21,8 +22,8 @@ func RenderMigrationFile(toolVersion string, generatedAt time.Time, instructions
 
 	pendingComment := ""
 
-	for _, instruction := range drivers.AnnotateInstructions(instructions) {
-		comment, isComment := instruction.(*drivers.SQLCommentInstruction)
+	for _, instruction := range driversshared.AnnotateInstructions(instructions) {
+		comment, isComment := instruction.(*driversshared.SQLCommentInstruction)
 		if isComment {
 			pendingComment = comment.String()
 
@@ -45,7 +46,7 @@ func RenderMigrationFile(toolVersion string, generatedAt time.Time, instructions
 }
 
 func WriteMigrationFiles(directory string, slug string, generatedAt time.Time,
-	toolVersion string, instructions []drivers.Instruction) ([]string, error) {
+	toolVersion string, instructions []driversshared.Instruction) ([]string, error) {
 	groups := splitMigrationInstructions(instructions)
 	if len(groups) == 0 {
 		return nil, nil
@@ -119,12 +120,12 @@ func usedMigrationVersions(directory string) (map[string]bool, error) {
 
 // PostgreSQL accepts ALTER TYPE ... ADD VALUE in a transaction, and it refuses the new
 // value in that same transaction. The values take a file of their own for that reason.
-func splitMigrationInstructions(instructions []drivers.Instruction) [][]drivers.Instruction {
-	var enumValues []drivers.Instruction
-	var others []drivers.Instruction
+func splitMigrationInstructions(instructions []driversshared.Instruction) [][]driversshared.Instruction {
+	var enumValues []driversshared.Instruction
+	var others []driversshared.Instruction
 
 	for _, instruction := range instructions {
-		_, isEnumValue := instruction.(*drivers.PostgresAlterTypeAddValueInstruction)
+		_, isEnumValue := instruction.(*driverspostgres.PostgresAlterTypeAddValueInstruction)
 		if isEnumValue {
 			enumValues = append(enumValues, instruction)
 
@@ -134,7 +135,7 @@ func splitMigrationInstructions(instructions []drivers.Instruction) [][]drivers.
 		others = append(others, instruction)
 	}
 
-	var groups [][]drivers.Instruction
+	var groups [][]driversshared.Instruction
 
 	if len(enumValues) > 0 {
 		groups = append(groups, enumValues)

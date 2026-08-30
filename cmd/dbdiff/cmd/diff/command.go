@@ -7,6 +7,7 @@ import (
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/urfave/cli/v3"
 )
 
@@ -62,7 +63,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return fmt.Errorf("target database URL is required")
 	}
 
-	driver, err := drivers.NewDriver(ctx, drivers.DriverName(command.String("driver")), currentSchema, finalSchema,
+	driver, err := drivers.NewDriver(ctx, driversshared.DriverName(command.String("driver")), currentSchema, finalSchema,
 		command.String("schema"), "", command.Bool("data"), command.Bool("privileges"))
 	if err != nil {
 		return err
@@ -76,10 +77,10 @@ func action(ctx context.Context, command *cli.Command) error {
 	}
 
 	if command.Bool("comments") {
-		instructions = drivers.AnnotateInstructions(instructions)
+		instructions = driversshared.AnnotateInstructions(instructions)
 	}
 
-	fmt.Println(drivers.RenderInstructions(instructions))
+	fmt.Println(driversshared.RenderInstructions(instructions))
 
 	if command.Bool("exit-code") && len(instructions) > 0 {
 		return ErrDifferencesFound

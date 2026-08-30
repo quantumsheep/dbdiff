@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
@@ -25,7 +25,7 @@ func GetMigrationConfigFromCommand(command *cli.Command) (*coremigrations.Migrat
 
 	driverName := command.String("driver")
 	if driverName != "" {
-		config.Driver = drivers.DriverName(driverName)
+		config.Driver = driversshared.DriverName(driverName)
 	}
 
 	source := command.String("source")

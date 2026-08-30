@@ -6,18 +6,18 @@ import (
 	"io"
 	"os"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"gopkg.in/yaml.v3"
 )
 
 const DefaultMigrationConfigPath = "dbdiff.yaml"
 
 type MigrationConfig struct {
-	Driver  drivers.DriverName `yaml:"driver"`
-	Source  string             `yaml:"source"`
-	Target  string             `yaml:"target"`
-	Schema  string             `yaml:"schema"`
-	Version string             `yaml:"version"`
+	Driver  driversshared.DriverName `yaml:"driver"`
+	Source  string                   `yaml:"source"`
+	Target  string                   `yaml:"target"`
+	Schema  string                   `yaml:"schema"`
+	Version string                   `yaml:"version"`
 }
 
 func ReadMigrationConfig(path string, optional bool) (*MigrationConfig, error) {

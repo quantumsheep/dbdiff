@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
+	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +22,7 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -37,7 +40,7 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\nCREATE INDEX users_id ON users (id);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -95,7 +98,7 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -109,7 +112,7 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"NOT SQL AT ALL;\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -122,9 +125,9 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
-		WriteSQLFile(t, directory, "20260822143000_email.sql",
+		sqltest.WriteSQLFile(t, directory, "20260822143000_email.sql",
 			"ALTER TABLE users ADD COLUMN email TEXT;\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -138,7 +141,7 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff:no-transaction\nCREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -157,7 +160,7 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
@@ -179,14 +182,14 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
-		WriteSQLFile(t, directory, "20260822143000_notes.sql",
+		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
 		set, err = LoadMigrationSet(t.Context(), migrator, directory)
@@ -200,9 +203,9 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
-		WriteSQLFile(t, directory, "20260822143000_notes.sql",
+		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -224,7 +227,7 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -251,7 +254,7 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\nNOT SQL AT ALL;\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -271,14 +274,14 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n")
 
 		set, err = LoadMigrationSet(t.Context(), migrator, directory)
@@ -292,7 +295,7 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -320,7 +323,7 @@ func TestApplyMigrations(t *testing.T) {
 	t.Run("GenerateThenApplyLeavesNoDiff", func(t *testing.T) {
 		directory := t.TempDir()
 
-		schema := WriteSQLFile(t, directory, "schema.sql",
+		schema := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);\n"+
 				"CREATE INDEX users_email ON users (email);\n")
 
@@ -341,7 +344,7 @@ func TestApplyMigrations(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
+		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
 			TargetDatabasePath: schema,
 			SourceDatabasePath: sourcePath,
 		})
@@ -358,7 +361,7 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff:no-transaction\nCREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -376,7 +379,7 @@ func TestApplyMigrations(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff:no-transaction\n"+
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
@@ -408,14 +411,14 @@ func TestRunMigrationRepair(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\n")
 
 		set, err = LoadMigrationSet(t.Context(), migrator, directory)
@@ -435,7 +438,7 @@ func TestRunMigrationRepair(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -461,7 +464,7 @@ func TestRunMigrationRepair(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff:no-transaction\n"+
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
@@ -490,7 +493,7 @@ func TestRunMigrationRepair(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		set, err := LoadMigrationSet(t.Context(), migrator, directory)
@@ -510,9 +513,9 @@ func TestStepMigration(t *testing.T) {
 	writeTwoFiles := func(tb testing.TB, directory string) {
 		tb.Helper()
 
-		WriteSQLFile(tb, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(tb, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
-		WriteSQLFile(tb, directory, "20260822143000_notes.sql",
+		sqltest.WriteSQLFile(tb, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 	}
 
@@ -568,7 +571,7 @@ func TestStepMigration(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, updated_at TEXT);\n"+
 				"CREATE TRIGGER touch AFTER UPDATE ON users\n"+
 				"BEGIN\n"+
@@ -586,7 +589,7 @@ func TestStepMigration(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff 1.0\n\n-- dbdiff:statement\nCREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"-- dbdiff:statement\nCREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
@@ -646,7 +649,7 @@ func TestVerifyMigrations(t *testing.T) {
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(tb, os.Mkdir(migrations, 0o750))
 
-		WriteSQLFile(tb, migrations, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(tb, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
 		sourcePath := filepath.Join(directory, "source.sqlite")
@@ -680,7 +683,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
+		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
 			TargetDatabasePath: directory,
 			SourceDatabasePath: sourcePath,
 		})
@@ -713,7 +716,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
+		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
 			TargetDatabasePath: directory,
 			SourceDatabasePath: sourcePath,
 		})
@@ -724,7 +727,7 @@ func TestVerifyMigrations(t *testing.T) {
 		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
 		require.NotEmpty(t, instructions)
-		require.Contains(t, drivers.RenderInstructions(instructions), `DROP TABLE "audit"`)
+		require.Contains(t, driversshared.RenderInstructions(instructions), `DROP TABLE "audit"`)
 	})
 
 	t.Run("TheHistoryTableIsNoDrift", func(t *testing.T) {
@@ -743,7 +746,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
+		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
 			TargetDatabasePath: directory,
 			SourceDatabasePath: sourcePath,
 		})
@@ -753,7 +756,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		instructions, err := driver.Diff(t.Context())
 		require.NoError(t, err)
-		require.NotContains(t, drivers.RenderInstructions(instructions), "dbdiff_migrations")
+		require.NotContains(t, driversshared.RenderInstructions(instructions), "dbdiff_migrations")
 	})
 
 	t.Run("ADatabaseWithNoAppliedMigration", func(t *testing.T) {
@@ -774,7 +777,7 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := drivers.NewSQLiteDriver(t.Context(), &drivers.SQLiteDriverConfig{
+		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
 			TargetDatabasePath: verifyDirectory,
 			SourceDatabasePath: sourcePath,
 		})
@@ -796,7 +799,7 @@ func TestPostgresNoTransactionMigration(t *testing.T) {
 	require.NoError(t, err)
 
 	directory := t.TempDir()
-	WriteSQLFile(t, directory, "20260101000000_concurrent_index.sql",
+	sqltest.WriteSQLFile(t, directory, "20260101000000_concurrent_index.sql",
 		`-- dbdiff:no-transaction
 DROP INDEX CONCURRENTLY IF EXISTS ix_users_email;
 ALTER TABLE users ALTER COLUMN username SET NOT NULL;
@@ -826,19 +829,19 @@ func TestPostgresMigrationRunner(t *testing.T) {
 
 		migrator := NewTestPostgresMigrator(t)
 
-		scratchVersion := drivers.DetectPostgresScratchVersion(t.Context(), PostgresTestConnectionString)
+		scratchVersion := driverspostgres.DetectPostgresScratchVersion(t.Context(), PostgresTestConnectionString)
 		require.NotEmpty(t, scratchVersion)
 
 		directory := t.TempDir()
 
-		schemaFile := WriteSQLFile(t, directory, "schema.sql",
+		schemaFile := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);\n"+
 				"CREATE INDEX users_email ON users (email);\n")
 
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		generateDriver, err := drivers.NewPostgresDriver(t.Context(), &drivers.PostgresDriverConfig{
+		generateDriver, err := driverspostgres.NewPostgresDriver(t.Context(), &driverspostgres.PostgresDriverConfig{
 			TargetConnectionString: schemaFile,
 			SourceConnectionString: migrations,
 			ScratchServerVersion:   string(scratchVersion),
@@ -860,7 +863,7 @@ func TestPostgresMigrationRunner(t *testing.T) {
 
 		sourceConnectionString := fmt.Sprintf("%s&search_path=%s", PostgresTestConnectionString, migrator.Schema())
 
-		driver, err := drivers.NewPostgresDriver(t.Context(), &drivers.PostgresDriverConfig{
+		driver, err := driverspostgres.NewPostgresDriver(t.Context(), &driverspostgres.PostgresDriverConfig{
 			TargetConnectionString: schemaFile,
 			SourceConnectionString: sourceConnectionString,
 		})

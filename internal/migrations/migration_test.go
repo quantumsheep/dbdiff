@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,9 +60,9 @@ func TestMigrationIdentity(t *testing.T) {
 	t.Run("ReadDirectory", func(t *testing.T) {
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260822143000_second.sql", "SELECT 2;")
-		WriteSQLFile(t, directory, "20260814101500_first.sql", "SELECT 1;")
-		WriteSQLFile(t, directory, "notes.txt", "ignored")
+		sqltest.WriteSQLFile(t, directory, "20260822143000_second.sql", "SELECT 2;")
+		sqltest.WriteSQLFile(t, directory, "20260814101500_first.sql", "SELECT 1;")
+		sqltest.WriteSQLFile(t, directory, "notes.txt", "ignored")
 
 		migrations, err := ReadMigrationDirectory(directory)
 		require.NoError(t, err)
@@ -75,8 +76,8 @@ func TestMigrationIdentity(t *testing.T) {
 	t.Run("ReadDirectorySkipsADownFile", func(t *testing.T) {
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;")
-		WriteSQLFile(t, directory, "20260814101500_init.down.sql", "SELECT 2;")
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;")
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.down.sql", "SELECT 2;")
 
 		migrations, err := ReadMigrationDirectory(directory)
 		require.NoError(t, err)
@@ -93,8 +94,8 @@ func TestMigrationIdentity(t *testing.T) {
 	t.Run("ReadDirectoryWithTwoFilesOfOneVersion", func(t *testing.T) {
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;")
-		WriteSQLFile(t, directory, "20260814101500_users.sql", "SELECT 2;")
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;")
+		sqltest.WriteSQLFile(t, directory, "20260814101500_users.sql", "SELECT 2;")
 
 		_, err := ReadMigrationDirectory(directory)
 		require.ErrorContains(t, err, "hold one version")
@@ -103,7 +104,7 @@ func TestMigrationIdentity(t *testing.T) {
 	t.Run("ReadDirectoryWithABadName", func(t *testing.T) {
 		directory := t.TempDir()
 
-		WriteSQLFile(t, directory, "first.sql", "SELECT 1;")
+		sqltest.WriteSQLFile(t, directory, "first.sql", "SELECT 1;")
 
 		_, err := ReadMigrationDirectory(directory)
 		require.ErrorContains(t, err, "first.sql")
@@ -120,7 +121,7 @@ func TestMigrationConfig(t *testing.T) {
 
 		config, err := ReadMigrationConfig(path, false)
 		require.NoError(t, err)
-		require.Equal(t, drivers.PostgresDriverName, config.Driver)
+		require.Equal(t, driversshared.PostgresDriverName, config.Driver)
 		require.Equal(t, "schema.sql", config.Target)
 		require.Equal(t, "./migrations", config.Source)
 		require.Equal(t, "public", config.Schema)
@@ -291,7 +292,7 @@ func TestMigrationSet(t *testing.T) {
 	t.Run("Content", func(t *testing.T) {
 		directory := t.TempDir()
 
-		path := WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;\nSELECT 2;\n")
+		path := sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;\nSELECT 2;\n")
 
 		entry := &MigrationEntry{
 			Migration: &Migration{
@@ -308,7 +309,7 @@ func TestMigrationSet(t *testing.T) {
 	t.Run("ContentOfAFileThatChanged", func(t *testing.T) {
 		directory := t.TempDir()
 
-		path := WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;\n")
+		path := sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql", "SELECT 1;\n")
 
 		entries, err := ReadMigrationDirectory(directory)
 		require.NoError(t, err)
