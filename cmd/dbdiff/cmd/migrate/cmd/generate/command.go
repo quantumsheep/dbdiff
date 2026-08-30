@@ -65,7 +65,7 @@ func action(ctx context.Context, command *cli.Command) error {
 	}
 
 	driver, err := drivers.NewDriver(ctx, config.Driver, config.Source, config.Target,
-		config.Schema, config.Version, false, false)
+		config.Schema, config.Version, false, false, config.Ignore.Tables)
 	if err != nil {
 		return err
 	}

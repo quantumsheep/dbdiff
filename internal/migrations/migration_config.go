@@ -18,6 +18,11 @@ type MigrationConfig struct {
 	Target  string                   `yaml:"target"`
 	Schema  string                   `yaml:"schema"`
 	Version string                   `yaml:"version"`
+	Ignore  MigrationIgnoreConfig    `yaml:"ignore"`
+}
+
+type MigrationIgnoreConfig struct {
+	Tables []string `yaml:"tables"`
 }
 
 func ReadMigrationConfig(path string, optional bool) (*MigrationConfig, error) {

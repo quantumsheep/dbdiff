@@ -85,6 +85,7 @@ dbdiff diff current.sqlite final.sqlite | sqlite3 current.sqlite
 | `--comments`   | none                              | Print a comment before each object that the output changes.                                   |
 | `--privileges` | none                              | Add the comparison of the owner and the privileges (postgres and mysql).                      |
 | `--exit-code`  | none                              | Exit with the code 1 when the schemas differ, like `diff(1)`.                                 |
+| `--ignore-table` | A table name                    | Ignore the table with this name. Repeat the flag for each table.                              |
 
 
 ### Driver detection
@@ -121,6 +122,9 @@ source: ./migrations   # the directory of the migration files
 target: ./schema.sql   # the wanted schema of `migrate generate`
 schema: app
 version: 17.11.0       # the version of the real PostgreSQL server
+ignore:
+  tables:              # the tables that the diff ignores
+    - example
 ```
 
 `migrate generate` compares the target against the replay of the migration files, and it writes the difference as a new file:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -15,6 +16,7 @@ type MySQLDriverConfig struct {
 	SourceConnectionString string
 	CompareData            bool
 	ComparePrivileges      bool
+	IgnoreTables           []string
 }
 
 type MySQLDriver struct {
@@ -22,6 +24,7 @@ type MySQLDriver struct {
 	SourceDatabaseConnection *sql.DB
 	CompareData              bool
 	ComparePrivileges        bool
+	IgnoreTables             []string
 
 	scratchDatabases    []*mysqlScratchDatabase
 	detailsByConnection map[*sql.DB]*mysqlConnectionDetails
@@ -45,6 +48,7 @@ func NewMySQLDriver(ctx context.Context, config *MySQLDriverConfig) (*MySQLDrive
 	driver := &MySQLDriver{
 		CompareData:         config.CompareData,
 		ComparePrivileges:   config.ComparePrivileges,
+		IgnoreTables:        config.IgnoreTables,
 		detailsByConnection: make(map[*sql.DB]*mysqlConnectionDetails),
 	}
 
@@ -327,6 +331,10 @@ func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable,
 		err := rows.Scan(&row.Name, &row.Engine, &row.Collation, &row.CreateOptions)
 		if err != nil {
 			return nil, err
+		}
+
+		if slices.Contains(d.IgnoreTables, row.Name) {
+			continue
 		}
 
 		tableRows = append(tableRows, row)

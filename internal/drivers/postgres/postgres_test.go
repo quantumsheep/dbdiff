@@ -5295,4 +5295,37 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.RequireInstructions(nil)
 	})
+
+	t.Run("IgnoredTable", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT, name TEXT);
+			CREATE TABLE ignored_created (id INT);
+			CREATE TABLE ignored_changed (id INT, name TEXT);
+		`)
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE TABLE ignored_dropped (id INT);
+			CREATE TABLE ignored_changed (id INT, email TEXT);
+		`)
+
+		driver.IgnoreTables = []string{"ignored_created", "ignored_dropped", "ignored_changed"}
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "name",
+							Type: "text",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
 }

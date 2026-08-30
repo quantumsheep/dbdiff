@@ -251,6 +251,10 @@ func (d *MySQLDriver) getPrivilegeSets(ctx context.Context, db *sql.DB, query st
 			return nil, err
 		}
 
+		if slices.Contains(d.IgnoreTables, tableName) {
+			continue
+		}
+
 		set, found := lo.Find(sets, func(set *MySQLPrivilegeSet) bool {
 			return set.Grantee == grantee && set.TableName == tableName
 		})
@@ -305,6 +309,10 @@ func (d *MySQLDriver) GetColumnPrivileges(ctx context.Context, db *sql.DB) ([]*M
 		err := rows.Scan(&grantee, &tableName, &columnName, &privilege, &grantable)
 		if err != nil {
 			return nil, err
+		}
+
+		if slices.Contains(d.IgnoreTables, tableName) {
+			continue
 		}
 
 		set, found := lo.Find(sets, func(set *MySQLColumnPrivilegeSet) bool {

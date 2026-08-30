@@ -12,7 +12,7 @@ import (
 
 func NewDriver(ctx context.Context, driverName driversshared.DriverName, currentSchema string, finalSchema string,
 	schema string, scratchVersion string, compareData bool,
-	comparePrivileges bool) (driversshared.Driver, error) {
+	comparePrivileges bool, ignoreTables []string) (driversshared.Driver, error) {
 	if driverName == "" {
 		detected, err := driversshared.DetectDriver(currentSchema, finalSchema)
 		if err != nil {
@@ -40,6 +40,7 @@ func NewDriver(ctx context.Context, driverName driversshared.DriverName, current
 			SourceDatabasePath: currentSchema,
 			TargetDatabasePath: finalSchema,
 			CompareData:        compareData,
+			IgnoreTables:       ignoreTables,
 		})
 	case driversshared.MySQLDriverName:
 		if schema != "" {
@@ -55,6 +56,7 @@ func NewDriver(ctx context.Context, driverName driversshared.DriverName, current
 			TargetConnectionString: finalSchema,
 			CompareData:            compareData,
 			ComparePrivileges:      comparePrivileges,
+			IgnoreTables:           ignoreTables,
 		})
 	case driversshared.PostgresDriverName:
 		return driverspostgres.NewPostgresDriver(ctx, &driverspostgres.PostgresDriverConfig{
@@ -65,6 +67,7 @@ func NewDriver(ctx context.Context, driverName driversshared.DriverName, current
 			CompareData:            compareData,
 			ComparePrivileges:      comparePrivileges,
 			ScratchServerVersion:   scratchVersion,
+			IgnoreTables:           ignoreTables,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)

@@ -64,7 +64,7 @@ func action(ctx context.Context, command *cli.Command) error {
 	}
 
 	driver, err := drivers.NewDriver(ctx, driversshared.DriverName(command.String("driver")), currentSchema, finalSchema,
-		command.String("schema"), "", command.Bool("data"), command.Bool("privileges"))
+		command.String("schema"), "", command.Bool("data"), command.Bool("privileges"), command.StringSlice("ignore-table"))
 	if err != nil {
 		return err
 	}

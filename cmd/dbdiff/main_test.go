@@ -169,6 +169,29 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Equal(t, "UPDATE \"users\" SET \"name\" = 'Alice' WHERE \"id\" = 1;\n", result.Stdout)
 	})
 
+	t.Run("IgnoreTableFlag", func(t *testing.T) {
+		directory := t.TempDir()
+		currentPath := filepath.Join(directory, "current.sqlite")
+		finalPath := filepath.Join(directory, "final.sqlite")
+
+		schema := `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`
+
+		clitest.WriteSQLiteDatabase(t, currentPath, schema)
+		clitest.WriteSQLiteDatabase(t, finalPath, schema+`CREATE TABLE example (id INTEGER PRIMARY KEY);`)
+
+		result := clitest.Run(t, binaryPath, "diff", currentPath, finalPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Contains(t, result.Stdout, "CREATE TABLE \"example\"")
+
+		result = clitest.Run(t, binaryPath, "diff", "--ignore-table", "example", currentPath, finalPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, "\n", result.Stdout)
+	})
+
 	t.Run("CommentsFlag", func(t *testing.T) {
 		directory := t.TempDir()
 		currentPath := filepath.Join(directory, "current.sqlite")

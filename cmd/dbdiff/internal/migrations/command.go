@@ -47,6 +47,11 @@ func GetMigrationConfigFromCommand(command *cli.Command) (*coremigrations.Migrat
 		config.Schema = schema
 	}
 
+	ignoreTables := command.StringSlice("ignore-table")
+	if len(ignoreTables) > 0 {
+		config.Ignore.Tables = ignoreTables
+	}
+
 	if config.Source == "" {
 		return nil, fmt.Errorf("name the source with the --source flag, or with the key source of dbdiff.yaml")
 	}

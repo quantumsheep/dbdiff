@@ -18,19 +18,22 @@ type SQLiteDriverConfig struct {
 	TargetDatabasePath string
 	SourceDatabasePath string
 	CompareData        bool
+	IgnoreTables       []string
 }
 
 type SQLiteDriver struct {
 	TargetDatabaseConnection *sql.DB
 	SourceDatabaseConnection *sql.DB
 	CompareData              bool
+	IgnoreTables             []string
 
 	temporaryDirectory string
 }
 
 func NewSQLiteDriver(ctx context.Context, config *SQLiteDriverConfig) (*SQLiteDriver, error) {
 	driver := &SQLiteDriver{
-		CompareData: config.CompareData,
+		CompareData:  config.CompareData,
+		IgnoreTables: config.IgnoreTables,
 	}
 
 	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetDatabasePath, "target")
@@ -218,6 +221,10 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 		err := rows.Scan(&tableName)
 		if err != nil {
 			return nil, err
+		}
+
+		if slices.Contains(d.IgnoreTables, tableName) {
+			continue
 		}
 
 		table, err := d.GetTable(ctx, db, tableName)

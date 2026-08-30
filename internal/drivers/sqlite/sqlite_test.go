@@ -4400,4 +4400,57 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.RequireInstructions(nil)
 	})
+
+	t.Run("IgnoredTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+
+			CREATE TABLE ignored_dropped (
+				id INTEGER PRIMARY KEY
+			);
+
+			CREATE TABLE ignored_changed (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL
+			);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				email TEXT
+			);
+
+			CREATE TABLE ignored_created (
+				id INTEGER PRIMARY KEY
+			);
+
+			CREATE TABLE ignored_changed (
+				id INTEGER PRIMARY KEY,
+				email TEXT NOT NULL
+			);
+		`)
+
+		driver.IgnoreTables = []string{"ignored_created", "ignored_dropped", "ignored_changed"}
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name: "email",
+						Type: "TEXT",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
 }

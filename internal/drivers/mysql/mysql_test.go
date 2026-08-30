@@ -1765,6 +1765,38 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 		driver.RequireInstructions(nil)
 	})
+
+	t.Run("IgnoredTable", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));
+			CREATE TABLE ignored_created (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE ignored_changed (id int NOT NULL, name varchar(255), PRIMARY KEY (id));
+		`)
+		driver.ExecOnSource(`
+			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE ignored_dropped (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE ignored_changed (id int NOT NULL, description varchar(255), PRIMARY KEY (id));
+		`)
+
+		driver.IgnoreTables = []string{"ignored_created", "ignored_dropped", "ignored_changed"}
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "email",
+						Type: "varchar(255)",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
 }
 
 // MariaDB reads the same driver code, and its catalog reports the types, the defaults,
@@ -2142,6 +2174,38 @@ func TestMariaDBDriver(t *testing.T) {
 			&MySQLCreateViewInstruction{
 				Name:       "adult_users",
 				Definition: "select `users`.`id` AS `id` from `users` where `users`.`age` >= 18",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("IgnoredTable", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));
+			CREATE TABLE ignored_created (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE ignored_changed (id int NOT NULL, name varchar(255), PRIMARY KEY (id));
+		`)
+		driver.ExecOnSource(`
+			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE ignored_dropped (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE ignored_changed (id int NOT NULL, description varchar(255), PRIMARY KEY (id));
+		`)
+
+		driver.IgnoreTables = []string{"ignored_created", "ignored_dropped", "ignored_changed"}
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "email",
+						Type: "varchar(255)",
+					},
+				},
 			},
 		})
 

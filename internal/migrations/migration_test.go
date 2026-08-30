@@ -116,7 +116,7 @@ func TestMigrationConfig(t *testing.T) {
 		directory := t.TempDir()
 
 		path := filepath.Join(directory, "dbdiff.yaml")
-		err := os.WriteFile(path, []byte("driver: postgres\ntarget: schema.sql\nsource: ./migrations\nschema: public\n"), 0o600)
+		err := os.WriteFile(path, []byte("driver: postgres\ntarget: schema.sql\nsource: ./migrations\nschema: public\nignore:\n  tables:\n    - example\n"), 0o600)
 		require.NoError(t, err)
 
 		config, err := ReadMigrationConfig(path, false)
@@ -125,6 +125,7 @@ func TestMigrationConfig(t *testing.T) {
 		require.Equal(t, "schema.sql", config.Target)
 		require.Equal(t, "./migrations", config.Source)
 		require.Equal(t, "public", config.Schema)
+		require.Equal(t, []string{"example"}, config.Ignore.Tables)
 	})
 
 	t.Run("AnOptionalFileThatIsAbsent", func(t *testing.T) {

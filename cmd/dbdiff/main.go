@@ -39,6 +39,10 @@ func main() {
 				Name:  "schema",
 				Usage: "Name of the schema. The postgres driver accepts this flag. The default is the schema of the search path",
 			},
+			&cli.StringSliceFlag{
+				Name:  "ignore-table",
+				Usage: "Name of a table that the diff ignores. Repeat the flag for each table",
+			},
 		},
 		Commands: []*cli.Command{
 			cmddiff.Command(),

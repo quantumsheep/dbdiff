@@ -21,6 +21,7 @@ type PostgresDriverConfig struct {
 	SourceSchema           string
 	CompareData            bool
 	ComparePrivileges      bool
+	IgnoreTables           []string
 
 	ScratchServerVersion string
 }
@@ -32,6 +33,7 @@ type PostgresDriver struct {
 	SourceSchema             string
 	CompareData              bool
 	ComparePrivileges        bool
+	IgnoreTables             []string
 
 	ScratchVersion embeddedpostgres.PostgresVersion
 
@@ -46,6 +48,7 @@ func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*Post
 		SourceSchema:      config.SourceSchema,
 		CompareData:       config.CompareData,
 		ComparePrivileges: config.ComparePrivileges,
+		IgnoreTables:      config.IgnoreTables,
 		ScratchVersion:    postgresScratchVersionOfConfig(ctx, config),
 	}
 
@@ -1575,6 +1578,10 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 			return nil, err
 		}
 
+		if slices.Contains(d.IgnoreTables, name) {
+			continue
+		}
+
 		owners = append(owners, &PostgresOwner{
 			ObjectType: ownerObjectType(relkind),
 			ObjectName: name,
@@ -1625,6 +1632,10 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 		err := rows.Scan(&name, &relkind, &grantee, &granted)
 		if err != nil {
 			return nil, err
+		}
+
+		if slices.Contains(d.IgnoreTables, name) {
+			continue
 		}
 
 		privileges = append(privileges, &PostgresPrivilege{
@@ -1855,6 +1866,10 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 			&storageParameters, &replicaIdentity, &replicaIdentityIndex)
 		if err != nil {
 			return nil, err
+		}
+
+		if slices.Contains(d.IgnoreTables, tableName) {
+			continue
 		}
 
 		table, err := d.GetTable(ctx, db, tableName)

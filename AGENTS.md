@@ -68,7 +68,7 @@ go build -o ./bin/dbdiff ./cmd/dbdiff
 go run ./cmd/dbdiff diff <source> <target>
 ```
 
-The `dbdiff` command holds `--driver` and `--schema`, with `Local` false, so every subcommand reads them. Every other flag belongs to the command that reads it:
+The `dbdiff` command holds `--driver`, `--schema`, and `--ignore-table`, with `Local` false, so every subcommand reads them. Every other flag belongs to the command that reads it:
 
 | Command                | Flags                                                 |
 | ---------------------- | ----------------------------------------------------- |

@@ -22,6 +22,7 @@ type diffOptions struct {
 	scratchServerVersion string
 	compareData          bool
 	comparePrivileges    bool
+	ignoreTables         []string
 }
 
 // Option configures Diff.
@@ -73,6 +74,13 @@ func WithPrivileges() Option {
 	})
 }
 
+// WithIgnoreTables names the tables that the diff ignores.
+func WithIgnoreTables(tables ...string) Option {
+	return diffOption(func(target *diffOptions) {
+		target.ignoreTables = append(target.ignoreTables, tables...)
+	})
+}
+
 // A Statement is one SQL statement of a diff.
 type Statement struct {
 	SQL string
@@ -92,7 +100,7 @@ func Diff(ctx context.Context, source string, target string, options ...Option) 
 	}
 
 	driver, err := internaldrivers.NewDriver(ctx, merged.driver, source, target, merged.schema,
-		merged.scratchServerVersion, merged.compareData, merged.comparePrivileges)
+		merged.scratchServerVersion, merged.compareData, merged.comparePrivileges, merged.ignoreTables)
 	if err != nil {
 		return nil, err
 	}
