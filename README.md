@@ -203,7 +203,7 @@ err := migrations.Up(ctx,
 
 - The PostgreSQL driver compares one schema per run. It prints no `CREATE SCHEMA` statement, and it detects no object that moved between schemas.
 - The `--privileges` flag covers tables, views, materialized views, and sequences. It reads no default privilege of `ALTER DEFAULT PRIVILEGES`.
-- dbdiff generates no down migration. A rollback is a restore from a backup.
+- dbdiff generates no down migration. Use an up migration as a down migration.
 - The name `dbdiff_migrations` is reserved. `dbdiff diff` hides a table with that name.
 - `migrate up` sends a whole migration file to the engine in one call. An error names the file, and not the position of the statement.
 
