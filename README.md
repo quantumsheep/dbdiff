@@ -139,7 +139,7 @@ dbdiff migrate up
 
 `migrate up` applies each pending file in its own transaction and records it in the table `dbdiff_migrations`. On MySQL a transaction rolls no DDL statement back, so `migrate up` marks each file with a dirty row instead. If a file fails halfway, repair the database, then run `migrate repair`. A checksum detects a file that changed after its migration ran. `migrate up` also accepts `--to <version>`, which stops the run after that version. `migrate preview` accepts `--run`, which applies every pending file in one transaction and rolls it back. `migrate preview --run` refuses the mysql driver, because MySQL commits every DDL statement at once.
 
-`migrate baseline` records every migration file as applied, and it runs no file. Use it to adopt dbdiff on a database that already holds the schema of the files.
+`migrate baseline` records every migration file as applied, and it runs no file. Use it to adopt dbdiff on a database that already holds the schema of the files. `migrate baseline` also accepts `--to <version>`, which stops the record after that version.
 
 A file that holds the line `-- dbdiff:no-transaction` runs outside a transaction, one call per statement.
 

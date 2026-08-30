@@ -76,6 +76,7 @@ The `dbdiff` command holds `--driver` and `--schema`, with `Local` false, so eve
 | Each `migrate` command | `--config`, `--source`, `--target`                    |
 | `migrate preview`      | The three flags above, and `--run`                    |
 | `migrate up`           | The three flags above, and `--to`                     |
+| `migrate baseline`     | The three flags above, and `--to`                     |
 
 Each subcommand of `migrate` writes its flags in its own `Command` function, because each command needs its own flag instances. A change of the text of one of the three migration flags touches each of the eight files.
 

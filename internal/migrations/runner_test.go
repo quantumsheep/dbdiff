@@ -421,7 +421,7 @@ func TestRunMigrationBaseline(t *testing.T) {
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
 		require.Contains(t, output.String(), "Recorded 20260822143000_notes.")
 		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
@@ -456,7 +456,7 @@ func TestRunMigrationBaseline(t *testing.T) {
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.NotContains(t, output.String(), "20260814101500_init")
 		require.Contains(t, output.String(), "Recorded 20260822143000_notes.")
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
@@ -486,12 +486,59 @@ func TestRunMigrationBaseline(t *testing.T) {
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
 
 		set, err = LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 		require.Equal(t, MigrationApplied, set.Entries[0].State)
+	})
+
+	t.Run("StopsAfterTheNamedVersion", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
+			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		var output bytes.Buffer
+
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "20260814101500", &output))
+		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
+		require.NotContains(t, output.String(), "20260822143000_notes")
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 1)
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, MigrationApplied, set.Entries[0].State)
+		require.Equal(t, MigrationPending, set.Entries[1].State)
+	})
+
+	t.Run("RefusesAVersionThatNoFileHolds", func(t *testing.T) {
+		migrator := NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		err = RunMigrationBaseline(t.Context(), migrator, set, "20990101000000", io.Discard)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no migration with the version")
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Empty(t, applied)
 	})
 
 	t.Run("WithNoUnrecordedFile", func(t *testing.T) {
@@ -510,7 +557,7 @@ func TestRunMigrationBaseline(t *testing.T) {
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, &output))
+		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.Contains(t, output.String(), "The record holds every file.")
 	})
 
@@ -531,7 +578,7 @@ func TestRunMigrationBaseline(t *testing.T) {
 		set, err = LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = RunMigrationBaseline(t.Context(), migrator, set, io.Discard)
+		err = RunMigrationBaseline(t.Context(), migrator, set, "", io.Discard)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "changed")
 	})

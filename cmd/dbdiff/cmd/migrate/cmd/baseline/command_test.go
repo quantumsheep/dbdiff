@@ -41,6 +41,33 @@ func TestMigrateBaselineCommand(t *testing.T) {
 		require.Equal(t, 0, verify.ExitCode, verify.Stderr)
 	})
 
+	t.Run("WithTheToFlag", func(t *testing.T) {
+		directory := t.TempDir()
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		clitest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+		clitest.WriteSQLFile(t, migrations, "20260822143000_notes.sql",
+			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
+
+		databasePath := filepath.Join(directory, "app.sqlite")
+		clitest.WriteSQLiteDatabase(t, databasePath, "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+
+		configPath := clitest.WriteMigrationConfig(t, directory,
+			"driver: sqlite3\nsource: "+migrations+"\n")
+
+		baseline := clitest.Run(t, binaryPath, "migrate", "baseline",
+			"--config", configPath, "--target", databasePath, "--to", "20260814101500")
+		require.Equal(t, 0, baseline.ExitCode, baseline.Stderr)
+		require.Contains(t, baseline.Stdout, "Recorded 20260814101500_init.")
+		require.NotContains(t, baseline.Stdout, "20260822143000_notes")
+
+		status := clitest.Run(t, binaryPath, "migrate", "status", "--config", configPath, "--target", databasePath)
+		require.Equal(t, 0, status.ExitCode, status.Stderr)
+		require.Contains(t, status.Stdout, "pending")
+	})
+
 	t.Run("WithNoUnrecordedFile", func(t *testing.T) {
 		directory := t.TempDir()
 

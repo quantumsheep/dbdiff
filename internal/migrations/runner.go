@@ -151,13 +151,15 @@ func StepMigration(ctx context.Context, migrator Migrator, set *MigrationSet,
 	return applyPendingMigrations(ctx, migrator, set, bufio.NewReader(input), "", output)
 }
 
-// An empty version keeps every pending file. A named version keeps the files up to that
-// version, and it must name a file of the directory.
 func pendingMigrationsUpTo(set *MigrationSet, lastVersion string) ([]*MigrationEntry, error) {
-	pending := set.Pending()
+	return migrationsUpTo(set, set.Pending(), lastVersion)
+}
 
+// An empty version keeps every entry. A named version keeps the entries up to that
+// version, and it must name a file of the directory.
+func migrationsUpTo(set *MigrationSet, entries []*MigrationEntry, lastVersion string) ([]*MigrationEntry, error) {
 	if lastVersion == "" {
-		return pending, nil
+		return entries, nil
 	}
 
 	holdsVersion := false
@@ -174,7 +176,7 @@ func pendingMigrationsUpTo(set *MigrationSet, lastVersion string) ([]*MigrationE
 
 	var kept []*MigrationEntry
 
-	for _, entry := range pending {
+	for _, entry := range entries {
 		if entry.Migration.Version <= lastVersion {
 			kept = append(kept, entry)
 		}
@@ -336,8 +338,9 @@ func RunMigrationRepair(ctx context.Context, migrator Migrator, set *MigrationSe
 
 // RunMigrationBaseline records every file that the history table does not hold, and it
 // runs no file. A baseline adopts a database that already holds the schema of the files.
+// A named lastVersion stops the record after that version.
 func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *MigrationSet,
-	output io.Writer) error {
+	lastVersion string, output io.Writer) error {
 	err := set.RecordError()
 	if err != nil {
 		return err
@@ -368,6 +371,11 @@ func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *Migration
 	unrecorded := lo.Filter(set.Entries, func(entry *MigrationEntry, _ int) bool {
 		return entry.State == MigrationPending || entry.State == MigrationOutOfOrder
 	})
+
+	unrecorded, err = migrationsUpTo(set, unrecorded, lastVersion)
+	if err != nil {
+		return err
+	}
 
 	if len(unrecorded) == 0 {
 		_, _ = fmt.Fprintln(output, "The record holds every file.")

@@ -27,6 +27,10 @@ func Command() *cli.Command {
 				Name:  "target",
 				Usage: "Connection URL of the database that the migrations change. The default is the DBDIFF_TARGET variable",
 			},
+			&cli.StringFlag{
+				Name:  "to",
+				Usage: "Version of the last migration to record, for example 20260822143000. The default records every migration file",
+			},
 		},
 		OnUsageError: helpers.OnUsageError,
 		Action:       action,
@@ -41,5 +45,5 @@ func action(ctx context.Context, command *cli.Command) error {
 
 	defer func() { _ = migrator.Close() }()
 
-	return coremigrations.RunMigrationBaseline(ctx, migrator, set, os.Stdout)
+	return coremigrations.RunMigrationBaseline(ctx, migrator, set, command.String("to"), os.Stdout)
 }
