@@ -2784,6 +2784,47 @@ func TestPostgresDriver(t *testing.T) {
 		})
 	})
 
+	t.Run("ConstraintsCheck", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE items (
+				price INT,
+				CONSTRAINT positive_price CHECK (price > 0),
+				CONSTRAINT small_price CHECK (price < 10)
+			);
+		`)
+		driver.ExecOnTarget(`CREATE TABLE items (price INT, CONSTRAINT positive_price CHECK (price >= 0));`)
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "positive_price"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "positive_price",
+							Type: "c",
+							Def:  "CHECK ((price >= 0))",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "small_price"},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("DropColumnWithPrimaryKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
