@@ -653,6 +653,11 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 		return nil, err
 	}
 
+	// PRAGMA index_list gives no stable order.
+	sort.SliceStable(indexes, func(i, j int) bool {
+		return indexes[i].Name < indexes[j].Name
+	})
+
 	return indexes, nil
 }
 
@@ -736,7 +741,7 @@ func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName s
 }
 
 func (d *SQLiteDriver) GetTriggers(ctx context.Context, db *sql.DB, objectName string) ([]*SQLiteTrigger, error) {
-	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", objectName)
+	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name", objectName)
 	if err != nil {
 		return nil, err
 	}

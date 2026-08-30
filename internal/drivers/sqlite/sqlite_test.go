@@ -3360,6 +3360,40 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("TriggersAndIndexesPrintInNameOrder", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`CREATE TABLE items (a INTEGER, b TEXT);`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE items (a INTEGER, b TEXT);
+			CREATE INDEX items_b ON items (b);
+			CREATE INDEX items_a ON items (a);
+			CREATE TRIGGER items_tb AFTER UPDATE ON items BEGIN SELECT 2; END;
+			CREATE TRIGGER items_ta AFTER INSERT ON items BEGIN SELECT 1; END;
+		`)
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&SQLiteCreateIndexInstruction{
+				Name:      "items_a",
+				TableName: "items",
+				Keys:      []string{`"a"`},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "items_b",
+				TableName: "items",
+				Keys:      []string{`"b"`},
+			},
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER items_ta AFTER INSERT ON items BEGIN SELECT 1; END",
+			},
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER items_tb AFTER UPDATE ON items BEGIN SELECT 2; END",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CreateTableWithTriggers", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
