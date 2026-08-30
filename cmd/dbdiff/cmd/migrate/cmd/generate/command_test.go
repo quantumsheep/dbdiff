@@ -53,6 +53,30 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		require.Contains(t, result.Stderr, "--source")
 	})
 
+	t.Run("RefusesAnEmptyMigration", func(t *testing.T) {
+		directory := t.TempDir()
+
+		schema := "CREATE TABLE users (id INTEGER PRIMARY KEY);"
+
+		clitest.WriteSQLFile(t, directory, "schema.sql", schema)
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		clitest.WriteSQLFile(t, migrations, "20260814101500_init.sql", schema)
+
+		configPath := clitest.WriteMigrationConfig(t, directory,
+			"driver: sqlite3\ntarget: "+filepath.Join(directory, "schema.sql")+
+				"\nsource: "+migrations+"\n")
+
+		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_users")
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "wrote no file")
+
+		entries, err := os.ReadDir(migrations)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+	})
+
 	t.Run("BuildsTheMigrationsDirectory", func(t *testing.T) {
 		directory := t.TempDir()
 

@@ -84,9 +84,7 @@ func action(ctx context.Context, command *cli.Command) error {
 	}
 
 	if len(paths) == 0 {
-		fmt.Println("The migrations hold the schema of the source already. dbdiff wrote no file.")
-
-		return nil
+		return fmt.Errorf("the migrations hold the schema of the source already, so dbdiff wrote no file")
 	}
 
 	for _, path := range paths {
