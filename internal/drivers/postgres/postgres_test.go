@@ -4031,6 +4031,92 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("CreateCast", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `
+			CREATE TYPE point2d AS (x integer, y integer);
+			CREATE FUNCTION point2d_to_text(point2d) RETURNS text AS $$
+				SELECT '(' || ($1).x::text || ',' || ($1).y::text || ')';
+			$$ LANGUAGE sql IMMUTABLE;
+		`
+		driver.ExecOnSource(setup)
+		driver.ExecOnTarget(setup)
+
+		driver.ExecOnTarget(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&PostgresCreateCastInstruction{
+				SourceType: "point2d",
+				TargetType: "text",
+				Method:     "f",
+				Context:    "a",
+				Function:   "point2d_to_text(point2d)",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("DropCast", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `
+			CREATE TYPE point2d AS (x integer, y integer);
+			CREATE FUNCTION point2d_to_text(point2d) RETURNS text AS $$
+				SELECT '(' || ($1).x::text || ',' || ($1).y::text || ')';
+			$$ LANGUAGE sql IMMUTABLE;
+		`
+		driver.ExecOnSource(setup)
+		driver.ExecOnTarget(setup)
+
+		driver.ExecOnSource(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&PostgresDropCastInstruction{
+				SourceType: "point2d",
+				TargetType: "text",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ModifyCast", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `
+			CREATE TYPE point2d AS (x integer, y integer);
+			CREATE FUNCTION point2d_to_text(point2d) RETURNS text AS $$
+				SELECT '(' || ($1).x::text || ',' || ($1).y::text || ')';
+			$$ LANGUAGE sql IMMUTABLE;
+		`
+		driver.ExecOnSource(setup)
+		driver.ExecOnTarget(setup)
+
+		driver.ExecOnSource(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d);`)
+		driver.ExecOnTarget(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS IMPLICIT;`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&PostgresDropCastInstruction{
+				SourceType: "point2d",
+				TargetType: "text",
+			},
+			&PostgresCreateCastInstruction{
+				SourceType: "point2d",
+				TargetType: "text",
+				Method:     "f",
+				Context:    "i",
+				Function:   "point2d_to_text(point2d)",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("Procedures", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

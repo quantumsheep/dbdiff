@@ -5,6 +5,47 @@ import (
 	"database/sql"
 )
 
+// PostgreSQL holds no action that changes a cast, so a new definition prints a DROP
+// statement and a CREATE statement. A cast holds no schema, so GetCasts scopes it to the
+// schema of its source type or its target type, like a domain or a composite type.
+type PostgresCast struct {
+	SourceType string
+	TargetType string
+
+	// Method holds the castmethod of pg_cast: "f" for a function, "i" for INOUT, and "b"
+	// for a binary coercion.
+	Method string
+
+	// Context holds the castcontext of pg_cast: "e" for explicit, "a" for assignment, and
+	// "i" for implicit.
+	Context string
+
+	// Function names the cast function with its argument list, and it stays empty for the
+	// INOUT method and the binary method.
+	Function string
+}
+
+func (c *PostgresCast) Equal(other *PostgresCast) bool {
+	return c.Method == other.Method && c.Context == other.Context && c.Function == other.Function
+}
+
+func (c *PostgresCast) CreateInstruction() *PostgresCreateCastInstruction {
+	return &PostgresCreateCastInstruction{
+		SourceType: c.SourceType,
+		TargetType: c.TargetType,
+		Method:     c.Method,
+		Context:    c.Context,
+		Function:   c.Function,
+	}
+}
+
+func (c *PostgresCast) DropInstruction() *PostgresDropCastInstruction {
+	return &PostgresDropCastInstruction{
+		SourceType: c.SourceType,
+		TargetType: c.TargetType,
+	}
+}
+
 type AutomaticCastLookup func(oldType string, newType string) (bool, error)
 
 func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, hasAutomaticCast AutomaticCastLookup) (bool, error) {

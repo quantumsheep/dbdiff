@@ -350,6 +350,52 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `DROP POLICY "docs_read" ON "docs";`, instruction.String())
 	})
 
+	t.Run("PostgresCreateCastWithFunction", func(t *testing.T) {
+		instruction := &PostgresCreateCastInstruction{
+			SourceType: "point2d",
+			TargetType: "text",
+			Method:     "f",
+			Context:    "a",
+			Function:   "point2d_to_text(point2d)",
+		}
+
+		require.Equal(t,
+			`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresCreateCastWithInout", func(t *testing.T) {
+		instruction := &PostgresCreateCastInstruction{
+			SourceType: "point2d",
+			TargetType: "point3d",
+			Method:     "i",
+		}
+
+		require.Equal(t, `CREATE CAST (point2d AS point3d) WITH INOUT;`, instruction.String())
+	})
+
+	t.Run("PostgresCreateCastWithoutFunction", func(t *testing.T) {
+		instruction := &PostgresCreateCastInstruction{
+			SourceType: "money_cents",
+			TargetType: "integer",
+			Method:     "b",
+			Context:    "i",
+		}
+
+		require.Equal(t,
+			`CREATE CAST (money_cents AS integer) WITHOUT FUNCTION AS IMPLICIT;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresDropCast", func(t *testing.T) {
+		instruction := &PostgresDropCastInstruction{
+			SourceType: "point2d",
+			TargetType: "text",
+		}
+
+		require.Equal(t, `DROP CAST (point2d AS text);`, instruction.String())
+	})
+
 	t.Run("PostgresCreateTableThatInherits", func(t *testing.T) {
 		instruction := &PostgresCreateTableInstruction{
 			Name: "child",

@@ -90,6 +90,24 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, `Drop the policy "read_every_row" of the table "users"`, instruction.Comment())
 	})
 
+	t.Run("PostgresCreateCast", func(t *testing.T) {
+		instruction := &PostgresCreateCastInstruction{
+			SourceType: "integer",
+			TargetType: "text",
+		}
+
+		require.Equal(t, `Create the cast "integer" to "text"`, instruction.Comment())
+	})
+
+	t.Run("PostgresDropCast", func(t *testing.T) {
+		instruction := &PostgresDropCastInstruction{
+			SourceType: "integer",
+			TargetType: "text",
+		}
+
+		require.Equal(t, `Drop the cast "integer" to "text"`, instruction.Comment())
+	})
+
 	t.Run("PostgresCreateRule", func(t *testing.T) {
 		instruction := &PostgresCreateRuleInstruction{
 			Definition: "CREATE RULE notify_me AS\n    ON UPDATE TO users DO\n NOTIFY users;",

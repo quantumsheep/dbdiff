@@ -196,6 +196,7 @@ err := migrations.Up(ctx,
 | Events                        | ➖                                              | ➖                      | ✅                                              |
 | Aggregates                    | ➖                                              | ✅                      | ➖                                              |
 | Operators                     | ➖                                              | ✅                      | ➖                                              |
+| Casts                         | ➖                                              | ✅                      | ➖                                              |
 | Extensions                    | ➖                                              | ✅                      | ➖                                              |
 | Comments                      | ➖                                              | ✅                      | ✅ (of a column)                                |
 | Row level security            | ➖                                              | ✅                      | ➖                                              |
