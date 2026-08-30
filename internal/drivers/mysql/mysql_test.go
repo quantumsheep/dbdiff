@@ -1893,6 +1893,31 @@ func TestMariaDBDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
+	t.Run("ChangeSequenceOptions", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnTarget("CREATE SEQUENCE order_numbers MINVALUE 5 MAXVALUE 500 CACHE 20 CYCLE;")
+		driver.ExecOnSource("CREATE SEQUENCE order_numbers MINVALUE 5 MAXVALUE 500 CACHE 10 NOCYCLE;")
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLDropSequenceInstruction{
+				Name: "order_numbers",
+			},
+			&MySQLCreateSequenceInstruction{
+				Name:      "order_numbers",
+				Start:     5,
+				Minimum:   5,
+				Maximum:   500,
+				Increment: 1,
+				Cache:     20,
+				Cycle:     true,
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("Trigger", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
