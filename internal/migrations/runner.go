@@ -365,7 +365,9 @@ func applyOneMigration(ctx context.Context, migrator Migrator, entry *MigrationE
 		return err
 	}
 
-	if !driversshared.FileUsesTransaction(content) {
+	// An engine without transactional DDL commits each DDL statement at once, so a
+	// rollback removes no schema change. The dirty row marks a half apply instead.
+	if !driversshared.FileUsesTransaction(content) || !migrator.SupportsTransactionalDDL() {
 		return applyOneMigrationWithoutTransaction(ctx, migrator, entry, content, output)
 	}
 
@@ -412,7 +414,15 @@ func applyOneMigrationWithoutTransaction(ctx context.Context, migrator Migrator,
 		return err
 	}
 
-	for _, statement := range driversshared.SplitSQLStatements(content) {
+	// The directive is the one signal that starts the split. A file without it runs in
+	// one call.
+	statements := []string{content}
+
+	if !driversshared.FileUsesTransaction(content) {
+		statements = driversshared.SplitSQLStatements(content)
+	}
+
+	for _, statement := range statements {
 		err = transaction.Apply(ctx, statement)
 		if err != nil {
 			return fmt.Errorf("%s failed, and the statements before the failure stay applied. "+

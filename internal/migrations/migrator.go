@@ -21,6 +21,7 @@ type Migrator interface {
 	Close() error
 	// A false value names an engine that commits every DDL statement at once. The command
 	// preview refuses such an engine, because its rollback rolls no schema change back.
+	// The commands up and step apply each of its files on the dirty-row path.
 	SupportsTransactionalDDL() bool
 	EnsureHistoryTable(ctx context.Context) error
 	AppliedMigrations(ctx context.Context) ([]AppliedMigration, error)

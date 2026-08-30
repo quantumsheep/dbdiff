@@ -4,6 +4,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -133,6 +134,51 @@ func TestMySQLMigrator(t *testing.T) {
 
 		err := RunMigrationPreview(t.Context(), migrator, NewMigrationSet(nil, nil), io.Discard)
 		require.NoError(t, err)
+	})
+
+	t.Run("UpClearsTheDirtyRowOfAWholeApply", func(t *testing.T) {
+		migrator := NewTestMySQLMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 1)
+		require.False(t, applied[0].Dirty)
+	})
+
+	t.Run("UpMarksAHalfApplyWithTheDirtyRow", func(t *testing.T) {
+		migrator := NewTestMySQLMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
+			"CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));\n"+
+				"CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));\n")
+
+		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "stay applied")
+		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 1)
+		require.True(t, applied[0].Dirty)
+
+		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+		require.Equal(t, MigrationDirty, set.Entries[0].State)
 	})
 
 	t.Run("SatisfiesTheMigratorInterface", func(t *testing.T) {
