@@ -34,4 +34,29 @@ func TestMigrateVerifyCommand(t *testing.T) {
 		require.Equal(t, 1, verify.ExitCode)
 		require.Contains(t, verify.Stdout, `DROP TABLE "audit"`)
 	})
+
+	t.Run("NamesAnOutOfOrderFile", func(t *testing.T) {
+		directory := t.TempDir()
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		clitest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		databasePath := filepath.Join(directory, "app.sqlite")
+		clitest.WriteSQLiteDatabase(t, databasePath, "")
+
+		configPath := clitest.WriteMigrationConfig(t, directory,
+			"driver: sqlite3\nsource: "+migrations+"\n")
+
+		up := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath, "--target", databasePath)
+		require.Equal(t, 0, up.ExitCode, up.Stderr)
+
+		clitest.WriteSQLFile(t, migrations, "20260810101500_early.sql",
+			"CREATE TABLE early (id INTEGER PRIMARY KEY);\n")
+
+		verify := clitest.Run(t, binaryPath, "migrate", "verify", "--config", configPath, "--target", databasePath)
+		require.Equal(t, 0, verify.ExitCode, verify.Stderr)
+		require.Contains(t, verify.Stdout, "20260810101500_early is out of order")
+	})
 }

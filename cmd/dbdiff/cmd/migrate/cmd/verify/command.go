@@ -56,6 +56,14 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
+	for _, entry := range set.Entries {
+		if entry.State != coremigrations.MigrationOutOfOrder {
+			continue
+		}
+
+		fmt.Printf("%s is out of order. The replay does not hold it.\n", entry.FileName())
+	}
+
 	directory, cleanup, err := coremigrations.MigrationVerifyDirectory(set)
 	if err != nil {
 		return err
