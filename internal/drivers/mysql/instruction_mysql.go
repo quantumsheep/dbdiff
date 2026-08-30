@@ -423,6 +423,9 @@ func (i *MySQLDropEventInstruction) Comment() string {
 type MySQLGrantInstruction struct {
 	Privileges []string
 
+	// A column list narrows the grant to those columns of the one privilege of Privileges.
+	Columns []string
+
 	// An empty table name gives the privileges of the whole database, with ON *.
 	TableName string
 
@@ -436,8 +439,12 @@ func (i *MySQLGrantInstruction) String() string {
 		target = QuoteIdentifier(i.TableName)
 	}
 
-	statement := fmt.Sprintf("GRANT %s ON %s TO %s",
-		strings.Join(i.Privileges, ", "), target, i.Grantee)
+	privilegeClause := strings.Join(i.Privileges, ", ")
+	if len(i.Columns) > 0 {
+		privilegeClause = i.Privileges[0] + " (" + strings.Join(QuoteIdentifiers(i.Columns), ", ") + ")"
+	}
+
+	statement := fmt.Sprintf("GRANT %s ON %s TO %s", privilegeClause, target, i.Grantee)
 
 	if i.WithGrantOption {
 		statement += " WITH GRANT OPTION"
@@ -456,8 +463,12 @@ func (i *MySQLGrantInstruction) Comment() string {
 
 type MySQLRevokeInstruction struct {
 	Privileges []string
-	TableName  string
-	Grantee    string
+
+	// A column list narrows the revoke to those columns of the one privilege of Privileges.
+	Columns []string
+
+	TableName string
+	Grantee   string
 }
 
 func (i *MySQLRevokeInstruction) String() string {
@@ -466,8 +477,12 @@ func (i *MySQLRevokeInstruction) String() string {
 		target = QuoteIdentifier(i.TableName)
 	}
 
-	return fmt.Sprintf("REVOKE %s ON %s FROM %s;",
-		strings.Join(i.Privileges, ", "), target, i.Grantee)
+	privilegeClause := strings.Join(i.Privileges, ", ")
+	if len(i.Columns) > 0 {
+		privilegeClause = i.Privileges[0] + " (" + strings.Join(QuoteIdentifiers(i.Columns), ", ") + ")"
+	}
+
+	return fmt.Sprintf("REVOKE %s ON %s FROM %s;", privilegeClause, target, i.Grantee)
 }
 
 func (i *MySQLRevokeInstruction) Comment() string {

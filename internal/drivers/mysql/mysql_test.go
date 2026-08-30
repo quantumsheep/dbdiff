@@ -1632,6 +1632,89 @@ func TestMySQLDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
+	t.Run("GrantColumnPrivileges", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.ComparePrivileges = true
+		driver.CreateTestUser("dbdiff_reader")
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
+			GRANT SELECT (id, name) ON users TO 'dbdiff_reader'@'%';
+		`)
+		driver.ExecOnSource(
+			"CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));")
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLGrantInstruction{
+				Privileges: []string{"SELECT"},
+				Columns:    []string{"id", "name"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("NarrowColumnPrivileges", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.ComparePrivileges = true
+		driver.CreateTestUser("dbdiff_reader")
+
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
+			GRANT SELECT (id, email) ON users TO 'dbdiff_reader'@'%';
+		`)
+		driver.ExecOnSource(`
+			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
+			GRANT SELECT (id, name) ON users TO 'dbdiff_reader'@'%';
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLGrantInstruction{
+				Privileges: []string{"SELECT"},
+				Columns:    []string{"email"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+			&MySQLRevokeInstruction{
+				Privileges: []string{"SELECT"},
+				Columns:    []string{"name"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("RevokeColumnPrivileges", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.ComparePrivileges = true
+		driver.CreateTestUser("dbdiff_reader")
+
+		driver.ExecOnTarget(
+			"CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));")
+		driver.ExecOnSource(`
+			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
+			GRANT SELECT (id, name) ON users TO 'dbdiff_reader'@'%';
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLRevokeInstruction{
+				Privileges: []string{"SELECT"},
+				Columns:    []string{"id", "name"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("DatabasePrivilegesAndGrantOption", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.ComparePrivileges = true

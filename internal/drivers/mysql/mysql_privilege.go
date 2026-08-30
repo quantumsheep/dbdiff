@@ -20,6 +20,14 @@ type MySQLPrivilegeSet struct {
 	Grantable  bool
 }
 
+type MySQLColumnPrivilegeSet struct {
+	Grantee   string
+	TableName string
+	Privilege string
+	Columns   []string
+	Grantable bool
+}
+
 func (d *MySQLDriver) DiffPrivileges(ctx context.Context) ([]driversshared.Instruction, error) {
 	targetSets, err := d.GetPrivileges(ctx, d.TargetDatabaseConnection)
 	if err != nil {
@@ -113,6 +121,85 @@ func (d *MySQLDriver) DiffPrivileges(ctx context.Context) ([]driversshared.Instr
 		})
 	}
 
+	targetColumnSets, err := d.GetColumnPrivileges(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceColumnSets, err := d.GetColumnPrivileges(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	findColumnSet := func(sets []*MySQLColumnPrivilegeSet, grantee string, tableName string, privilege string) (*MySQLColumnPrivilegeSet, bool) {
+		return lo.Find(sets, func(set *MySQLColumnPrivilegeSet) bool {
+			return set.Grantee == grantee && set.TableName == tableName && set.Privilege == privilege
+		})
+	}
+
+	for _, targetSet := range targetColumnSets {
+		sourceSet, found := findColumnSet(sourceColumnSets, targetSet.Grantee, targetSet.TableName, targetSet.Privilege)
+		if !found {
+			additions = append(additions, &MySQLGrantInstruction{
+				Privileges:      []string{targetSet.Privilege},
+				Columns:         targetSet.Columns,
+				TableName:       targetSet.TableName,
+				Grantee:         targetSet.Grantee,
+				WithGrantOption: targetSet.Grantable,
+			})
+
+			continue
+		}
+
+		missingColumns := lo.Filter(targetSet.Columns, func(column string, _ int) bool {
+			return !lo.Contains(sourceSet.Columns, column)
+		})
+
+		if targetSet.Grantable && !sourceSet.Grantable {
+			additions = append(additions, &MySQLGrantInstruction{
+				Privileges:      []string{targetSet.Privilege},
+				Columns:         targetSet.Columns,
+				TableName:       targetSet.TableName,
+				Grantee:         targetSet.Grantee,
+				WithGrantOption: true,
+			})
+		} else if len(missingColumns) > 0 {
+			additions = append(additions, &MySQLGrantInstruction{
+				Privileges:      []string{targetSet.Privilege},
+				Columns:         missingColumns,
+				TableName:       targetSet.TableName,
+				Grantee:         targetSet.Grantee,
+				WithGrantOption: targetSet.Grantable,
+			})
+		}
+
+		extraColumns := lo.Filter(sourceSet.Columns, func(column string, _ int) bool {
+			return !lo.Contains(targetSet.Columns, column)
+		})
+		if len(extraColumns) > 0 {
+			removals = append(removals, &MySQLRevokeInstruction{
+				Privileges: []string{targetSet.Privilege},
+				Columns:    extraColumns,
+				TableName:  targetSet.TableName,
+				Grantee:    targetSet.Grantee,
+			})
+		}
+	}
+
+	for _, sourceSet := range sourceColumnSets {
+		_, found := findColumnSet(targetColumnSets, sourceSet.Grantee, sourceSet.TableName, sourceSet.Privilege)
+		if found {
+			continue
+		}
+
+		removals = append(removals, &MySQLRevokeInstruction{
+			Privileges: []string{sourceSet.Privilege},
+			Columns:    sourceSet.Columns,
+			TableName:  sourceSet.TableName,
+			Grantee:    sourceSet.Grantee,
+		})
+	}
+
 	return append(additions, removals...), nil
 }
 
@@ -177,6 +264,63 @@ func (d *MySQLDriver) getPrivilegeSets(ctx context.Context, db *sql.DB, query st
 		}
 
 		set.Privileges = append(set.Privileges, privilege)
+
+		if grantable == "YES" {
+			set.Grantable = true
+		}
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return sets, nil
+}
+
+// The read skips a grant of a dropped table, because the grant tables keep such a row and
+// the diff can revoke nothing on an absent table.
+func (d *MySQLDriver) GetColumnPrivileges(ctx context.Context, db *sql.DB) ([]*MySQLColumnPrivilegeSet, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT p.GRANTEE, p.TABLE_NAME, p.COLUMN_NAME, p.PRIVILEGE_TYPE, p.IS_GRANTABLE
+		FROM information_schema.COLUMN_PRIVILEGES p
+		WHERE p.TABLE_SCHEMA = DATABASE()
+		AND EXISTS (
+			SELECT 1 FROM information_schema.TABLES t
+			WHERE t.TABLE_SCHEMA = p.TABLE_SCHEMA AND t.TABLE_NAME = p.TABLE_NAME
+		)
+		ORDER BY p.GRANTEE, p.TABLE_NAME, p.PRIVILEGE_TYPE, p.COLUMN_NAME;
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var sets []*MySQLColumnPrivilegeSet
+
+	for rows.Next() {
+		var grantee, tableName, columnName, privilege, grantable string
+
+		err := rows.Scan(&grantee, &tableName, &columnName, &privilege, &grantable)
+		if err != nil {
+			return nil, err
+		}
+
+		set, found := lo.Find(sets, func(set *MySQLColumnPrivilegeSet) bool {
+			return set.Grantee == grantee && set.TableName == tableName && set.Privilege == privilege
+		})
+		if !found {
+			set = &MySQLColumnPrivilegeSet{
+				Grantee:   grantee,
+				TableName: tableName,
+				Privilege: privilege,
+			}
+
+			sets = append(sets, set)
+		}
+
+		set.Columns = append(set.Columns, columnName)
 
 		if grantable == "YES" {
 			set.Grantable = true

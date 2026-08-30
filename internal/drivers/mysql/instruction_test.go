@@ -411,6 +411,17 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("MySQLGrantOnColumns", func(t *testing.T) {
+		instruction := &MySQLGrantInstruction{
+			Privileges: []string{"SELECT"},
+			Columns:    []string{"id", "name"},
+			TableName:  "users",
+			Grantee:    "'reader'@'%'",
+		}
+
+		require.Equal(t, "GRANT SELECT (`id`, `name`) ON `users` TO 'reader'@'%';", instruction.String())
+	})
+
 	t.Run("MySQLGrantOnTheDatabase", func(t *testing.T) {
 		instruction := &MySQLGrantInstruction{
 			Privileges: []string{"SELECT"},
@@ -429,6 +440,17 @@ func TestInstructions(t *testing.T) {
 
 		require.Equal(t, "REVOKE DELETE, GRANT OPTION ON `users` FROM 'reader'@'%';",
 			instruction.String())
+	})
+
+	t.Run("MySQLRevokeOnColumns", func(t *testing.T) {
+		instruction := &MySQLRevokeInstruction{
+			Privileges: []string{"SELECT"},
+			Columns:    []string{"id", "name"},
+			TableName:  "users",
+			Grantee:    "'reader'@'%'",
+		}
+
+		require.Equal(t, "REVOKE SELECT (`id`, `name`) ON `users` FROM 'reader'@'%';", instruction.String())
 	})
 
 	t.Run("MySQLInsert", func(t *testing.T) {

@@ -141,6 +141,15 @@ func TestInstructionComments(t *testing.T) {
 		require.Equal(t, "Grant the privileges of the database", (&MySQLGrantInstruction{}).Comment())
 	})
 
+	t.Run("MySQLGrantOnColumns", func(t *testing.T) {
+		instruction := &MySQLGrantInstruction{
+			TableName: "users",
+			Columns:   []string{"id", "name"},
+		}
+
+		require.Equal(t, `Grant the privileges of the table "users"`, instruction.Comment())
+	})
+
 	t.Run("MySQLRevoke", func(t *testing.T) {
 		instruction := &MySQLRevokeInstruction{
 			TableName: "users",
@@ -148,6 +157,15 @@ func TestInstructionComments(t *testing.T) {
 
 		require.Equal(t, `Revoke the privileges of the table "users"`, instruction.Comment())
 		require.Equal(t, "Revoke the privileges of the database", (&MySQLRevokeInstruction{}).Comment())
+	})
+
+	t.Run("MySQLRevokeOnColumns", func(t *testing.T) {
+		instruction := &MySQLRevokeInstruction{
+			TableName: "users",
+			Columns:   []string{"id", "name"},
+		}
+
+		require.Equal(t, `Revoke the privileges of the table "users"`, instruction.Comment())
 	})
 
 	t.Run("MySQLInsert", func(t *testing.T) {
