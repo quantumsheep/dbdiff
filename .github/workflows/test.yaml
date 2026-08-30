@@ -1,6 +1,11 @@
 name: Tests
 
-on: [push]
+# A push of a tag runs the tests through the call of the release workflow, so the push
+# trigger covers the branches only.
+on:
+  push:
+    branches: ["**"]
+  workflow_call:
 
 jobs:
   build:
