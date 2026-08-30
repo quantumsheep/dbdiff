@@ -37,6 +37,19 @@ func TestMigrateUpCommand(t *testing.T) {
 		require.Contains(t, result.Stderr, "DBDIFF_TARGET")
 	})
 
+	t.Run("WithASQLSourceAsTheTarget", func(t *testing.T) {
+		directory := t.TempDir()
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		configPath := clitest.WriteMigrationConfig(t, directory,
+			"driver: sqlite3\nsource: "+migrations+"\ntarget: ./schema.sql\n")
+
+		result := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath)
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "names SQL text")
+	})
+
 	t.Run("WithTheToFlag", func(t *testing.T) {
 		directory := t.TempDir()
 

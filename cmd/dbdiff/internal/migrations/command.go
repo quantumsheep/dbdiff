@@ -64,6 +64,12 @@ func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 		return nil, nil, nil, err
 	}
 
+	// The key target of dbdiff.yaml also holds the wanted schema of generate. A SQL
+	// source here gives an opaque driver error without this check.
+	if driversshared.IsSQLSource(config.Target) {
+		return nil, nil, nil, fmt.Errorf("the target %q names SQL text, and this command needs a database. Give a connection URL with the --target flag, or with the DBDIFF_TARGET variable", config.Target)
+	}
+
 	migrator, err := coremigrations.NewMigrator(ctx, config.Driver, config.Target, config.Schema)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to open the target database: %w", err)
