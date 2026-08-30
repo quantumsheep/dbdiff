@@ -237,7 +237,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnTarget(`CREATE TABLE simple (id INT, name TEXT);`)
 
-		driver.RequireInstructions([]driversshared.Instruction{
+		diff := driver.RequireInstructions([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
 				Name: "simple",
 				Columns: []*PostgresColumn{
@@ -252,6 +252,8 @@ func TestPostgresDriver(t *testing.T) {
 				},
 			},
 		})
+
+		driver.ExecOnSource(diff)
 	})
 
 	t.Run("DropTable", func(t *testing.T) {
@@ -4900,6 +4902,9 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "users",
 			},
 		}, instructions)
+
+		_, err = driver.SourceDatabaseConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		require.NoError(t, err)
 	})
 
 	t.Run("SQLSourceWithConcurrentIndex", func(t *testing.T) {
