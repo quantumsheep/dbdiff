@@ -62,7 +62,7 @@ func RenderMigrationPreview(set *MigrationSet) (string, error) {
 			continue
 		}
 
-		fmt.Fprintf(&builder, "%s is out of order. The command up will refuse it.\n", entry.FileName())
+		fmt.Fprintf(&builder, "%s is out of order. The commands up and step will refuse it.\n", entry.FileName())
 	}
 
 	pending := set.Pending()
