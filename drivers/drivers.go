@@ -6,6 +6,7 @@ import (
 
 	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/quantumsheep/dbdiff/migrations"
 )
 
 // DriverName names a database engine.
@@ -29,6 +30,28 @@ type FolderDataSource = driversshared.FolderDataSource
 // ConnectionStringDataSource names a database. The field holds a URL, a DSN, a libpq
 // keyword string, or a SQLite path.
 type ConnectionStringDataSource = driversshared.ConnectionStringDataSource
+
+// NewFileDataSource names one .sql file.
+func NewFileDataSource(path string) FileDataSource {
+	return FileDataSource{
+		Path: path,
+	}
+}
+
+// NewFolderDataSource names a directory of .sql files.
+func NewFolderDataSource(path string) FolderDataSource {
+	return FolderDataSource{
+		Path: path,
+	}
+}
+
+// NewConnectionStringDataSource names a database. The argument holds a URL, a DSN, a
+// libpq keyword string, or a SQLite path.
+func NewConnectionStringDataSource(connectionString string) ConnectionStringDataSource {
+	return ConnectionStringDataSource{
+		ConnectionString: connectionString,
+	}
+}
 
 // DetectDriver names the engine of two data sources. A SQL source gives no engine, so
 // the other side decides.
@@ -89,7 +112,9 @@ func WithIgnoreTables(tables ...string) Option {
 
 // A Driver diffs two data sources. A driver value runs one diff at a time.
 type Driver struct {
-	inner driversshared.Driver
+	inner  driversshared.Driver
+	name   DriverName
+	schema string
 }
 
 func NewDriver(name DriverName, options ...Option) (*Driver, error) {
@@ -127,8 +152,16 @@ func NewDriver(name DriverName, options ...Option) (*Driver, error) {
 	}
 
 	return &Driver{
-		inner: inner,
+		inner:  inner,
+		name:   name,
+		schema: internalOptions.Schema,
 	}, nil
+}
+
+// Migrator gives the migrator of the engine of the driver. The migrator reads the
+// engine name and the schema from the driver.
+func (d *Driver) Migrator() *migrations.Migrator {
+	return migrations.NewMigrator(d.name, d.schema)
 }
 
 type diffOptions struct {

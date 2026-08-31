@@ -1,4 +1,4 @@
-package migrations
+package migrations_test
 
 import (
 	"os"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	dbdiffdrivers "github.com/quantumsheep/dbdiff/drivers"
+	"github.com/quantumsheep/dbdiff/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,6 +18,15 @@ func TestMigrations(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	newSQLiteMigrator := func(t *testing.T) *migrations.Migrator {
+		t.Helper()
+
+		driver, err := dbdiffdrivers.NewDriver(dbdiffdrivers.SQLiteDriverName)
+		require.NoError(t, err)
+
+		return driver.Migrator()
+	}
+
 	t.Run("UpAppliesThePendingFiles", func(t *testing.T) {
 		directory := t.TempDir()
 		writeMigration(t, directory, "20260814101500_init.sql",
@@ -24,26 +34,24 @@ func TestMigrations(t *testing.T) {
 		writeMigration(t, directory, "20260822143000_add_created_at.sql",
 			"ALTER TABLE users ADD COLUMN created_at TEXT;\n")
 
-		database := WithDatabase(
-			dbdiffdrivers.SQLiteDriverName,
-			dbdiffdrivers.ConnectionStringDataSource{
-				ConnectionString: filepath.Join(t.TempDir(), "app.sqlite"),
-			},
+		migrator := newSQLiteMigrator(t)
+		target := migrations.WithTargetDataSource(
+			dbdiffdrivers.NewConnectionStringDataSource(filepath.Join(t.TempDir(), "app.sqlite")),
 		)
 
-		err := Up(t.Context(), database, WithDirectory(directory))
+		err := migrator.Up(t.Context(), target, migrations.WithMigrationDirectory(directory))
 		require.NoError(t, err)
 
-		entries, err := Status(t.Context(), database, WithDirectory(directory))
+		entries, err := migrator.Status(t.Context(), target, migrations.WithMigrationDirectory(directory))
 		require.NoError(t, err)
 		require.Len(t, entries, 2)
 		require.Equal(t, "20260814101500", entries[0].Version)
 		require.Equal(t, "init", entries[0].Name)
-		require.Equal(t, StateApplied, entries[0].State)
+		require.Equal(t, migrations.StateApplied, entries[0].State)
 		require.False(t, entries[0].AppliedAt.IsZero())
-		require.Equal(t, StateApplied, entries[1].State)
+		require.Equal(t, migrations.StateApplied, entries[1].State)
 
-		err = Up(t.Context(), database, WithDirectory(directory))
+		err = migrator.Up(t.Context(), target, migrations.WithMigrationDirectory(directory))
 		require.NoError(t, err)
 	})
 
@@ -54,36 +62,31 @@ func TestMigrations(t *testing.T) {
 		writeMigration(t, directory, "20260822143000_add_created_at.sql",
 			"ALTER TABLE users ADD COLUMN created_at TEXT;\n")
 
-		database := WithDatabase(
-			"",
-			dbdiffdrivers.ConnectionStringDataSource{
-				ConnectionString: filepath.Join(t.TempDir(), "app.sqlite"),
-			},
+		migrator := newSQLiteMigrator(t)
+		target := migrations.WithTargetDataSource(
+			dbdiffdrivers.NewConnectionStringDataSource(filepath.Join(t.TempDir(), "app.sqlite")),
 		)
 
-		err := Up(t.Context(), database, WithDirectory(directory), WithToVersion("20260814101500"))
+		err := migrator.Up(t.Context(), target, migrations.WithMigrationDirectory(directory),
+			migrations.WithToVersion("20260814101500"))
 		require.NoError(t, err)
 
-		entries, err := Status(t.Context(), database, WithDirectory(directory))
+		entries, err := migrator.Status(t.Context(), target, migrations.WithMigrationDirectory(directory))
 		require.NoError(t, err)
 		require.Len(t, entries, 2)
-		require.Equal(t, StateApplied, entries[0].State)
-		require.Equal(t, StatePending, entries[1].State)
+		require.Equal(t, migrations.StateApplied, entries[0].State)
+		require.Equal(t, migrations.StatePending, entries[1].State)
 	})
 
 	t.Run("UpRefusesAMissingOption", func(t *testing.T) {
-		err := Up(t.Context(), WithDirectory(t.TempDir()))
-		require.ErrorContains(t, err, "WithDatabase")
+		migrator := newSQLiteMigrator(t)
 
-		err = Up(
-			t.Context(),
-			WithDatabase(
-				"",
-				dbdiffdrivers.ConnectionStringDataSource{
-					ConnectionString: filepath.Join(t.TempDir(), "app.sqlite"),
-				},
-			),
-		)
-		require.ErrorContains(t, err, "WithDirectory")
+		err := migrator.Up(t.Context(), migrations.WithMigrationDirectory(t.TempDir()))
+		require.ErrorContains(t, err, "WithTargetDataSource")
+
+		err = migrator.Up(t.Context(), migrations.WithTargetDataSource(
+			dbdiffdrivers.NewConnectionStringDataSource(filepath.Join(t.TempDir(), "app.sqlite")),
+		))
+		require.ErrorContains(t, err, "WithMigrationDirectory")
 	})
 }

@@ -6,14 +6,36 @@ import (
 	"io"
 	"time"
 
-	dbdiffdrivers "github.com/quantumsheep/dbdiff/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
+// DriverName names a database engine.
+type DriverName = driversshared.DriverName
+
+// ConnectionStringDataSource names a database. The field holds a URL, a DSN, a libpq
+// keyword string, or a SQLite path.
+type ConnectionStringDataSource = driversshared.ConnectionStringDataSource
+
+// A Migrator applies the migrations of one engine. Driver.Migrator of the drivers
+// package creates it, so the migrator carries the engine name and the schema of the
+// driver.
+type Migrator struct {
+	driver DriverName
+	schema string
+}
+
+// NewMigrator creates a migrator for the named engine. Use Driver.Migrator of the
+// drivers package instead of a direct call.
+func NewMigrator(driver DriverName, schema string) *Migrator {
+	return &Migrator{
+		driver: driver,
+		schema: schema,
+	}
+}
+
 type commonOptions struct {
-	driver    dbdiffdrivers.DriverName
-	database  dbdiffdrivers.ConnectionStringDataSource
-	schema    string
+	target    ConnectionStringDataSource
 	directory string
 	output    io.Writer
 }
@@ -28,7 +50,7 @@ type statusOptions struct {
 	commonOptions
 }
 
-// Option configures every function of this package.
+// Option configures every method of Migrator.
 type Option interface {
 	UpOption
 	StatusOption
@@ -60,42 +82,32 @@ func (apply upOption) applyUp(target *upOptions) {
 	apply(target)
 }
 
-// WithDatabase names the database that receives the migrations. An empty driver value
-// starts the detection of the engine from the database value.
-func WithDatabase(driver dbdiffdrivers.DriverName, database dbdiffdrivers.ConnectionStringDataSource) Option {
-	return commonOption(func(target *commonOptions) {
-		target.driver = driver
-		target.database = database
+// WithTargetDataSource names the database that receives the migrations.
+func WithTargetDataSource(target ConnectionStringDataSource) Option {
+	return commonOption(func(merged *commonOptions) {
+		merged.target = target
 	})
 }
 
-// WithSchema names the PostgreSQL schema. Without this option the search path of the
-// connection string applies.
-func WithSchema(schema string) Option {
-	return commonOption(func(target *commonOptions) {
-		target.schema = schema
-	})
-}
-
-// WithDirectory names the directory that holds the migration files.
-func WithDirectory(directory string) Option {
-	return commonOption(func(target *commonOptions) {
-		target.directory = directory
+// WithMigrationDirectory names the directory that holds the migration files.
+func WithMigrationDirectory(directory string) Option {
+	return commonOption(func(merged *commonOptions) {
+		merged.directory = directory
 	})
 }
 
 // WithOutput names the writer that receives one progress line per applied file. Without
 // this option the lines go away.
 func WithOutput(output io.Writer) Option {
-	return commonOption(func(target *commonOptions) {
-		target.output = output
+	return commonOption(func(merged *commonOptions) {
+		merged.output = output
 	})
 }
 
 // WithToVersion stops Up after the file with the given version.
 func WithToVersion(version string) UpOption {
-	return upOption(func(target *upOptions) {
-		target.toVersion = version
+	return upOption(func(merged *upOptions) {
+		merged.toVersion = version
 	})
 }
 
@@ -118,14 +130,14 @@ type Entry struct {
 }
 
 // Up applies every pending file, in one transaction per file.
-func Up(ctx context.Context, options ...UpOption) error {
+func (m *Migrator) Up(ctx context.Context, options ...UpOption) error {
 	merged := &upOptions{}
 
 	for _, option := range options {
 		option.applyUp(merged)
 	}
 
-	migrator, set, err := open(ctx, &merged.commonOptions)
+	migrator, set, err := m.open(ctx, &merged.commonOptions)
 	if err != nil {
 		return err
 	}
@@ -141,14 +153,14 @@ func Up(ctx context.Context, options ...UpOption) error {
 }
 
 // Status reads the state of each migration file and of each history row.
-func Status(ctx context.Context, options ...StatusOption) ([]Entry, error) {
+func (m *Migrator) Status(ctx context.Context, options ...StatusOption) ([]Entry, error) {
 	merged := &statusOptions{}
 
 	for _, option := range options {
 		option.applyStatus(merged)
 	}
 
-	migrator, set, err := open(ctx, &merged.commonOptions)
+	migrator, set, err := m.open(ctx, &merged.commonOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -190,16 +202,16 @@ func stateOf(state coremigrations.MigrationState) State {
 	}
 }
 
-func open(ctx context.Context, merged *commonOptions) (coremigrations.Migrator, *coremigrations.MigrationSet, error) {
-	if merged.database.ConnectionString == "" {
-		return nil, nil, fmt.Errorf("name the database with the WithDatabase option")
+func (m *Migrator) open(ctx context.Context, merged *commonOptions) (coremigrations.Migrator, *coremigrations.MigrationSet, error) {
+	if merged.target.ConnectionString == "" {
+		return nil, nil, fmt.Errorf("name the target with the WithTargetDataSource option")
 	}
 
 	if merged.directory == "" {
-		return nil, nil, fmt.Errorf("name the migrations directory with the WithDirectory option")
+		return nil, nil, fmt.Errorf("name the migrations directory with the WithMigrationDirectory option")
 	}
 
-	migrator, err := coremigrations.NewMigrator(ctx, merged.driver, merged.database, merged.schema)
+	migrator, err := coremigrations.NewMigrator(ctx, m.driver, merged.target, m.schema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open the database: %w", err)
 	}

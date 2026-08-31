@@ -160,8 +160,8 @@ import "github.com/quantumsheep/dbdiff/drivers"
 driver, err := drivers.NewDriver(drivers.SQLiteDriverName)
 
 statements, err := driver.Diff(ctx,
-	drivers.ConnectionStringDataSource{ConnectionString: "app.sqlite"},
-	drivers.FileDataSource{Path: "schema.sql"},
+	drivers.NewConnectionStringDataSource("app.sqlite"),
+	drivers.NewFileDataSource("schema.sql"),
 )
 ```
 
@@ -173,11 +173,13 @@ import (
 	"github.com/quantumsheep/dbdiff/migrations"
 )
 
-err := migrations.Up(ctx,
-	migrations.WithDatabase(drivers.PostgresDriverName, drivers.ConnectionStringDataSource{
-		ConnectionString: os.Getenv("DATABASE_URL"),
-	}),
-	migrations.WithDirectory("migrations"),
+driver, err := drivers.NewDriver(drivers.PostgresDriverName)
+
+err = driver.Migrator().Up(ctx,
+	migrations.WithTargetDataSource(
+		drivers.NewConnectionStringDataSource(os.Getenv("DATABASE_URL")),
+	),
+	migrations.WithMigrationDirectory("migrations"),
 )
 ```
 

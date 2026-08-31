@@ -207,6 +207,8 @@ A file that holds no directive runs in ONE call. A file that holds the line `-- 
 
 ## Migrations
 
+The public entry point is `Driver.Migrator()` of the `drivers` package, so the public `drivers` package imports the public `migrations` package. The public `migrations` package aliases its types from `internal/drivers/shared` and never imports `drivers`. An import of `drivers` there creates an import cycle.
+
 `Migrator` in `internal/migrations` is a sibling of `Driver`, not a wrapper of it. `internal/migrations` imports `drivers`, and `drivers` imports nothing of it. `NewMigrator(ctx, driverName, target ConnectionStringDataSource, schema)` builds the migrator. An empty driver name detects the engine from the target, because a migration target is always a database, never a SQL source. The constant `MigrationHistoryTableName` stays in `drivers`, because the diff hides that table. The `migrate` commands give the word `source` to the migration directory, and the word `target` to the other side.
 
 A migration entry holds one of five states: `pending`, `applied`, `changed` (checksum differs), `missing` (a row without a file), and `out of order` (no row, and the version sorts before the last applied version).
