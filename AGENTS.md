@@ -98,7 +98,7 @@ A driver value runs one diff at a time. Each `Diff` call binds `SourceDatabaseCo
 
 `internal/drivers.NewDriver(driverName, DriverOptions{Version, Schema, ComparePrivileges, IgnoreTables})` builds the driver of that name. It takes no context and it detects no engine, so the caller detects the engine first, with `DetectDriver`, then names it. An option that the driver name does not use, for example a schema on the mysql driver, gives an error that names the option.
 
-`DetectDriver` in `internal/drivers/shared/driver_detection.go` reads two `DataSource` values and names the engine when the user gives no `--driver` flag. A SQL source takes the engine of the other side. Two empty or two different names give an error that names the `--driver` flag.
+`DetectDriver` in `internal/drivers/shared/driver_detection.go` reads two `DataSource` values and names the engine when the caller names none. A SQL source takes the engine of the other side. Two empty or two different names give an error that asks for the name of the driver. That error names no CLI flag, because a Go caller holds no flag. `helpers.DetectDriverName` of `cmd/dbdiff/internal/helpers` wraps the error with the `--driver` flag, and every command calls that wrap.
 
 ## Naming
 

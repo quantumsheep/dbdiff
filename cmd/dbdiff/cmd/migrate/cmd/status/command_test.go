@@ -18,4 +18,15 @@ func TestMigrateStatusCommand(t *testing.T) {
 		require.Contains(t, result.Stderr, "unsupported driver: oracle")
 		require.Equal(t, 1, strings.Count(result.Stderr, "unsupported driver: oracle"))
 	})
+
+	t.Run("UndetectableTargetNamesTheDriverFlag", func(t *testing.T) {
+		source := clitest.MakeMigrationsDirectory(t, t.TempDir())
+
+		result := clitest.Run(t, binaryPath, "migrate", "status",
+			"--source", source, "--target", "oracle://user@localhost/app")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Contains(t, result.Stderr, "cannot detect the driver")
+		require.Contains(t, result.Stderr, "--driver")
+	})
 }

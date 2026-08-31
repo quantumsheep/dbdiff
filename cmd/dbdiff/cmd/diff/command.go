@@ -68,7 +68,7 @@ func action(ctx context.Context, command *cli.Command) error {
 
 	driverName := driversshared.DriverName(command.String("driver"))
 	if driverName == "" {
-		detected, err := driversshared.DetectDriver(source, target)
+		detected, err := helpers.DetectDriverName(source, target)
 		if err != nil {
 			return err
 		}

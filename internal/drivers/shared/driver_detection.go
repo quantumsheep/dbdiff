@@ -21,12 +21,12 @@ func DetectDriver(source DataSource, target DataSource) (DriverName, error) {
 	targetDriverName := detectDriverOfDataSource(target)
 
 	if sourceDriverName == "" && targetDriverName == "" {
-		return "", fmt.Errorf("cannot detect the driver of the source %q and the target %q. Use the --driver flag",
+		return "", fmt.Errorf("cannot detect the driver of the source %q and the target %q. Name the driver",
 			dataSourceArgument(source), dataSourceArgument(target))
 	}
 
 	if sourceDriverName != "" && targetDriverName != "" && sourceDriverName != targetDriverName {
-		return "", fmt.Errorf("the source %q names the %s driver and the target %q names the %s driver. Use the --driver flag",
+		return "", fmt.Errorf("the source %q names the %s driver and the target %q names the %s driver. Name the driver",
 			dataSourceArgument(source), sourceDriverName, dataSourceArgument(target), targetDriverName)
 	}
 

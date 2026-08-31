@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
@@ -76,7 +77,17 @@ func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 		return nil, nil, nil, fmt.Errorf("the target %q names SQL text, and this command needs a database. Give a connection URL with the --target flag, or with the DBDIFF_TARGET variable", config.Target)
 	}
 
-	migrator, err := coremigrations.NewMigrator(ctx, config.Driver, target, config.Schema)
+	driverName := config.Driver
+	if driverName == "" {
+		detected, err := helpers.DetectDriverName(target, target)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		driverName = detected
+	}
+
+	migrator, err := coremigrations.NewMigrator(ctx, driverName, target, config.Schema)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to open the target database: %w", err)
 	}

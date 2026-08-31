@@ -86,7 +86,7 @@ func TestDetectDriver(t *testing.T) {
 		require.Contains(t, err.Error(), "cannot detect the driver")
 		require.Contains(t, err.Error(), targetPath)
 		require.Contains(t, err.Error(), sourcePath)
-		require.Contains(t, err.Error(), "--driver")
+		require.NotContains(t, err.Error(), "--driver")
 	})
 
 	t.Run("TwoDirectories", func(t *testing.T) {

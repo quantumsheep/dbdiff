@@ -2,8 +2,10 @@ package helpers
 
 import (
 	"context"
+	"fmt"
 	"runtime/debug"
 
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/urfave/cli/v3"
 )
 
@@ -25,4 +27,15 @@ func Version() string {
 
 func OnUsageError(ctx context.Context, command *cli.Command, err error, isSubcommand bool) error {
 	return err
+}
+
+// DetectDriverName names the engine of two data sources. The error of the detection
+// names no CLI flag, so this wrap names the flag that gives the driver.
+func DetectDriverName(source driversshared.DataSource, target driversshared.DataSource) (driversshared.DriverName, error) {
+	driverName, err := driversshared.DetectDriver(source, target)
+	if err != nil {
+		return "", fmt.Errorf("%w with the --driver flag", err)
+	}
+
+	return driverName, nil
 }
