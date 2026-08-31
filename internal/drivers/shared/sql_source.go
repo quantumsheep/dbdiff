@@ -15,20 +15,6 @@ type SQLSource struct {
 	Files []string
 }
 
-func IsSQLSource(path string) bool {
-	if path == "" || strings.Contains(path, "://") {
-		return false
-	}
-
-	if HasSQLExtension(path) {
-		return true
-	}
-
-	information, err := os.Stat(path)
-
-	return err == nil && information.IsDir()
-}
-
 func NewSQLSource(path string) (*SQLSource, error) {
 	information, err := os.Stat(path)
 	if err != nil {

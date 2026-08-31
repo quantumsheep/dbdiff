@@ -46,7 +46,7 @@ type MigrationTransaction interface {
 	Rollback() error
 }
 
-func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target string,
+func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
 	schema string) (Migrator, error) {
 	if driverName == "" {
 		detected, err := driversshared.DetectDriver(target, target)
@@ -59,11 +59,11 @@ func NewMigrator(ctx context.Context, driverName driversshared.DriverName, targe
 
 	switch driverName {
 	case driversshared.SQLiteDriverName:
-		return NewSQLiteMigrator(target)
+		return NewSQLiteMigrator(target.ConnectionString)
 	case driversshared.PostgresDriverName:
-		return NewPostgresMigrator(ctx, target, schema)
+		return NewPostgresMigrator(ctx, target.ConnectionString, schema)
 	case driversshared.MySQLDriverName:
-		return NewMySQLMigrator(ctx, target)
+		return NewMySQLMigrator(ctx, target.ConnectionString)
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)
 	}

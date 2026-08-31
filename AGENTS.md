@@ -29,7 +29,7 @@ Read this section before you write any code.
 | `cmd/dbdiff/internal/migrations/` | The flag and configuration reading of the eight migrate commands                                     |
 | `cmd/dbdiff/internal/clitest/`    | The helpers that build the binary and run it                                                         |
 | `internal/sqltest/`               | The writer of a `.sql` file, shared by the driver tests, the migrations tests, and `clitest`         |
-| `internal/drivers/`               | One file, `new_driver.go`. It holds `NewDriver`, the one driver switch of the program.               |
+| `internal/drivers/`               | One file, `new_driver.go`. It holds `NewDriver(driverName, DriverOptions)`, the one driver switch of the program. |
 | `internal/drivers/shared/`        | The engine-free core: `Driver`, the `SQL` instruction types, quoting, the SQL sources, the statement splitter, the comment builders, `DetectDriver`, `DiffByKey`, and `DiffData` |
 | `internal/drivers/sqlite/`        | The SQLite driver: the schema models, the `SQLite` instruction types, and the data comparison        |
 | `internal/drivers/postgres/`      | The PostgreSQL driver, with the same shape                                                           |
@@ -90,14 +90,15 @@ The SQLite driver needs CGO. If a build fails with an undefined symbol, set `CGO
 
 ```go
 type Driver interface {
-	Close() error
-	Diff(ctx context.Context) ([]Instruction, error)
+	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) ([]Instruction, error)
 }
 ```
 
-A driver holds two `*sql.DB` fields: `SourceDatabaseConnection` and `TargetDatabaseConnection`. A constructor is `New<Engine>Driver(ctx context.Context, config *<Engine>DriverConfig)`. `OpenSide(ctx, path, ...)` reads a database, or it builds a temporary database from a SQL source. `Close` releases the temporary database.
+A driver value runs one diff at a time. Each `Diff` call binds `SourceDatabaseConnection` and `TargetDatabaseConnection`, the two `*sql.DB` fields of the driver, on entry, and it clears both on exit. A constructor is `New<Engine>Driver(config *<Engine>DriverConfig)`, with no context, no error, and no source. `OpenSide(ctx, source, ...)` reads a database, or it builds a temporary database from a SQL source, for the span of one `Diff` call. `Diff` releases every resource that the call opened before it returns: the two connections, and the sqlite temporary directory, the postgres scratch server, or the mysql scratch database that a SQL source needed.
 
-`DetectDriver` in `internal/drivers/shared/driver_detection.go` names the engine when the user gives no `--driver` flag. A SQL source takes the engine of the other side. Two empty or two different names give an error that names the `--driver` flag.
+`internal/drivers.NewDriver(driverName, DriverOptions{Version, Schema, ComparePrivileges, IgnoreTables})` builds the driver of that name. It takes no context and it detects no engine, so the caller detects the engine first, with `DetectDriver`, then names it. An option that the driver name does not use, for example a schema on the mysql driver, gives an error that names the option.
+
+`DetectDriver` in `internal/drivers/shared/driver_detection.go` reads two `DataSource` values and names the engine when the user gives no `--driver` flag. A SQL source takes the engine of the other side. Two empty or two different names give an error that names the `--driver` flag.
 
 ## Naming
 
@@ -189,7 +190,7 @@ MySQL gives no creation order for the tables, so a diff that creates or drops a 
 
 ## SQL sources
 
-An argument names SQL text when the path ends in `.sql`, or when the path is a directory. A path that holds `://` never names SQL text. A directory gives its top-level `.sql` files in the order of the names, without the `.down.sql` files.
+`ParseDataSource(argument string) DataSource` in `internal/drivers/shared/data_source.go` reads a CLI argument into a `DataSource`: a `FileDataSource` when the path ends in `.sql`, a `FolderDataSource` when the path is a directory, and a `ConnectionStringDataSource` in every other case. A path that holds `://` never names SQL text. `IsSQLSource` reports a `FileDataSource` or a `FolderDataSource`, and `SQLSourcePath` reads its path. A directory gives its top-level `.sql` files in the order of the names, without the `.down.sql` files.
 
 Each engine materializes a source as a temporary database: SQLite as a file, PostgreSQL as a scratch server from `fergusstrange/embedded-postgres`, and MySQL as a scratch database on the server of the other side. The mysql driver refuses two SQL sources, because it then holds no server. The scratch server takes the major version of the database of the other side, or the `version` key of `dbdiff.yaml`. Do not name a version in the code. Four settings of the scratch server matter. Keep them:
 
@@ -206,7 +207,7 @@ A file that holds no directive runs in ONE call. A file that holds the line `-- 
 
 ## Migrations
 
-`Migrator` in `internal/migrations` is a sibling of `Driver`, not a wrapper of it. `internal/migrations` imports `drivers`, and `drivers` imports nothing of it. The constant `MigrationHistoryTableName` stays in `drivers`, because the diff hides that table. The `migrate` commands give the word `source` to the migration directory, and the word `target` to the other side.
+`Migrator` in `internal/migrations` is a sibling of `Driver`, not a wrapper of it. `internal/migrations` imports `drivers`, and `drivers` imports nothing of it. `NewMigrator(ctx, driverName, target ConnectionStringDataSource, schema)` builds the migrator. An empty driver name detects the engine from the target, because a migration target is always a database, never a SQL source. The constant `MigrationHistoryTableName` stays in `drivers`, because the diff hides that table. The `migrate` commands give the word `source` to the migration directory, and the word `target` to the other side.
 
 A migration entry holds one of five states: `pending`, `applied`, `changed` (checksum differs), `missing` (a row without a file), and `out of order` (no row, and the version sorts before the last applied version).
 
@@ -218,7 +219,7 @@ Three behavior rules. Keep them:
 
 ## Data comparison
 
-The `--data` flag sets the `CompareData` field of the driver config. The schema output stays the same in every case. `driversshared.DiffData` in `internal/drivers/shared/data_diff.go` holds the comparison, and each engine gives it a `DataRules` value. The data section prints after the whole schema section. Format each value as an SQL literal before the comparison, so `NULL` never equals the text `'NULL'`.
+The `--data` flag sets the `CompareData` field of `DiffOptions`, the third argument of `Diff`. The schema output stays the same in every case. `driversshared.DiffData` in `internal/drivers/shared/data_diff.go` holds the comparison, and each engine gives it a `DataRules` value. The data section prints after the whole schema section. Format each value as an SQL literal before the comparison, so `NULL` never equals the text `'NULL'`.
 
 ---
 
@@ -240,7 +241,7 @@ The PostgreSQL tests need the database at `postgres://user:password@localhost:54
 
 One engine gets one top-level function for each type under test: `TestSQLiteDriver` and `TestSQLiteMigrator`, `TestPostgresDriver` and `TestPostgresMigrator`, `TestMySQLDriver` and `TestMySQLMigrator`. `TestMariaDBDriver` runs the MariaDB branches of the mysql driver. Each behavior gets one `t.Run` subtest, named with a short noun phrase in CamelCase, for example `AddColumn`.
 
-`TestingSQLiteDriver` and `TestingPostgresDriver` embed the driver and hold the `testing.TB` value. The constructor builds the databases and registers the cleanup with `tb.Cleanup`. The PostgreSQL harness creates one source schema and one target schema in one database, drops both in the cleanup, and checks each drop with `require.NoError`. Keep the connection of the harness open until the cleanup ends. Every harness method calls `d.tb.Helper()` on its first line.
+`TestingSQLiteDriver` and `TestingPostgresDriver` embed the driver, hold the `testing.TB` value, and store the two `DataSource` values of the harness. `Diff` clears the connection fields of the driver on exit, so the harness keeps its own `sourceConnection` and `targetConnection` for `ExecOnTarget` and `ExecOnSource`. A SQL source holds no such connection, and a helper that reads or writes it materializes a temporary database on first use. The constructor builds the databases and registers the cleanup with `tb.Cleanup`. The PostgreSQL harness creates one source schema and one target schema in one database, drops both in the cleanup, and checks each drop with `require.NoError`. Keep the connection of the harness open until the cleanup ends. Every harness method calls `d.tb.Helper()` on its first line.
 
 | Helper                                   | Purpose                                            |
 | ---------------------------------------- | -------------------------------------------------- |

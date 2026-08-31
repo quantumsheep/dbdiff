@@ -12,7 +12,7 @@ import (
 
 type commonOptions struct {
 	driver    dbdiffdrivers.DriverName
-	database  string
+	database  dbdiffdrivers.ConnectionStringDataSource
 	schema    string
 	directory string
 	output    io.Writer
@@ -61,12 +61,11 @@ func (apply upOption) applyUp(target *upOptions) {
 }
 
 // WithDatabase names the database that receives the migrations. An empty driver value
-// starts the detection of the engine from the url value, which holds a SQLite path, a
-// PostgreSQL connection string, or a MySQL URL.
-func WithDatabase(driver dbdiffdrivers.DriverName, url string) Option {
+// starts the detection of the engine from the database value.
+func WithDatabase(driver dbdiffdrivers.DriverName, database dbdiffdrivers.ConnectionStringDataSource) Option {
 	return commonOption(func(target *commonOptions) {
 		target.driver = driver
-		target.database = url
+		target.database = database
 	})
 }
 
@@ -192,7 +191,7 @@ func stateOf(state coremigrations.MigrationState) State {
 }
 
 func open(ctx context.Context, merged *commonOptions) (coremigrations.Migrator, *coremigrations.MigrationSet, error) {
-	if merged.database == "" {
+	if merged.database.ConnectionString == "" {
 		return nil, nil, fmt.Errorf("name the database with the WithDatabase option")
 	}
 

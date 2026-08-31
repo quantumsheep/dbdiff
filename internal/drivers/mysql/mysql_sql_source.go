@@ -89,21 +89,27 @@ type mysqlScratchDatabase struct {
 	name         string
 }
 
-func (d *MySQLDriver) OpenSide(ctx context.Context, connectionString string, otherConnectionString string, role string) (*sql.DB, error) {
-	if !driversshared.IsSQLSource(connectionString) {
-		return OpenMySQLConnection(connectionString)
+func (d *MySQLDriver) OpenSide(ctx context.Context, source driversshared.DataSource,
+	otherSource driversshared.DataSource, role string) (*sql.DB, error) {
+	connectionSource, isConnectionString := source.(driversshared.ConnectionStringDataSource)
+	if isConnectionString {
+		return OpenMySQLConnection(connectionSource.ConnectionString)
 	}
 
-	if driversshared.IsSQLSource(otherConnectionString) {
+	if driversshared.IsSQLSource(otherSource) {
 		return nil, fmt.Errorf("the mysql driver builds a SQL source on the server of the other side. Give a database as the other argument")
 	}
 
-	sqlSource, err := driversshared.NewSQLSource(connectionString)
+	path, _ := driversshared.SQLSourcePath(source)
+
+	sqlSource, err := driversshared.NewSQLSource(path)
 	if err != nil {
 		return nil, err
 	}
 
-	serverConfig, err := ParseMySQLConnectionString(otherConnectionString)
+	otherConnectionSource := otherSource.(driversshared.ConnectionStringDataSource)
+
+	serverConfig, err := ParseMySQLConnectionString(otherConnectionSource.ConnectionString)
 	if err != nil {
 		return nil, err
 	}

@@ -12,17 +12,13 @@ import (
 )
 
 type MySQLDriverConfig struct {
-	TargetConnectionString string
-	SourceConnectionString string
-	CompareData            bool
-	ComparePrivileges      bool
-	IgnoreTables           []string
+	ComparePrivileges bool
+	IgnoreTables      []string
 }
 
 type MySQLDriver struct {
 	TargetDatabaseConnection *sql.DB
 	SourceDatabaseConnection *sql.DB
-	CompareData              bool
 	ComparePrivileges        bool
 	IgnoreTables             []string
 
@@ -44,52 +40,11 @@ type mysqlConnectionDetails struct {
 	defaultCollation string
 }
 
-func NewMySQLDriver(ctx context.Context, config *MySQLDriverConfig) (*MySQLDriver, error) {
-	driver := &MySQLDriver{
-		CompareData:         config.CompareData,
-		ComparePrivileges:   config.ComparePrivileges,
-		IgnoreTables:        config.IgnoreTables,
-		detailsByConnection: make(map[*sql.DB]*mysqlConnectionDetails),
+func NewMySQLDriver(config *MySQLDriverConfig) *MySQLDriver {
+	return &MySQLDriver{
+		ComparePrivileges: config.ComparePrivileges,
+		IgnoreTables:      config.IgnoreTables,
 	}
-
-	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetConnectionString,
-		config.SourceConnectionString, "target")
-	if err != nil {
-		_ = driver.dropScratchDatabases()
-		return nil, err
-	}
-
-	driver.TargetDatabaseConnection = targetDatabaseConnection
-
-	err = driver.registerConnection(ctx, targetDatabaseConnection)
-	if err != nil {
-		_ = driver.TargetDatabaseConnection.Close()
-		_ = driver.dropScratchDatabases()
-
-		return nil, err
-	}
-
-	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceConnectionString,
-		config.TargetConnectionString, "source")
-	if err != nil {
-		_ = driver.TargetDatabaseConnection.Close()
-		_ = driver.dropScratchDatabases()
-
-		return nil, err
-	}
-
-	driver.SourceDatabaseConnection = sourceDatabaseConnection
-
-	err = driver.registerConnection(ctx, sourceDatabaseConnection)
-	if err != nil {
-		_ = driver.TargetDatabaseConnection.Close()
-		_ = driver.SourceDatabaseConnection.Close()
-		_ = driver.dropScratchDatabases()
-
-		return nil, err
-	}
-
-	return driver, nil
 }
 
 func (d *MySQLDriver) registerConnection(ctx context.Context, db *sql.DB) error {
@@ -121,12 +76,52 @@ func (d *MySQLDriver) registerConnection(ctx context.Context, db *sql.DB) error 
 	return nil
 }
 
-func (d *MySQLDriver) Close() error {
-	targetError := d.TargetDatabaseConnection.Close()
-	sourceError := d.SourceDatabaseConnection.Close()
-	dropError := d.dropScratchDatabases()
+func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSource,
+	target driversshared.DataSource) (func(), error) {
+	d.detailsByConnection = make(map[*sql.DB]*mysqlConnectionDetails)
 
-	return driversshared.FirstError(targetError, sourceError, dropError)
+	targetDatabaseConnection, err := d.OpenSide(ctx, target, source, "target")
+	if err != nil {
+		_ = d.dropScratchDatabases()
+		return nil, err
+	}
+
+	d.TargetDatabaseConnection = targetDatabaseConnection
+
+	err = d.registerConnection(ctx, targetDatabaseConnection)
+	if err != nil {
+		_ = d.TargetDatabaseConnection.Close()
+		_ = d.dropScratchDatabases()
+
+		return nil, err
+	}
+
+	sourceDatabaseConnection, err := d.OpenSide(ctx, source, target, "source")
+	if err != nil {
+		_ = d.TargetDatabaseConnection.Close()
+		_ = d.dropScratchDatabases()
+
+		return nil, err
+	}
+
+	d.SourceDatabaseConnection = sourceDatabaseConnection
+
+	err = d.registerConnection(ctx, sourceDatabaseConnection)
+	if err != nil {
+		_ = d.TargetDatabaseConnection.Close()
+		_ = d.SourceDatabaseConnection.Close()
+		_ = d.dropScratchDatabases()
+
+		return nil, err
+	}
+
+	return func() {
+		_ = d.TargetDatabaseConnection.Close()
+		_ = d.SourceDatabaseConnection.Close()
+		d.TargetDatabaseConnection = nil
+		d.SourceDatabaseConnection = nil
+		_ = d.dropScratchDatabases()
+	}, nil
 }
 
 func (d *MySQLDriver) dropScratchDatabases() error {
@@ -144,7 +139,15 @@ func (d *MySQLDriver) dropScratchDatabases() error {
 	return firstError
 }
 
-func (d *MySQLDriver) Diff(ctx context.Context) ([]driversshared.Instruction, error) {
+func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
+	target driversshared.DataSource, options driversshared.DiffOptions) ([]driversshared.Instruction, error) {
+	release, err := d.openSides(ctx, source, target)
+	if err != nil {
+		return nil, err
+	}
+
+	defer release()
+
 	d.disableForeignKeyChecks = false
 	d.targetTables = nil
 	d.sourceTables = nil
@@ -198,7 +201,7 @@ func (d *MySQLDriver) Diff(ctx context.Context) ([]driversshared.Instruction, er
 		instructions = append(instructions, privilegeInstructions...)
 	}
 
-	if d.CompareData {
+	if options.CompareData {
 		dataInstructions, err := d.DiffData(ctx)
 		if err != nil {
 			return nil, err

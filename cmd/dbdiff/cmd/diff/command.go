@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/urfave/cli/v3"
 )
@@ -63,15 +63,31 @@ func action(ctx context.Context, command *cli.Command) error {
 		return fmt.Errorf("target database URL is required")
 	}
 
-	driver, err := drivers.NewDriver(ctx, driversshared.DriverName(command.String("driver")), currentSchema, finalSchema,
-		command.String("schema"), "", command.Bool("data"), command.Bool("privileges"), command.StringSlice("ignore-table"))
+	source := driversshared.ParseDataSource(currentSchema)
+	target := driversshared.ParseDataSource(finalSchema)
+
+	driverName := driversshared.DriverName(command.String("driver"))
+	if driverName == "" {
+		detected, err := driversshared.DetectDriver(source, target)
+		if err != nil {
+			return err
+		}
+
+		driverName = detected
+	}
+
+	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
+		Schema:            command.String("schema"),
+		ComparePrivileges: command.Bool("privileges"),
+		IgnoreTables:      command.StringSlice("ignore-table"),
+	})
 	if err != nil {
 		return err
 	}
 
-	defer func() { _ = driver.Close() }()
-
-	instructions, err := driver.Diff(ctx)
+	instructions, err := driver.Diff(ctx, source, target, driversshared.DiffOptions{
+		CompareData: command.Bool("data"),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to diff databases: %w", err)
 	}

@@ -33,10 +33,20 @@ func skipWithoutPostgresServer(tb testing.TB) {
 
 type TestingPostgresDriver struct {
 	*PostgresDriver
-	tb           testing.TB
-	conn         *sql.DB
+
+	tb   testing.TB
+	conn *sql.DB
+
+	source driversshared.DataSource
+	target driversshared.DataSource
+
 	targetSchema string
 	sourceSchema string
+
+	CompareData bool
+
+	sourceConnection *sql.DB
+	targetConnection *sql.DB
 }
 
 func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
@@ -84,22 +94,32 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	targetConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, targetSchema)
 	sourceConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, sourceSchema)
 
-	driver, err := NewPostgresDriver(tb.Context(), &PostgresDriverConfig{
-		TargetConnectionString: targetConnectionString,
-		SourceConnectionString: sourceConnectionString,
-	})
+	// The harness diffs a call at a time, and the driver fields go nil between two calls, so
+	// the harness keeps its own connection of each side for ExecOnTarget and ExecOnSource.
+	targetConnection, err := OpenPostgresConnection(targetConnectionString, "")
 	require.NoError(tb, err)
-
 	tb.Cleanup(func() {
-		require.NoError(tb, driver.Close())
+		require.NoError(tb, targetConnection.Close())
 	})
+
+	sourceConnection, err := OpenPostgresConnection(sourceConnectionString, "")
+	require.NoError(tb, err)
+	tb.Cleanup(func() {
+		require.NoError(tb, sourceConnection.Close())
+	})
+
+	driver := NewPostgresDriver(&PostgresDriverConfig{})
 
 	return &TestingPostgresDriver{
-		PostgresDriver: driver,
-		tb:             tb,
-		conn:           conn,
-		targetSchema:   targetSchema,
-		sourceSchema:   sourceSchema,
+		PostgresDriver:   driver,
+		tb:               tb,
+		conn:             conn,
+		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
+		target:           driversshared.ConnectionStringDataSource{ConnectionString: targetConnectionString},
+		targetSchema:     targetSchema,
+		sourceSchema:     sourceSchema,
+		sourceConnection: sourceConnection,
+		targetConnection: targetConnection,
 	}
 }
 
@@ -139,24 +159,31 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 	targetConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", targetDatabase)
 	sourceConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", sourceDatabase)
 
-	driver, err := NewPostgresDriver(tb.Context(), &PostgresDriverConfig{
-		TargetConnectionString: targetConnectionString,
-		SourceConnectionString: sourceConnectionString,
-	})
+	targetConnection, err := OpenPostgresConnection(targetConnectionString, "")
+	require.NoError(tb, err)
+
+	sourceConnection, err := OpenPostgresConnection(sourceConnectionString, "")
 	require.NoError(tb, err)
 
 	// Go calls a cleanup in the reverse order of its registration, so this one closes every
 	// connection before the database drop above. A drop fails while a connection uses it.
 	tb.Cleanup(func() {
-		require.NoError(tb, driver.Close())
+		require.NoError(tb, targetConnection.Close())
+		require.NoError(tb, sourceConnection.Close())
 	})
 
+	driver := NewPostgresDriver(&PostgresDriverConfig{})
+
 	return &TestingPostgresDriver{
-		PostgresDriver: driver,
-		tb:             tb,
-		conn:           adminConn,
-		targetSchema:   "public",
-		sourceSchema:   "public",
+		PostgresDriver:   driver,
+		tb:               tb,
+		conn:             adminConn,
+		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
+		target:           driversshared.ConnectionStringDataSource{ConnectionString: targetConnectionString},
+		targetSchema:     "public",
+		sourceSchema:     "public",
+		sourceConnection: sourceConnection,
+		targetConnection: targetConnection,
 	}
 }
 
@@ -171,20 +198,20 @@ func NewTestPostgresDriverWithPrivileges(tb testing.TB) *TestingPostgresDriver {
 
 func (d *TestingPostgresDriver) ExecOnTarget(sqlStatements string) {
 	d.tb.Helper()
-	_, err := d.TargetDatabaseConnection.Exec(sqlStatements)
+	_, err := d.targetConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
 func (d *TestingPostgresDriver) ExecOnSource(sqlStatements string) {
 	d.tb.Helper()
-	_, err := d.SourceDatabaseConnection.Exec(sqlStatements)
+	_, err := d.sourceConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
 func (d *TestingPostgresDriver) RequireInstructions(expected []driversshared.Instruction) string {
 	d.tb.Helper()
 
-	instructions, err := d.Diff(context.Background())
+	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
@@ -194,7 +221,7 @@ func (d *TestingPostgresDriver) RequireInstructions(expected []driversshared.Ins
 func (d *TestingPostgresDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 
-	rows, err := d.SourceDatabaseConnection.Query(fmt.Sprintf("SELECT * FROM %s %s;", driversshared.QuoteIdentifier(table), additionalRules))
+	rows, err := d.sourceConnection.Query(fmt.Sprintf("SELECT * FROM %s %s;", driversshared.QuoteIdentifier(table), additionalRules))
 	require.NoError(d.tb, err)
 
 	defer func() { require.NoError(d.tb, rows.Close()) }()
@@ -227,6 +254,46 @@ func (d *TestingPostgresDriver) FetchAllFromSource(table string, additionalRules
 	require.NoError(d.tb, rows.Err())
 
 	return results
+}
+
+// A test that diffs two SQL sources builds no live connection of its own, because the
+// scratch server that materializes them stops as soon as Diff returns. This helper gives
+// such a test a schema on the already-running test server, applies the SQL source to it,
+// and returns a connection that stays open so the test can prove that the generated SQL of
+// the diff runs.
+func openVerificationConnection(tb testing.TB, sqlSourcePath string) *sql.DB {
+	tb.Helper()
+
+	adminConnection, err := sql.Open("pgx", postgresTestConnectionString)
+	require.NoError(tb, err)
+
+	schemaName := fmt.Sprintf("verify_%d", time.Now().UnixNano())
+
+	_, err = adminConnection.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", schemaName))
+	require.NoError(tb, err)
+
+	tb.Cleanup(func() {
+		_, err := adminConnection.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", schemaName))
+		require.NoError(tb, err)
+
+		require.NoError(tb, adminConnection.Close())
+	})
+
+	connectionString := fmt.Sprintf("%s&search_path=%s", postgresTestConnectionString, schemaName)
+
+	connection, err := OpenPostgresConnection(connectionString, "")
+	require.NoError(tb, err)
+
+	tb.Cleanup(func() {
+		require.NoError(tb, connection.Close())
+	})
+
+	sqlSource, err := driversshared.NewSQLSource(sqlSourcePath)
+	require.NoError(tb, err)
+
+	require.NoError(tb, sqlSource.ApplyTo(tb.Context(), connection))
+
+	return connection
 }
 
 func TestPostgresDriver(t *testing.T) {
@@ -4909,20 +4976,16 @@ func TestPostgresDriver(t *testing.T) {
 
 		harness.ExecOnTarget(`CREATE TABLE users (id INT NOT NULL);`)
 
-		// The two connection strings hold no search path, so the config selects the schema.
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: postgresTestConnectionString,
-			SourceConnectionString: postgresTestConnectionString,
-			TargetSchema:           harness.targetSchema,
-			SourceSchema:           harness.sourceSchema,
-		})
-		require.NoError(t, err)
+		// The two connection strings hold no search path, so the schema fields of the
+		// driver select it.
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
+		driver.TargetSchema = harness.targetSchema
+		driver.SourceSchema = harness.sourceSchema
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
+		source := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		target := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
 
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		diff := driversshared.RenderInstructions(instructions)
@@ -4934,19 +4997,14 @@ func TestPostgresDriver(t *testing.T) {
 	})
 
 	t.Run("UnknownSchema", func(t *testing.T) {
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: postgresTestConnectionString,
-			SourceConnectionString: postgresTestConnectionString,
-			TargetSchema:           "schema_that_does_not_exist",
-			SourceSchema:           "schema_that_does_not_exist",
-		})
-		require.NoError(t, err)
-
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
+		driver := NewPostgresDriver(&PostgresDriverConfig{
+			Schema: "schema_that_does_not_exist",
 		})
 
-		_, err = driver.Diff(t.Context())
+		source := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		target := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+
+		_, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.EqualError(t, err, `the target database has no schema with the name "schema_that_does_not_exist"`)
 	})
 
@@ -4971,17 +5029,12 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT NOT NULL);
 		`)
 
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: migrationsDirectory,
-			SourceConnectionString: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
+		source := driversshared.ParseDataSource(sourcePath)
+		target := driversshared.ParseDataSource(migrationsDirectory)
 
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, []driversshared.Instruction{
@@ -4998,7 +5051,8 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		_, err = driver.SourceDatabaseConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		verifyConnection := openVerificationConnection(t, sourcePath)
+		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
 		require.NoError(t, err)
 	})
 
@@ -5011,17 +5065,12 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT NOT NULL);
 		`)
 
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: t.TempDir(),
-			SourceConnectionString: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
+		source := driversshared.ParseDataSource(sourcePath)
+		target := driversshared.ParseDataSource(t.TempDir())
 
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, []driversshared.Instruction{
@@ -5030,7 +5079,8 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		_, err = driver.SourceDatabaseConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		verifyConnection := openVerificationConnection(t, sourcePath)
+		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
 		require.NoError(t, err)
 	})
 
@@ -5055,17 +5105,12 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT NOT NULL, email TEXT, username TEXT NOT NULL);
 		`)
 
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: migrationsDirectory,
-			SourceConnectionString: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
+		source := driversshared.ParseDataSource(sourcePath)
+		target := driversshared.ParseDataSource(migrationsDirectory)
 
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, []driversshared.Instruction{
@@ -5074,7 +5119,8 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		_, err = driver.SourceDatabaseConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		verifyConnection := openVerificationConnection(t, sourcePath)
+		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
 		require.NoError(t, err)
 	})
 
@@ -5092,17 +5138,12 @@ func TestPostgresDriver(t *testing.T) {
 			ALTER TABLE mfa RENAME COLUMN login_id TO login_mfa_id;
 		`)
 
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: targetPath,
-			SourceConnectionString: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
+		source := driversshared.ParseDataSource(sourcePath)
+		target := driversshared.ParseDataSource(targetPath)
 
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})
@@ -5120,17 +5161,12 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE mfa (id INT, label TEXT NOT NULL);
 		`)
 
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: targetPath,
-			SourceConnectionString: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
+		source := driversshared.ParseDataSource(sourcePath)
+		target := driversshared.ParseDataSource(targetPath)
 
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, []driversshared.Instruction{
@@ -5152,7 +5188,8 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		_, err = driver.SourceDatabaseConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		verifyConnection := openVerificationConnection(t, sourcePath)
+		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
 		require.NoError(t, err)
 	})
 
@@ -5181,43 +5218,49 @@ func TestPostgresDriver(t *testing.T) {
 		require.Equal(t, embeddedpostgres.PostgresVersion(""), version)
 	})
 
-	t.Run("ScratchVersionOfConfig", func(t *testing.T) {
+	t.Run("ScratchVersionOfSources", func(t *testing.T) {
 		sqlPath := sqltest.WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (id INT);`)
 
 		liveVersion := DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString)
 		require.NotEmpty(t, liveVersion)
 
-		version := postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: sqlPath,
-			SourceConnectionString: postgresTestConnectionString,
-		})
+		sqlSource := driversshared.ParseDataSource(sqlPath)
+		liveSource := driversshared.ParseDataSource(postgresTestConnectionString)
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
+
+		version, err := driver.scratchVersionOfSources(t.Context(), liveSource, sqlSource)
+		require.NoError(t, err)
 		require.Equal(t, liveVersion, version)
 
-		version = postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: postgresTestConnectionString,
-			SourceConnectionString: sqlPath,
-		})
+		version, err = driver.scratchVersionOfSources(t.Context(), sqlSource, liveSource)
+		require.NoError(t, err)
 		require.Equal(t, liveVersion, version)
 
-		version = postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: sqlPath,
-			SourceConnectionString: sqlPath,
-		})
+		version, err = driver.scratchVersionOfSources(t.Context(), sqlSource, sqlSource)
+		require.NoError(t, err)
 		require.Equal(t, embeddedpostgres.PostgresVersion(""), version)
 
-		version = postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: sqlPath,
-			SourceConnectionString: sqlPath,
-			ScratchServerVersion:   "17.11.0",
+		versionedDriver := NewPostgresDriver(&PostgresDriverConfig{
+			ScratchServerVersion: "17.11.0",
 		})
+
+		version, err = versionedDriver.scratchVersionOfSources(t.Context(), sqlSource, sqlSource)
+		require.NoError(t, err)
 		require.Equal(t, embeddedpostgres.PostgresVersion("17.11.0"), version)
 
-		version = postgresScratchVersionOfConfig(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: postgresTestConnectionString,
-			SourceConnectionString: sqlPath,
-			ScratchServerVersion:   "17.11.0",
-		})
+		version, err = versionedDriver.scratchVersionOfSources(t.Context(), sqlSource, liveSource)
+		require.NoError(t, err)
 		require.Equal(t, liveVersion, version)
+	})
+
+	t.Run("ValidateScratchServerVersion", func(t *testing.T) {
+		require.NoError(t, ValidateScratchServerVersion(""))
+		require.NoError(t, ValidateScratchServerVersion("17"))
+		require.NoError(t, ValidateScratchServerVersion("17.11.0"))
+
+		require.EqualError(t, ValidateScratchServerVersion("99"), `unknown postgres version "99"`)
+		require.EqualError(t, ValidateScratchServerVersion("5.2"), `unknown postgres version "5.2"`)
 	})
 
 	t.Run("SQLFileTargetAgainstDatabase", func(t *testing.T) {
@@ -5232,20 +5275,16 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT NOT NULL, name TEXT);
 		`)
 
-		driver, err := NewPostgresDriver(t.Context(), &PostgresDriverConfig{
-			TargetConnectionString: targetPath,
-			SourceConnectionString: postgresTestConnectionString,
-			SourceSchema:           harness.sourceSchema,
-		})
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
+
+		source := harness.source
+		target := driversshared.ParseDataSource(targetPath)
+
+		version, err := driver.scratchVersionOfSources(t.Context(), source, target)
 		require.NoError(t, err)
+		require.Equal(t, DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString), version)
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
-
-		require.Equal(t, DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString), driver.ScratchVersion)
-
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, []driversshared.Instruction{

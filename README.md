@@ -157,7 +157,12 @@ The package `drivers` runs a diff:
 ```go
 import "github.com/quantumsheep/dbdiff/drivers"
 
-statements, err := drivers.Diff(ctx, "app.sqlite", "schema.sql")
+driver, err := drivers.NewDriver(drivers.SQLiteDriverName)
+
+statements, err := driver.Diff(ctx,
+	drivers.ConnectionStringDataSource{ConnectionString: "app.sqlite"},
+	drivers.FileDataSource{Path: "schema.sql"},
+)
 ```
 
 The package `migrations` applies the migrations, for example at the start of a server:
@@ -169,7 +174,9 @@ import (
 )
 
 err := migrations.Up(ctx,
-	migrations.WithDatabase(drivers.PostgresDriverName, os.Getenv("DATABASE_URL")),
+	migrations.WithDatabase(drivers.PostgresDriverName, drivers.ConnectionStringDataSource{
+		ConnectionString: os.Getenv("DATABASE_URL"),
+	}),
 	migrations.WithDirectory("migrations"),
 )
 ```

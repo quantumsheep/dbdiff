@@ -8,9 +8,14 @@ import (
 // table, and the user then erases the history of every migration.
 const MigrationHistoryTableName = "dbdiff_migrations"
 
+type DiffOptions struct {
+	CompareData bool
+}
+
+// A driver value runs one diff at a time. Each Diff call binds the connection
+// fields of the driver on entry and clears them on exit.
 type Driver interface {
-	Close() error
-	Diff(ctx context.Context) ([]Instruction, error)
+	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) ([]Instruction, error)
 }
 
 func FirstError(candidates ...error) error {

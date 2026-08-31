@@ -20,32 +20,77 @@ import (
 type TestingSQLiteDriver struct {
 	*SQLiteDriver
 
-	tb testing.TB
-}
+	tb          testing.TB
+	source      driversshared.DataSource
+	target      driversshared.DataSource
+	CompareData bool
 
-func (d *TestingSQLiteDriver) Close() error {
-	d.tb.Helper()
-	return d.SQLiteDriver.Close()
+	sourceConnection *sql.DB
+	targetConnection *sql.DB
 }
 
 func (d *TestingSQLiteDriver) ExecOnTarget(sqlStatements string) {
 	d.tb.Helper()
 
-	_, err := d.TargetDatabaseConnection.Exec(sqlStatements)
+	_, err := d.targetDatabase().Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
 func (d *TestingSQLiteDriver) ExecOnSource(sqlStatements string) {
 	d.tb.Helper()
 
-	_, err := d.SourceDatabaseConnection.Exec(sqlStatements)
+	_, err := d.sourceDatabase().Exec(sqlStatements)
 	require.NoError(d.tb, err)
+}
+
+func (d *TestingSQLiteDriver) sourceDatabase() *sql.DB {
+	d.tb.Helper()
+
+	return d.database(d.source, &d.sourceConnection, "source")
+}
+
+func (d *TestingSQLiteDriver) targetDatabase() *sql.DB {
+	d.tb.Helper()
+
+	return d.database(d.target, &d.targetConnection, "target")
+}
+
+// A SQL source holds no connection of its own, because the harness opens one only for
+// a side that a database path names. A test that reads or writes such a side materializes
+// it here, on its first use. The driver materializes its own copy of a SQL source on
+// every Diff call, so a write through this accessor never reaches the diff.
+func (d *TestingSQLiteDriver) database(source driversshared.DataSource, connection **sql.DB, role string) *sql.DB {
+	d.tb.Helper()
+
+	if *connection != nil {
+		return *connection
+	}
+
+	path, isSQLSource := driversshared.SQLSourcePath(source)
+	require.True(d.tb, isSQLSource, "the %s side holds no open connection", role)
+
+	sqlSource, err := driversshared.NewSQLSource(path)
+	require.NoError(d.tb, err)
+
+	opened, err := sql.Open("sqlite3", filepath.Join(d.tb.TempDir(), role+".sqlite"))
+	require.NoError(d.tb, err)
+
+	err = sqlSource.ApplyTo(d.tb.Context(), opened)
+	require.NoError(d.tb, err)
+
+	d.tb.Cleanup(func() {
+		require.NoError(d.tb, opened.Close())
+	})
+
+	*connection = opened
+
+	return *connection
 }
 
 func (d *TestingSQLiteDriver) RequireInstructions(expected []driversshared.Instruction) string {
 	d.tb.Helper()
 
-	instructions, err := d.Diff(d.tb.Context())
+	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
@@ -55,10 +100,12 @@ func (d *TestingSQLiteDriver) RequireInstructions(expected []driversshared.Instr
 func (d *TestingSQLiteDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 
-	columns, err := d.GetTableColumns(d.tb.Context(), d.SourceDatabaseConnection, table)
+	sourceConnection := d.sourceDatabase()
+
+	columns, err := d.GetTableColumns(d.tb.Context(), sourceConnection, table)
 	require.NoError(d.tb, err)
 
-	rows, err := d.SourceDatabaseConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))
+	rows, err := sourceConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))
 	require.NoError(d.tb, err)
 
 	var results []map[string]any
@@ -97,13 +144,13 @@ func NewTestSQLiteDriver(tb testing.TB) *TestingSQLiteDriver {
 	return NewTestSQLiteDriverWithPaths(tb, targetDatabasePath, sourceDatabasePath)
 }
 
-// The driver refuses a database file that is absent, so the constructor creates each
+// The driver refuses a database file that is absent, so the harness creates each
 // empty file first. A SQL source builds its own database.
 func NewTestSQLiteDriverWithPaths(tb testing.TB, targetPath string, sourcePath string) *TestingSQLiteDriver {
 	tb.Helper()
 
 	for _, path := range []string{targetPath, sourcePath} {
-		if driversshared.IsSQLSource(path) {
+		if driversshared.IsSQLSource(driversshared.ParseDataSource(path)) {
 			continue
 		}
 
@@ -112,19 +159,39 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, targetPath string, sourcePath s
 		require.NoError(tb, file.Close())
 	}
 
-	driver, err := NewSQLiteDriver(tb.Context(), &SQLiteDriverConfig{
-		TargetDatabasePath: targetPath,
-		SourceDatabasePath: sourcePath,
-	})
-	require.NoError(tb, err)
-	tb.Cleanup(func() {
-		require.NoError(tb, driver.Close())
-	})
+	driver := NewSQLiteDriver(&SQLiteDriverConfig{})
 
-	return &TestingSQLiteDriver{
+	source := driversshared.ParseDataSource(sourcePath)
+	target := driversshared.ParseDataSource(targetPath)
+
+	testingDriver := &TestingSQLiteDriver{
 		SQLiteDriver: driver,
 		tb:           tb,
+		source:       source,
+		target:       target,
 	}
+
+	if !driversshared.IsSQLSource(source) {
+		connection, err := sql.Open("sqlite3", TrimSQLitePrefix(sourcePath))
+		require.NoError(tb, err)
+		tb.Cleanup(func() {
+			require.NoError(tb, connection.Close())
+		})
+
+		testingDriver.sourceConnection = connection
+	}
+
+	if !driversshared.IsSQLSource(target) {
+		connection, err := sql.Open("sqlite3", TrimSQLitePrefix(targetPath))
+		require.NoError(tb, err)
+		tb.Cleanup(func() {
+			require.NoError(tb, connection.Close())
+		})
+
+		testingDriver.targetConnection = connection
+	}
+
+	return testingDriver
 }
 
 func recreated(tableName string, instructions ...driversshared.Instruction) []driversshared.Instruction {
@@ -2533,7 +2600,7 @@ func TestSQLiteDriver(t *testing.T) {
 			{"id": int64(2), "email": "bob@example.com", "age": int64(25)},
 		}, rows)
 
-		_, err := driver.SourceDatabaseConnection.Exec(`INSERT INTO users (id, email, age) VALUES (3, 'alice@example.com', 40);`)
+		_, err := driver.sourceConnection.Exec(`INSERT INTO users (id, email, age) VALUES (3, 'alice@example.com', 40);`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: users.email")
 	})
 
@@ -2579,7 +2646,7 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 		driver.ExecOnSource(`INSERT INTO members (id, team, name) VALUES (1, 'red', 'Alice');`)
 
-		_, err := driver.SourceDatabaseConnection.Exec(`INSERT INTO members (id, team, name) VALUES (2, 'red', 'Alice');`)
+		_, err := driver.sourceConnection.Exec(`INSERT INTO members (id, team, name) VALUES (2, 'red', 'Alice');`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: members.team, members.name")
 	})
 
@@ -2798,7 +2865,7 @@ func TestSQLiteDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 		driver.ExecOnSource(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'lead');`)
 
-		_, err := driver.SourceDatabaseConnection.Exec(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'guest');`)
+		_, err := driver.sourceConnection.Exec(`INSERT INTO memberships (team, member, role) VALUES ('red', 'Alice', 'guest');`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: memberships.member, memberships.team")
 	})
 
@@ -3324,7 +3391,7 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver.ExecOnSource(diff)
 
-		triggers, err := driver.GetTriggers(t.Context(), driver.SourceDatabaseConnection, "users")
+		triggers, err := driver.GetTriggers(t.Context(), driver.sourceConnection, "users")
 		require.NoError(t, err)
 		require.Len(t, triggers, 1)
 		require.Equal(t, "users_insert", triggers[0].Name)
@@ -4379,10 +4446,10 @@ func TestSQLiteDriver(t *testing.T) {
 		targetPath := sqltest.WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (;`)
 		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
 
-		_, err := NewSQLiteDriver(t.Context(), &SQLiteDriverConfig{
-			TargetDatabasePath: targetPath,
-			SourceDatabasePath: sourcePath,
-		})
+		driver := NewSQLiteDriver(&SQLiteDriverConfig{})
+
+		_, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
+			driversshared.ParseDataSource(targetPath), driversshared.DiffOptions{})
 		require.ErrorContains(t, err, "schema.sql")
 	})
 

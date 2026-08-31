@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
+	"strings"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -174,23 +176,44 @@ func DetectPostgresScratchVersion(ctx context.Context, connectionString string) 
 	return postgresScratchVersions[versionNumber/10000]
 }
 
-func postgresScratchVersionOfConfig(ctx context.Context, config *PostgresDriverConfig) embeddedpostgres.PostgresVersion {
-	targetHoldsSQL := driversshared.IsSQLSource(config.TargetConnectionString)
-	sourceHoldsSQL := driversshared.IsSQLSource(config.SourceConnectionString)
+func (d *PostgresDriver) scratchVersionOfSources(ctx context.Context, source driversshared.DataSource,
+	target driversshared.DataSource) (embeddedpostgres.PostgresVersion, error) {
+	sourceHoldsSQL := driversshared.IsSQLSource(source)
+	targetHoldsSQL := driversshared.IsSQLSource(target)
 
 	if targetHoldsSQL && !sourceHoldsSQL {
-		return DetectPostgresScratchVersion(ctx, config.SourceConnectionString)
+		connectionSource := source.(driversshared.ConnectionStringDataSource)
+		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString), nil
 	}
 
 	if sourceHoldsSQL && !targetHoldsSQL {
-		return DetectPostgresScratchVersion(ctx, config.TargetConnectionString)
+		connectionSource := target.(driversshared.ConnectionStringDataSource)
+		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString), nil
 	}
 
-	if targetHoldsSQL && sourceHoldsSQL && config.ScratchServerVersion != "" {
-		return embeddedpostgres.PostgresVersion(config.ScratchServerVersion)
+	if targetHoldsSQL && sourceHoldsSQL && d.ScratchServerVersion != "" {
+		return embeddedpostgres.PostgresVersion(d.ScratchServerVersion), nil
 	}
 
-	return ""
+	return "", nil
+}
+
+// The keys of postgresScratchVersions hold a major version only, and a version of the flag
+// can name a minor version and a patch version, so the check reads the major version prefix.
+func ValidateScratchServerVersion(version string) error {
+	if version == "" {
+		return nil
+	}
+
+	for major := range postgresScratchVersions {
+		majorVersion := strconv.Itoa(major)
+
+		if version == majorVersion || strings.HasPrefix(version, majorVersion+".") {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unknown postgres version %q", version)
 }
 
 func findFreePort() (uint32, error) {
@@ -209,12 +232,15 @@ func findFreePort() (uint32, error) {
 	return uint32(address.Port), nil
 }
 
-func (d *PostgresDriver) OpenSide(ctx context.Context, connectionString string, schema string, role string) (*sql.DB, error) {
-	if !driversshared.IsSQLSource(connectionString) {
-		return OpenPostgresConnection(connectionString, schema)
+func (d *PostgresDriver) OpenSide(ctx context.Context, source driversshared.DataSource, schema string, role string) (*sql.DB, error) {
+	connectionSource, isConnectionString := source.(driversshared.ConnectionStringDataSource)
+	if isConnectionString {
+		return OpenPostgresConnection(connectionSource.ConnectionString, schema)
 	}
 
-	sqlSource, err := driversshared.NewSQLSource(connectionString)
+	path, _ := driversshared.SQLSourcePath(source)
+
+	sqlSource, err := driversshared.NewSQLSource(path)
 	if err != nil {
 		return nil, err
 	}

@@ -32,10 +32,19 @@ func skipWithoutMySQLServer(tb testing.TB) {
 type TestingMySQLDriver struct {
 	*MySQLDriver
 
-	tb             testing.TB
-	conn           *sql.DB
+	tb   testing.TB
+	conn *sql.DB
+
+	source driversshared.DataSource
+	target driversshared.DataSource
+
 	targetDatabase string
 	sourceDatabase string
+
+	CompareData bool
+
+	sourceConnection *sql.DB
+	targetConnection *sql.DB
 }
 
 func NewTestMySQLDriver(tb testing.TB) *TestingMySQLDriver {
@@ -81,22 +90,35 @@ func newTestMySQLDriverWithServer(tb testing.TB, serverConnectionString string) 
 		require.NoError(tb, conn.Close())
 	})
 
-	driver, err := NewMySQLDriver(tb.Context(), &MySQLDriverConfig{
-		TargetConnectionString: testConnectionStringWithDatabase(tb, serverConnectionString, targetDatabase),
-		SourceConnectionString: testConnectionStringWithDatabase(tb, serverConnectionString, sourceDatabase),
-	})
-	require.NoError(tb, err)
+	targetConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, targetDatabase)
+	sourceConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, sourceDatabase)
 
+	// The harness diffs a call at a time, and the driver fields go nil between two calls, so
+	// the harness keeps its own connection of each side for ExecOnTarget and ExecOnSource.
+	targetConnection, err := OpenMySQLConnection(targetConnectionString)
+	require.NoError(tb, err)
 	tb.Cleanup(func() {
-		require.NoError(tb, driver.Close())
+		require.NoError(tb, targetConnection.Close())
 	})
+
+	sourceConnection, err := OpenMySQLConnection(sourceConnectionString)
+	require.NoError(tb, err)
+	tb.Cleanup(func() {
+		require.NoError(tb, sourceConnection.Close())
+	})
+
+	driver := NewMySQLDriver(&MySQLDriverConfig{})
 
 	return &TestingMySQLDriver{
-		MySQLDriver:    driver,
-		tb:             tb,
-		conn:           conn,
-		targetDatabase: targetDatabase,
-		sourceDatabase: sourceDatabase,
+		MySQLDriver:      driver,
+		tb:               tb,
+		conn:             conn,
+		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
+		target:           driversshared.ConnectionStringDataSource{ConnectionString: targetConnectionString},
+		targetDatabase:   targetDatabase,
+		sourceDatabase:   sourceDatabase,
+		sourceConnection: sourceConnection,
+		targetConnection: targetConnection,
 	}
 }
 
@@ -125,21 +147,24 @@ func NewTestMySQLDriverWithTargetDirectory(tb testing.TB, directory string) *Tes
 		require.NoError(tb, conn.Close())
 	})
 
-	driver, err := NewMySQLDriver(tb.Context(), &MySQLDriverConfig{
-		TargetConnectionString: directory,
-		SourceConnectionString: testConnectionStringWithDatabase(tb, mysqlTestConnectionString, sourceDatabase),
-	})
-	require.NoError(tb, err)
+	sourceConnectionString := testConnectionStringWithDatabase(tb, mysqlTestConnectionString, sourceDatabase)
 
+	sourceConnection, err := OpenMySQLConnection(sourceConnectionString)
+	require.NoError(tb, err)
 	tb.Cleanup(func() {
-		require.NoError(tb, driver.Close())
+		require.NoError(tb, sourceConnection.Close())
 	})
+
+	driver := NewMySQLDriver(&MySQLDriverConfig{})
 
 	return &TestingMySQLDriver{
-		MySQLDriver:    driver,
-		tb:             tb,
-		conn:           conn,
-		sourceDatabase: sourceDatabase,
+		MySQLDriver:      driver,
+		tb:               tb,
+		conn:             conn,
+		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
+		target:           driversshared.ParseDataSource(directory),
+		sourceDatabase:   sourceDatabase,
+		sourceConnection: sourceConnection,
 	}
 }
 
@@ -167,21 +192,21 @@ func (d *TestingMySQLDriver) CreateTestUser(name string) {
 func (d *TestingMySQLDriver) ExecOnTarget(sqlStatements string) {
 	d.tb.Helper()
 
-	_, err := d.TargetDatabaseConnection.Exec(sqlStatements)
+	_, err := d.targetConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
 func (d *TestingMySQLDriver) ExecOnSource(sqlStatements string) {
 	d.tb.Helper()
 
-	_, err := d.SourceDatabaseConnection.Exec(sqlStatements)
+	_, err := d.sourceConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
 func (d *TestingMySQLDriver) RequireInstructions(expected []driversshared.Instruction) string {
 	d.tb.Helper()
 
-	instructions, err := d.Diff(d.tb.Context())
+	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
@@ -194,7 +219,7 @@ func (d *TestingMySQLDriver) RequireInstructions(expected []driversshared.Instru
 func (d *TestingMySQLDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 
-	rows, err := d.SourceDatabaseConnection.Query(
+	rows, err := d.sourceConnection.Query(
 		fmt.Sprintf("SELECT * FROM %s %s;", QuoteIdentifier(table), additionalRules))
 	require.NoError(d.tb, err)
 
@@ -1443,10 +1468,12 @@ func TestMySQLDriver(t *testing.T) {
 	})
 
 	t.Run("TwoSQLSourcesGiveAnError", func(t *testing.T) {
-		_, err := NewMySQLDriver(t.Context(), &MySQLDriverConfig{
-			TargetConnectionString: t.TempDir(),
-			SourceConnectionString: t.TempDir(),
-		})
+		driver := NewMySQLDriver(&MySQLDriverConfig{})
+
+		target := driversshared.ParseDataSource(t.TempDir())
+		source := driversshared.ParseDataSource(t.TempDir())
+
+		_, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Give a database")

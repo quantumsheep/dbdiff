@@ -10,49 +10,49 @@ import (
 
 func TestDetectDriver(t *testing.T) {
 	t.Run("SQLiteConnectionURL", func(t *testing.T) {
-		name, err := DetectDriver("sqlite://target.db", "sqlite://source.db")
+		name, err := DetectDriver(ParseDataSource("sqlite://target.db"), ParseDataSource("sqlite://source.db"))
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("PostgresConnectionURL", func(t *testing.T) {
-		name, err := DetectDriver("postgres://user@localhost/target", "postgresql://user@localhost/source")
+		name, err := DetectDriver(ParseDataSource("postgres://user@localhost/target"), ParseDataSource("postgresql://user@localhost/source"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("PostgresKeywordString", func(t *testing.T) {
-		name, err := DetectDriver("host=localhost user=app dbname=target", "host=localhost user=app dbname=source")
+		name, err := DetectDriver(ParseDataSource("host=localhost user=app dbname=target"), ParseDataSource("host=localhost user=app dbname=source"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("PostgresKeywordStringWithAQuotedValue", func(t *testing.T) {
-		name, err := DetectDriver("host=localhost user=app password='a b'", "host=localhost user=app password='c d'")
+		name, err := DetectDriver(ParseDataSource("host=localhost user=app password='a b'"), ParseDataSource("host=localhost user=app password='c d'"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("PostgresKeywordStringWithAnUnknownKeyword", func(t *testing.T) {
-		name, err := DetectDriver("host=localhost future_option=1", "host=localhost future_option=2")
+		name, err := DetectDriver(ParseDataSource("host=localhost future_option=1"), ParseDataSource("host=localhost future_option=2"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("FilePathWithAnEqualSign", func(t *testing.T) {
-		name, err := DetectDriver("stats=v2.db", "stats=v1.db")
+		name, err := DetectDriver(ParseDataSource("stats=v2.db"), ParseDataSource("stats=v1.db"))
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("DatabaseFilePath", func(t *testing.T) {
-		name, err := DetectDriver("target.db", "./source.sqlite")
+		name, err := DetectDriver(ParseDataSource("target.db"), ParseDataSource("./source.sqlite"))
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
@@ -61,7 +61,7 @@ func TestDetectDriver(t *testing.T) {
 	t.Run("SQLFileAgainstDatabase", func(t *testing.T) {
 		targetPath := writeDetectionSQLFile(t, "schema.sql")
 
-		name, err := DetectDriver(targetPath, "postgres://user@localhost/source")
+		name, err := DetectDriver(ParseDataSource(targetPath), ParseDataSource("postgres://user@localhost/source"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
@@ -70,7 +70,7 @@ func TestDetectDriver(t *testing.T) {
 	t.Run("DatabaseAgainstSQLFile", func(t *testing.T) {
 		sourcePath := writeDetectionSQLFile(t, "schema.sql")
 
-		name, err := DetectDriver("source.db", sourcePath)
+		name, err := DetectDriver(ParseDataSource("source.db"), ParseDataSource(sourcePath))
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
@@ -80,43 +80,52 @@ func TestDetectDriver(t *testing.T) {
 		targetPath := writeDetectionSQLFile(t, "target.sql")
 		sourcePath := writeDetectionSQLFile(t, "source.sql")
 
-		_, err := DetectDriver(targetPath, sourcePath)
+		_, err := DetectDriver(ParseDataSource(targetPath), ParseDataSource(sourcePath))
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "cannot detect the driver")
+		require.Contains(t, err.Error(), targetPath)
+		require.Contains(t, err.Error(), sourcePath)
 		require.Contains(t, err.Error(), "--driver")
 	})
 
 	t.Run("TwoDirectories", func(t *testing.T) {
-		_, err := DetectDriver(t.TempDir(), t.TempDir())
+		targetDirectory := t.TempDir()
+		sourceDirectory := t.TempDir()
+
+		_, err := DetectDriver(ParseDataSource(targetDirectory), ParseDataSource(sourceDirectory))
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "cannot detect the driver")
+		require.Contains(t, err.Error(), targetDirectory)
+		require.Contains(t, err.Error(), sourceDirectory)
 	})
 
 	t.Run("UnknownScheme", func(t *testing.T) {
-		_, err := DetectDriver("oracle://user@localhost/target", "oracle://user@localhost/source")
+		_, err := DetectDriver(ParseDataSource("oracle://user@localhost/target"), ParseDataSource("oracle://user@localhost/source"))
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "cannot detect the driver")
+		require.Contains(t, err.Error(), "oracle://user@localhost/target")
+		require.Contains(t, err.Error(), "oracle://user@localhost/source")
 	})
 
 	t.Run("MySQLScheme", func(t *testing.T) {
-		driverName, err := DetectDriver("mysql://user@localhost/target", "mysql://user@localhost/source")
+		driverName, err := DetectDriver(ParseDataSource("mysql://user@localhost/target"), ParseDataSource("mysql://user@localhost/source"))
 
 		require.NoError(t, err)
 		require.Equal(t, MySQLDriverName, driverName)
 	})
 
 	t.Run("MariaDBScheme", func(t *testing.T) {
-		driverName, err := DetectDriver("mariadb://user@localhost/target", "")
+		driverName, err := DetectDriver(ParseDataSource("mariadb://user@localhost/target"), ParseDataSource(""))
 
 		require.NoError(t, err)
 		require.Equal(t, MySQLDriverName, driverName)
 	})
 
 	t.Run("TwoDifferentEngines", func(t *testing.T) {
-		_, err := DetectDriver("sqlite://target.db", "postgres://user@localhost/source")
+		_, err := DetectDriver(ParseDataSource("sqlite://target.db"), ParseDataSource("postgres://user@localhost/source"))
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "names the sqlite3 driver")

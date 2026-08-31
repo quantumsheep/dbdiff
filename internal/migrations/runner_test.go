@@ -344,15 +344,10 @@ func TestApplyMigrations(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
-		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
-			TargetDatabasePath: schema,
-			SourceDatabasePath: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
-		defer func() { require.NoError(t, driver.Close()) }()
-
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
+			driversshared.ParseDataSource(schema), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})
@@ -861,15 +856,10 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
-			TargetDatabasePath: directory,
-			SourceDatabasePath: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
-		defer func() { require.NoError(t, driver.Close()) }()
-
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
+			driversshared.ParseDataSource(directory), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})
@@ -894,15 +884,10 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
-			TargetDatabasePath: directory,
-			SourceDatabasePath: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
-		defer func() { require.NoError(t, driver.Close()) }()
-
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
+			driversshared.ParseDataSource(directory), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, instructions)
 		require.Contains(t, driversshared.RenderInstructions(instructions), `DROP TABLE "audit"`)
@@ -924,15 +909,10 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
-			TargetDatabasePath: directory,
-			SourceDatabasePath: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
-		defer func() { require.NoError(t, driver.Close()) }()
-
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
+			driversshared.ParseDataSource(directory), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.NotContains(t, driversshared.RenderInstructions(instructions), "dbdiff_migrations")
 	})
@@ -955,15 +935,10 @@ func TestVerifyMigrations(t *testing.T) {
 
 		defer cleanup()
 
-		driver, err := driverssqlite.NewSQLiteDriver(t.Context(), &driverssqlite.SQLiteDriverConfig{
-			TargetDatabasePath: verifyDirectory,
-			SourceDatabasePath: sourcePath,
-		})
-		require.NoError(t, err)
+		driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
-		defer func() { require.NoError(t, driver.Close()) }()
-
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
+			driversshared.ParseDataSource(verifyDirectory), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})
@@ -1019,16 +994,12 @@ func TestPostgresMigrationRunner(t *testing.T) {
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		generateDriver, err := driverspostgres.NewPostgresDriver(t.Context(), &driverspostgres.PostgresDriverConfig{
-			TargetConnectionString: schemaFile,
-			SourceConnectionString: migrations,
-			ScratchServerVersion:   string(scratchVersion),
+		generateDriver := driverspostgres.NewPostgresDriver(&driverspostgres.PostgresDriverConfig{
+			ScratchServerVersion: string(scratchVersion),
 		})
-		require.NoError(t, err)
 
-		defer func() { require.NoError(t, generateDriver.Close()) }()
-
-		generatedInstructions, err := generateDriver.Diff(t.Context())
+		generatedInstructions, err := generateDriver.Diff(t.Context(), driversshared.ParseDataSource(migrations),
+			driversshared.ParseDataSource(schemaFile), driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		paths, err := WriteMigrationFiles(migrations, "add_users", time.Now(), "test", generatedInstructions)
@@ -1041,17 +1012,10 @@ func TestPostgresMigrationRunner(t *testing.T) {
 
 		sourceConnectionString := fmt.Sprintf("%s&search_path=%s", PostgresTestConnectionString, migrator.Schema())
 
-		driver, err := driverspostgres.NewPostgresDriver(t.Context(), &driverspostgres.PostgresDriverConfig{
-			TargetConnectionString: schemaFile,
-			SourceConnectionString: sourceConnectionString,
-		})
-		require.NoError(t, err)
+		driver := driverspostgres.NewPostgresDriver(&driverspostgres.PostgresDriverConfig{})
 
-		t.Cleanup(func() {
-			require.NoError(t, driver.Close())
-		})
-
-		instructions, err := driver.Diff(t.Context())
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourceConnectionString),
+			driversshared.ParseDataSource(schemaFile), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})

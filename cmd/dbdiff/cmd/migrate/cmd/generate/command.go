@@ -8,7 +8,8 @@ import (
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/migrations"
-	"github.com/quantumsheep/dbdiff/internal/drivers"
+	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
@@ -64,15 +65,29 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	driver, err := drivers.NewDriver(ctx, config.Driver, config.Source, config.Target,
-		config.Schema, config.Version, false, false, config.Ignore.Tables)
+	source := driversshared.ParseDataSource(config.Source)
+	target := driversshared.ParseDataSource(config.Target)
+
+	driverName := config.Driver
+	if driverName == "" {
+		detected, err := driversshared.DetectDriver(source, target)
+		if err != nil {
+			return err
+		}
+
+		driverName = detected
+	}
+
+	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
+		Version:      config.Version,
+		Schema:       config.Schema,
+		IgnoreTables: config.Ignore.Tables,
+	})
 	if err != nil {
 		return err
 	}
 
-	defer func() { _ = driver.Close() }()
-
-	instructions, err := driver.Diff(ctx)
+	instructions, err := driver.Diff(ctx, source, target, driversshared.DiffOptions{})
 	if err != nil {
 		return err
 	}

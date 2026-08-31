@@ -16,16 +16,18 @@ const (
 
 var SupportedDriverNames = []DriverName{SQLiteDriverName, PostgresDriverName, MySQLDriverName}
 
-func DetectDriver(source string, target string) (DriverName, error) {
-	sourceDriverName := detectDriverOfArgument(source)
-	targetDriverName := detectDriverOfArgument(target)
+func DetectDriver(source DataSource, target DataSource) (DriverName, error) {
+	sourceDriverName := detectDriverOfDataSource(source)
+	targetDriverName := detectDriverOfDataSource(target)
 
 	if sourceDriverName == "" && targetDriverName == "" {
-		return "", fmt.Errorf("cannot detect the driver of %q and %q. Use the --driver flag", source, target)
+		return "", fmt.Errorf("cannot detect the driver of the source %q and the target %q. Use the --driver flag",
+			dataSourceArgument(source), dataSourceArgument(target))
 	}
 
 	if sourceDriverName != "" && targetDriverName != "" && sourceDriverName != targetDriverName {
-		return "", fmt.Errorf("%q names the %s driver and %q names the %s driver. Use the --driver flag", source, sourceDriverName, target, targetDriverName)
+		return "", fmt.Errorf("the source %q names the %s driver and the target %q names the %s driver. Use the --driver flag",
+			dataSourceArgument(source), sourceDriverName, dataSourceArgument(target), targetDriverName)
 	}
 
 	if sourceDriverName != "" {
@@ -35,7 +37,30 @@ func DetectDriver(source string, target string) (DriverName, error) {
 	return targetDriverName, nil
 }
 
-func detectDriverOfArgument(argument string) DriverName {
+// dataSourceArgument names the value that the user gave for a data source, so the
+// detection error can name what defeated it.
+func dataSourceArgument(source DataSource) string {
+	path, isSQLSource := SQLSourcePath(source)
+	if isSQLSource {
+		return path
+	}
+
+	connection, ok := source.(ConnectionStringDataSource)
+	if ok {
+		return connection.ConnectionString
+	}
+
+	return ""
+}
+
+func detectDriverOfDataSource(source DataSource) DriverName {
+	connection, ok := source.(ConnectionStringDataSource)
+	if !ok {
+		return ""
+	}
+
+	argument := connection.ConnectionString
+
 	if argument == "" {
 		return ""
 	}
@@ -53,10 +78,6 @@ func detectDriverOfArgument(argument string) DriverName {
 	}
 
 	if strings.Contains(argument, "://") {
-		return ""
-	}
-
-	if IsSQLSource(argument) {
 		return ""
 	}
 

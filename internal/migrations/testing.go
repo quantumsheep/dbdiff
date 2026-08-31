@@ -12,6 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
 	driversmysql "github.com/quantumsheep/dbdiff/internal/drivers/mysql"
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 	"github.com/stretchr/testify/require"
 )
@@ -235,15 +236,10 @@ func GenerateSQLiteMigration(tb testing.TB, target string, migrations string) []
 
 	require.NoError(tb, os.MkdirAll(migrations, 0o750))
 
-	driver, err := driverssqlite.NewSQLiteDriver(tb.Context(), &driverssqlite.SQLiteDriverConfig{
-		TargetDatabasePath: target,
-		SourceDatabasePath: migrations,
-	})
-	require.NoError(tb, err)
+	driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
-	defer func() { require.NoError(tb, driver.Close()) }()
-
-	instructions, err := driver.Diff(tb.Context())
+	instructions, err := driver.Diff(tb.Context(), driversshared.ParseDataSource(migrations),
+		driversshared.ParseDataSource(target), driversshared.DiffOptions{})
 	require.NoError(tb, err)
 
 	moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)

@@ -24,7 +24,12 @@ func TestMigrations(t *testing.T) {
 		writeMigration(t, directory, "20260822143000_add_created_at.sql",
 			"ALTER TABLE users ADD COLUMN created_at TEXT;\n")
 
-		database := WithDatabase(dbdiffdrivers.SQLiteDriverName, filepath.Join(t.TempDir(), "app.sqlite"))
+		database := WithDatabase(
+			dbdiffdrivers.SQLiteDriverName,
+			dbdiffdrivers.ConnectionStringDataSource{
+				ConnectionString: filepath.Join(t.TempDir(), "app.sqlite"),
+			},
+		)
 
 		err := Up(t.Context(), database, WithDirectory(directory))
 		require.NoError(t, err)
@@ -49,7 +54,12 @@ func TestMigrations(t *testing.T) {
 		writeMigration(t, directory, "20260822143000_add_created_at.sql",
 			"ALTER TABLE users ADD COLUMN created_at TEXT;\n")
 
-		database := WithDatabase("", filepath.Join(t.TempDir(), "app.sqlite"))
+		database := WithDatabase(
+			"",
+			dbdiffdrivers.ConnectionStringDataSource{
+				ConnectionString: filepath.Join(t.TempDir(), "app.sqlite"),
+			},
+		)
 
 		err := Up(t.Context(), database, WithDirectory(directory), WithToVersion("20260814101500"))
 		require.NoError(t, err)
@@ -65,7 +75,15 @@ func TestMigrations(t *testing.T) {
 		err := Up(t.Context(), WithDirectory(t.TempDir()))
 		require.ErrorContains(t, err, "WithDatabase")
 
-		err = Up(t.Context(), WithDatabase("", filepath.Join(t.TempDir(), "app.sqlite")))
+		err = Up(
+			t.Context(),
+			WithDatabase(
+				"",
+				dbdiffdrivers.ConnectionStringDataSource{
+					ConnectionString: filepath.Join(t.TempDir(), "app.sqlite"),
+				},
+			),
+		)
 		require.ErrorContains(t, err, "WithDirectory")
 	})
 }

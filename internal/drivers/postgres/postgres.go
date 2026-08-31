@@ -15,15 +15,10 @@ import (
 )
 
 type PostgresDriverConfig struct {
-	TargetConnectionString string
-	SourceConnectionString string
-	TargetSchema           string
-	SourceSchema           string
-	CompareData            bool
-	ComparePrivileges      bool
-	IgnoreTables           []string
-
+	Schema               string
+	ComparePrivileges    bool
 	ScratchServerVersion string
+	IgnoreTables         []string
 }
 
 type PostgresDriver struct {
@@ -31,9 +26,9 @@ type PostgresDriver struct {
 	SourceDatabaseConnection *sql.DB
 	TargetSchema             string
 	SourceSchema             string
-	CompareData              bool
 	ComparePrivileges        bool
 	IgnoreTables             []string
+	ScratchServerVersion     string
 
 	ScratchVersion embeddedpostgres.PostgresVersion
 
@@ -42,35 +37,14 @@ type PostgresDriver struct {
 	recreatedObjectNames map[string]bool
 }
 
-func NewPostgresDriver(ctx context.Context, config *PostgresDriverConfig) (*PostgresDriver, error) {
-	driver := &PostgresDriver{
-		TargetSchema:      config.TargetSchema,
-		SourceSchema:      config.SourceSchema,
-		CompareData:       config.CompareData,
-		ComparePrivileges: config.ComparePrivileges,
-		IgnoreTables:      config.IgnoreTables,
-		ScratchVersion:    postgresScratchVersionOfConfig(ctx, config),
+func NewPostgresDriver(config *PostgresDriverConfig) *PostgresDriver {
+	return &PostgresDriver{
+		TargetSchema:         config.Schema,
+		SourceSchema:         config.Schema,
+		ComparePrivileges:    config.ComparePrivileges,
+		IgnoreTables:         config.IgnoreTables,
+		ScratchServerVersion: config.ScratchServerVersion,
 	}
-
-	targetDatabaseConnection, err := driver.OpenSide(ctx, config.TargetConnectionString, config.TargetSchema, "target")
-	if err != nil {
-		_ = driver.StopScratchServer()
-		return nil, err
-	}
-
-	driver.TargetDatabaseConnection = targetDatabaseConnection
-
-	sourceDatabaseConnection, err := driver.OpenSide(ctx, config.SourceConnectionString, config.SourceSchema, "source")
-	if err != nil {
-		_ = driver.TargetDatabaseConnection.Close()
-		_ = driver.StopScratchServer()
-
-		return nil, err
-	}
-
-	driver.SourceDatabaseConnection = sourceDatabaseConnection
-
-	return driver, nil
 }
 
 func OpenPostgresConnection(connectionString string, schema string) (*sql.DB, error) {
@@ -111,18 +85,18 @@ func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema st
 	return nil
 }
 
-func (d *PostgresDriver) Close() error {
-	targetError := d.TargetDatabaseConnection.Close()
-	sourceError := d.SourceDatabaseConnection.Close()
-	stopError := d.StopScratchServer()
+func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSource,
+	target driversshared.DataSource, options driversshared.DiffOptions) ([]driversshared.Instruction, error) {
+	release, err := d.openSides(ctx, source, target)
+	if err != nil {
+		return nil, err
+	}
 
-	return driversshared.FirstError(targetError, sourceError, stopError)
-}
+	defer release()
 
-func (d *PostgresDriver) Diff(ctx context.Context) ([]driversshared.Instruction, error) {
 	d.recreatedObjectNames = nil
 
-	err := d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "target")
+	err = d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "target")
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +150,7 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]driversshared.Instruction,
 		instructions = append(instructions, sectionDiff.Removals...)
 	}
 
-	if d.CompareData {
+	if options.CompareData {
 		dataInstructions, err := d.DiffData(ctx)
 		if err != nil {
 			return nil, err
@@ -186,6 +160,42 @@ func (d *PostgresDriver) Diff(ctx context.Context) ([]driversshared.Instruction,
 	}
 
 	return instructions, nil
+}
+
+func (d *PostgresDriver) openSides(ctx context.Context, source driversshared.DataSource,
+	target driversshared.DataSource) (func(), error) {
+	version, err := d.scratchVersionOfSources(ctx, source, target)
+	if err != nil {
+		return nil, err
+	}
+
+	d.ScratchVersion = version
+
+	targetDatabaseConnection, err := d.OpenSide(ctx, target, d.TargetSchema, "target")
+	if err != nil {
+		_ = d.StopScratchServer()
+		return nil, err
+	}
+
+	d.TargetDatabaseConnection = targetDatabaseConnection
+
+	sourceDatabaseConnection, err := d.OpenSide(ctx, source, d.SourceSchema, "source")
+	if err != nil {
+		_ = d.TargetDatabaseConnection.Close()
+		_ = d.StopScratchServer()
+
+		return nil, err
+	}
+
+	d.SourceDatabaseConnection = sourceDatabaseConnection
+
+	return func() {
+		_ = d.TargetDatabaseConnection.Close()
+		_ = d.SourceDatabaseConnection.Close()
+		d.TargetDatabaseConnection = nil
+		d.SourceDatabaseConnection = nil
+		_ = d.StopScratchServer()
+	}, nil
 }
 
 type sectionRules[T any] struct {
