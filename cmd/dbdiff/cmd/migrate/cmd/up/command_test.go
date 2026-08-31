@@ -21,7 +21,7 @@ func TestMigrateUpCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath, "--target", databasePath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "--source")
+		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
 	})
 
 	t.Run("WithNoTarget", func(t *testing.T) {
@@ -34,7 +34,7 @@ func TestMigrateUpCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "DBDIFF_TARGET")
+		require.Equal(t, "dbdiff: name the target with the --target flag, with the key target of dbdiff.yaml, or with the DBDIFF_TARGET variable\n", result.Stderr)
 	})
 
 	t.Run("WithASQLSourceAsTheTarget", func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestMigrateUpCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "names SQL text")
+		require.Equal(t, "dbdiff: the target \"./schema.sql\" names SQL text, and this command needs a database. Give a connection URL with the --target flag, or with the DBDIFF_TARGET variable\n", result.Stderr)
 	})
 
 	t.Run("WithTheToFlag", func(t *testing.T) {
@@ -88,6 +88,6 @@ func TestMigrateUpCommand(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "migrate", "up",
 			"--config", configPath, "--target", databasePath, "--to", "20990101000000")
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "no migration with the version")
+		require.Equal(t, "dbdiff: the directory holds no migration with the version 20990101000000\n", result.Stderr)
 	})
 }

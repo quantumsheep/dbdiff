@@ -275,6 +275,10 @@ Rules:
 
 Each command package holds the tests of its own command. `TestDbdiffCommand` of `cmd/dbdiff/main_test.go` covers the root command and the `diff` command. `TestMigrateCommand` covers the flow that walks every subcommand of `migrate`. Add a subtest for each new flag and for each new error of the command. The `cmd/dbdiff/internal/clitest` package holds `Build`, `Run`, and the writers of the test fixtures.
 
+## Error assertions
+
+Compare the whole error output. A test of an error message writes the message in full, with `require.Equal` on `result.Stderr` of a CLI test, or with `require.EqualError` on an error value. Never assert on a part of a message with `require.Contains`. A part hides a change of the text near it, and the whole text keeps the output predictable. The CLI writes one line with the form `dbdiff: <message>\n`.
+
 ---
 
 # Go conventions

@@ -125,8 +125,8 @@ func TestMySQLMigrator(t *testing.T) {
 		}, nil)
 
 		err := RunMigrationPreview(t.Context(), migrator, set, io.Discard)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "preview cannot roll the pending files back")
+		require.EqualError(t, err,
+			"the target engine commits every DDL statement at once, so preview cannot roll the pending files back")
 	})
 
 	t.Run("PreviewWithNoPendingFileReportsNoError", func(t *testing.T) {
@@ -167,8 +167,8 @@ func TestMySQLMigrator(t *testing.T) {
 		require.NoError(t, err)
 
 		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "stay applied")
+		require.EqualError(t, err, "20260814101500_init failed, and the statements before the failure stay applied. "+
+			"Repair the database, and run migrate repair: Error 1050 (42S01): Table 'users' already exists")
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
 
 		applied, err := migrator.AppliedMigrations(t.Context())

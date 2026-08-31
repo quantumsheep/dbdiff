@@ -21,7 +21,7 @@ func TestMigrateStepCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "step", "--config", configPath, "--target", databasePath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "--source")
+		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
 	})
 
 	t.Run("WithoutATerminal", func(t *testing.T) {
@@ -39,6 +39,6 @@ func TestMigrateStepCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "step", "--config", configPath, "--target", databasePath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "terminal")
+		require.Equal(t, "dbdiff: step needs a terminal. Use the command up to apply a migration with no prompt\n", result.Stderr)
 	})
 }

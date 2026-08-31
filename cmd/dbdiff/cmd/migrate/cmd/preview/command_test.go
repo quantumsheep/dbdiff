@@ -21,7 +21,7 @@ func TestMigratePreviewCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "preview", "--config", configPath, "--target", databasePath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "--source")
+		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
 	})
 
 	t.Run("PrintsThePendingFile", func(t *testing.T) {

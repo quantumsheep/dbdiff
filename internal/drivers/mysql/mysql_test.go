@@ -1475,8 +1475,7 @@ func TestMySQLDriver(t *testing.T) {
 
 		_, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "Give a database")
+		require.EqualError(t, err, "the mysql driver builds a SQL source on the server of the other side. Give a database as the other argument")
 	})
 
 	t.Run("DataComparison", func(t *testing.T) {

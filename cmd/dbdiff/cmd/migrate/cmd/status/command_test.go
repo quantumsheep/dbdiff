@@ -1,7 +1,6 @@
 package cmdmigratestatus_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/clitest"
@@ -15,8 +14,7 @@ func TestMigrateStatusCommand(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "migrate", "status", "--driver", "oracle", "--target", "app.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "unsupported driver: oracle")
-		require.Equal(t, 1, strings.Count(result.Stderr, "unsupported driver: oracle"))
+		require.Equal(t, "dbdiff: invalid value \"oracle\" for flag -driver: unsupported driver: oracle\n", result.Stderr)
 	})
 
 	t.Run("UndetectableTargetNamesTheDriverFlag", func(t *testing.T) {
@@ -26,7 +24,6 @@ func TestMigrateStatusCommand(t *testing.T) {
 			"--source", source, "--target", "oracle://user@localhost/app")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "cannot detect the driver")
-		require.Contains(t, result.Stderr, "--driver")
+		require.Equal(t, "dbdiff: cannot detect the driver of the source \"oracle://user@localhost/app\" and the target \"oracle://user@localhost/app\". Name the driver with the --driver flag\n", result.Stderr)
 	})
 }

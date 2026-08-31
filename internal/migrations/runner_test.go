@@ -383,8 +383,8 @@ func TestApplyMigrations(t *testing.T) {
 		require.NoError(t, err)
 
 		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "stay applied")
+		require.EqualError(t, err, "20260814101500_init failed, and the statements before the failure stay applied. "+
+			"Repair the database, and run migrate repair: table users already exists")
 
 		applied, err := migrator.AppliedMigrations(t.Context())
 		require.NoError(t, err)
@@ -396,8 +396,10 @@ func TestApplyMigrations(t *testing.T) {
 		require.Equal(t, MigrationDirty, set.Entries[0].State)
 
 		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "dirty")
+		require.EqualError(t, err, "the migrations of the database need attention: 20260814101500_init is dirty. "+
+			"The command migrate repair updates a changed row, and it deletes a missing row. "+
+			"An out of order file needs a delete and a new generate. "+
+			"A dirty file is half applied. Repair the database first, and migrate repair then deletes its row")
 	})
 }
 
@@ -528,8 +530,7 @@ func TestRunMigrationBaseline(t *testing.T) {
 		require.NoError(t, err)
 
 		err = RunMigrationBaseline(t.Context(), migrator, set, "20990101000000", io.Discard)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "no migration with the version")
+		require.EqualError(t, err, "the directory holds no migration with the version 20990101000000")
 
 		applied, err := migrator.AppliedMigrations(t.Context())
 		require.NoError(t, err)
@@ -574,8 +575,10 @@ func TestRunMigrationBaseline(t *testing.T) {
 		require.NoError(t, err)
 
 		err = RunMigrationBaseline(t.Context(), migrator, set, "", io.Discard)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "changed")
+		require.EqualError(t, err, "the migrations of the database need attention: 20260814101500_init is changed. "+
+			"The command migrate repair updates a changed row, and it deletes a missing row. "+
+			"An out of order file needs a delete and a new generate. "+
+			"A dirty file is half applied. Repair the database first, and migrate repair then deletes its row")
 	})
 }
 

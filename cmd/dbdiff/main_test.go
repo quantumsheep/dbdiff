@@ -1,8 +1,8 @@
 package main_test
 
 import (
+	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/clitest"
@@ -80,29 +80,28 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "diff", "--privileges", "a.sqlite", "b.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "the privileges option applies to the postgres driver and to the mysql driver")
+		require.Equal(t, "dbdiff: the privileges option applies to the postgres driver and to the mysql driver\n", result.Stderr)
 	})
 
 	t.Run("ArgumentWithNoCommandName", func(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "current.sqlite", "final.sqlite")
 
 		require.Equal(t, 3, result.ExitCode)
-		require.Contains(t, result.Stderr, "No help topic for 'current.sqlite'")
+		require.Equal(t, "No help topic for 'current.sqlite'\n", result.Stderr)
 	})
 
 	t.Run("MissingSourceArgument", func(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "diff")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "source database URL is required")
+		require.Equal(t, "dbdiff: source database URL is required\n", result.Stderr)
 	})
 
 	t.Run("UnsupportedDriver", func(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "diff", "--driver", "oracle", "source.sqlite", "target.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "unsupported driver: oracle")
-		require.Equal(t, 1, strings.Count(result.Stderr, "unsupported driver: oracle"))
+		require.Equal(t, "dbdiff: invalid value \"oracle\" for flag -driver: unsupported driver: oracle\n", result.Stderr)
 	})
 
 	t.Run("SchemaFlagWithSQLiteDriver", func(t *testing.T) {
@@ -113,7 +112,7 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "diff", "--schema", "public", currentPath, finalPath)
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "the schema option applies to the postgres driver only")
+		require.Equal(t, "dbdiff: the schema option applies to the postgres driver only\n", result.Stderr)
 	})
 
 	t.Run("DiffTwoDatabases", func(t *testing.T) {
@@ -142,7 +141,7 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, binaryPath, "diff", currentPath, finalPath)
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "does not exist")
+		require.Equal(t, fmt.Sprintf("dbdiff: failed to diff databases: the target database %q does not exist\n", finalPath), result.Stderr)
 		require.NoFileExists(t, finalPath)
 	})
 
@@ -276,8 +275,7 @@ CREATE TABLE "posts" (
 		result := clitest.Run(t, binaryPath, "diff", currentPath, finalPath)
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "cannot detect the driver")
-		require.Contains(t, result.Stderr, "--driver")
+		require.Equal(t, fmt.Sprintf("dbdiff: cannot detect the driver of the source %q and the target %q. Name the driver with the --driver flag\n", currentPath, finalPath), result.Stderr)
 		require.Empty(t, result.Stdout)
 	})
 
@@ -285,8 +283,7 @@ CREATE TABLE "posts" (
 		result := clitest.Run(t, binaryPath, "diff", "sqlite://source.db", "postgres://user@localhost/target")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "names the sqlite3 driver")
-		require.Contains(t, result.Stderr, "names the postgres driver")
+		require.Equal(t, "dbdiff: the source \"sqlite://source.db\" names the sqlite3 driver and the target \"postgres://user@localhost/target\" names the postgres driver. Name the driver with the --driver flag\n", result.Stderr)
 		require.Empty(t, result.Stdout)
 	})
 

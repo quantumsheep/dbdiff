@@ -1,6 +1,7 @@
 package cmdmigrategenerate_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,12 +20,15 @@ func TestMigrateGenerateCommand(t *testing.T) {
 
 		migrations := clitest.MakeMigrationsDirectory(t, directory)
 
+		schemaPath := filepath.Join(directory, "schema.sql")
+
 		configPath := clitest.WriteMigrationConfig(t, directory,
-			"target: "+filepath.Join(directory, "schema.sql")+"\nsource: "+migrations+"\n")
+			"target: "+schemaPath+"\nsource: "+migrations+"\n")
 
 		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "--driver")
+		require.Equal(t, fmt.Sprintf("dbdiff: cannot detect the driver of the source %q and the target %q. Name the driver with the --driver flag\n",
+			migrations, schemaPath), result.Stderr)
 	})
 
 	t.Run("WithNoTarget", func(t *testing.T) {
@@ -37,7 +41,7 @@ func TestMigrateGenerateCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "target")
+		require.Equal(t, "dbdiff: name the target with the --target flag, with the key target of dbdiff.yaml, or with the DBDIFF_TARGET variable\n", result.Stderr)
 	})
 
 	t.Run("WithNoSource", func(t *testing.T) {
@@ -50,7 +54,7 @@ func TestMigrateGenerateCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "--source")
+		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
 	})
 
 	t.Run("RefusesAnEmptyMigration", func(t *testing.T) {
@@ -70,7 +74,7 @@ func TestMigrateGenerateCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "wrote no file")
+		require.Equal(t, "dbdiff: the migrations hold the schema of the source already, so dbdiff wrote no file\n", result.Stderr)
 
 		entries, err := os.ReadDir(migrations)
 		require.NoError(t, err)
@@ -94,7 +98,7 @@ func TestMigrateGenerateCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_example")
 		require.Equal(t, 1, result.ExitCode)
-		require.Contains(t, result.Stderr, "wrote no file")
+		require.Equal(t, "dbdiff: the migrations hold the schema of the source already, so dbdiff wrote no file\n", result.Stderr)
 	})
 
 	t.Run("BuildsTheMigrationsDirectory", func(t *testing.T) {

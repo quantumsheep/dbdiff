@@ -1,6 +1,7 @@
 package driversshared
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,11 +83,7 @@ func TestDetectDriver(t *testing.T) {
 
 		_, err := DetectDriver(ParseDataSource(targetPath), ParseDataSource(sourcePath))
 
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "cannot detect the driver")
-		require.Contains(t, err.Error(), targetPath)
-		require.Contains(t, err.Error(), sourcePath)
-		require.NotContains(t, err.Error(), "--driver")
+		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the source %q and the target %q. Name the driver", targetPath, sourcePath))
 	})
 
 	t.Run("TwoDirectories", func(t *testing.T) {
@@ -95,19 +92,13 @@ func TestDetectDriver(t *testing.T) {
 
 		_, err := DetectDriver(ParseDataSource(targetDirectory), ParseDataSource(sourceDirectory))
 
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "cannot detect the driver")
-		require.Contains(t, err.Error(), targetDirectory)
-		require.Contains(t, err.Error(), sourceDirectory)
+		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the source %q and the target %q. Name the driver", targetDirectory, sourceDirectory))
 	})
 
 	t.Run("UnknownScheme", func(t *testing.T) {
 		_, err := DetectDriver(ParseDataSource("oracle://user@localhost/target"), ParseDataSource("oracle://user@localhost/source"))
 
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "cannot detect the driver")
-		require.Contains(t, err.Error(), "oracle://user@localhost/target")
-		require.Contains(t, err.Error(), "oracle://user@localhost/source")
+		require.EqualError(t, err, `cannot detect the driver of the source "oracle://user@localhost/target" and the target "oracle://user@localhost/source". Name the driver`)
 	})
 
 	t.Run("MySQLScheme", func(t *testing.T) {
@@ -127,9 +118,7 @@ func TestDetectDriver(t *testing.T) {
 	t.Run("TwoDifferentEngines", func(t *testing.T) {
 		_, err := DetectDriver(ParseDataSource("sqlite://target.db"), ParseDataSource("postgres://user@localhost/source"))
 
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "names the sqlite3 driver")
-		require.Contains(t, err.Error(), "names the postgres driver")
+		require.EqualError(t, err, `the source "sqlite://target.db" names the sqlite3 driver and the target "postgres://user@localhost/source" names the postgres driver. Name the driver`)
 	})
 }
 
