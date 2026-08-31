@@ -79,7 +79,7 @@ func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 
 	driverName := config.Driver
 	if driverName == "" {
-		detected, err := helpers.DetectDriverName(target, target)
+		detected, err := helpers.DetectDriverNameOfTarget(target)
 		if err != nil {
 			return nil, nil, nil, err
 		}

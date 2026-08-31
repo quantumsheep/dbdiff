@@ -24,6 +24,6 @@ func TestMigrateStatusCommand(t *testing.T) {
 			"--source", source, "--target", "oracle://user@localhost/app")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: cannot detect the driver of the source \"oracle://user@localhost/app\" and the target \"oracle://user@localhost/app\". Name the driver with the --driver flag\n", result.Stderr)
+		require.Equal(t, "dbdiff: cannot detect the driver of the target \"oracle://user@localhost/app\". Name the driver with the --driver flag\n", result.Stderr)
 	})
 }

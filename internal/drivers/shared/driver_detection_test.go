@@ -122,6 +122,21 @@ func TestDetectDriver(t *testing.T) {
 	})
 }
 
+func TestDetectDriverOfTarget(t *testing.T) {
+	t.Run("ConnectionURL", func(t *testing.T) {
+		name, err := DetectDriverOfTarget(ParseDataSource("postgres://user@localhost/app"))
+
+		require.NoError(t, err)
+		require.Equal(t, PostgresDriverName, name)
+	})
+
+	t.Run("UnknownSchemeNamesTheTargetOneTime", func(t *testing.T) {
+		_, err := DetectDriverOfTarget(ParseDataSource("oracle://user@localhost/app"))
+
+		require.EqualError(t, err, `cannot detect the driver of the target "oracle://user@localhost/app". Name the driver`)
+	})
+}
+
 func writeDetectionSQLFile(tb testing.TB, name string) string {
 	tb.Helper()
 

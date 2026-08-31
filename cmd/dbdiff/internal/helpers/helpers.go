@@ -33,9 +33,21 @@ func OnUsageError(ctx context.Context, command *cli.Command, err error, isSubcom
 // names no CLI flag, so this wrap names the flag that gives the driver.
 func DetectDriverName(source driversshared.DataSource, target driversshared.DataSource) (driversshared.DriverName, error) {
 	driverName, err := driversshared.DetectDriver(source, target)
-	if err != nil {
-		return "", fmt.Errorf("%w with the --driver flag", err)
+
+	return driverName, nameTheDriverFlag(err)
+}
+
+// DetectDriverNameOfTarget names the engine of the target of a migration.
+func DetectDriverNameOfTarget(target driversshared.DataSource) (driversshared.DriverName, error) {
+	driverName, err := driversshared.DetectDriverOfTarget(target)
+
+	return driverName, nameTheDriverFlag(err)
+}
+
+func nameTheDriverFlag(err error) error {
+	if err == nil {
+		return nil
 	}
 
-	return driverName, nil
+	return fmt.Errorf("%w with the --driver flag", err)
 }

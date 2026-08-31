@@ -37,6 +37,18 @@ func DetectDriver(source DataSource, target DataSource) (DriverName, error) {
 	return targetDriverName, nil
 }
 
+// A migration holds one database, so the two-sided detection would name that database
+// two times.
+func DetectDriverOfTarget(target DataSource) (DriverName, error) {
+	driverName := detectDriverOfDataSource(target)
+	if driverName == "" {
+		return "", fmt.Errorf("cannot detect the driver of the target %q. Name the driver",
+			dataSourceArgument(target))
+	}
+
+	return driverName, nil
+}
+
 // dataSourceArgument names the value that the user gave for a data source, so the
 // detection error can name what defeated it.
 func dataSourceArgument(source DataSource) string {

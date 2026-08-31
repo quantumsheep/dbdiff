@@ -49,7 +49,7 @@ type MigrationTransaction interface {
 func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
 	schema string) (Migrator, error) {
 	if driverName == "" {
-		detected, err := driversshared.DetectDriver(target, target)
+		detected, err := driversshared.DetectDriverOfTarget(target)
 		if err != nil {
 			return nil, err
 		}
