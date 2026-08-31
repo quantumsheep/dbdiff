@@ -36,6 +36,21 @@ func TestNewDriverAndDiff(t *testing.T) {
 		require.Contains(t, statements[0].Comment, "users")
 	})
 
+	t.Run("StatementsRenderAsOneText", func(t *testing.T) {
+		statements := Statements{
+			{
+				SQL: "CREATE TABLE \"users\" (\"id\" INTEGER PRIMARY KEY);",
+			},
+			{
+				SQL: "DROP TABLE \"projects\";",
+			},
+		}
+
+		require.Equal(t,
+			"CREATE TABLE \"users\" (\"id\" INTEGER PRIMARY KEY);\nDROP TABLE \"projects\";",
+			statements.String())
+	})
+
 	t.Run("StatementsOfAFolderDataSourceDiff", func(t *testing.T) {
 		source := writeSchema(t, "source.sql", "")
 

@@ -3,6 +3,7 @@ package drivers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -186,10 +187,26 @@ type Statement struct {
 	Comment string
 }
 
+// Statements holds the statements of a diff, in the order of the output of the diff
+// command.
+type Statements []Statement
+
+// String gives the statements as one SQL text, one statement per line, in the same
+// format as the output of the diff command.
+func (statements Statements) String() string {
+	texts := make([]string, 0, len(statements))
+
+	for _, statement := range statements {
+		texts = append(texts, statement.SQL)
+	}
+
+	return strings.Join(texts, "\n")
+}
+
 // Diff reads the schema of the source and of the target, and it gives the statements
 // that change the source.
 func (d *Driver) Diff(ctx context.Context, source DataSource, target DataSource,
-	options ...DiffOption) ([]Statement, error) {
+	options ...DiffOption) (Statements, error) {
 	merged := &diffOptions{}
 
 	for _, option := range options {
@@ -203,7 +220,7 @@ func (d *Driver) Diff(ctx context.Context, source DataSource, target DataSource,
 		return nil, err
 	}
 
-	var statements []Statement
+	var statements Statements
 
 	for _, instruction := range instructions {
 		statements = append(statements, Statement{
