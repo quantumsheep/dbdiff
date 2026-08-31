@@ -175,12 +175,14 @@ import (
 
 driver, err := drivers.NewDriver(drivers.PostgresDriverName)
 
-err = driver.Migrator().Up(ctx,
+migrator := driver.Migrator(
 	migrations.WithTargetDataSource(
 		drivers.NewConnectionStringDataSource(os.Getenv("DATABASE_URL")),
 	),
 	migrations.WithMigrationDirectory("migrations"),
 )
+
+err = migrator.Up(ctx)
 ```
 
 ## Supported objects

@@ -160,8 +160,8 @@ func NewDriver(name DriverName, options ...Option) (*Driver, error) {
 
 // Migrator gives the migrator of the engine of the driver. The migrator reads the
 // engine name and the schema from the driver.
-func (d *Driver) Migrator() *migrations.Migrator {
-	return migrations.NewMigrator(d.name, d.schema)
+func (d *Driver) Migrator(options ...migrations.MigratorOption) *migrations.Migrator {
+	return migrations.NewMigrator(d.name, d.schema, options...)
 }
 
 type diffOptions struct {

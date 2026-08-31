@@ -17,98 +17,69 @@ type DriverName = driversshared.DriverName
 // keyword string, or a SQLite path.
 type ConnectionStringDataSource = driversshared.ConnectionStringDataSource
 
-// A Migrator applies the migrations of one engine. Driver.Migrator of the drivers
-// package creates it, so the migrator carries the engine name and the schema of the
-// driver.
+// A Migrator applies the migrations of one directory to one database. Driver.Migrator
+// of the drivers package creates it, so the migrator carries the engine name and the
+// schema of the driver.
 type Migrator struct {
-	driver DriverName
-	schema string
+	driver    DriverName
+	schema    string
+	target    ConnectionStringDataSource
+	directory string
 }
 
 // NewMigrator creates a migrator for the named engine. Use Driver.Migrator of the
 // drivers package instead of a direct call.
-func NewMigrator(driver DriverName, schema string) *Migrator {
-	return &Migrator{
+func NewMigrator(driver DriverName, schema string, options ...MigratorOption) *Migrator {
+	migrator := &Migrator{
 		driver: driver,
 		schema: schema,
 	}
+
+	for _, option := range options {
+		option(migrator)
+	}
+
+	return migrator
 }
 
-type commonOptions struct {
-	target    ConnectionStringDataSource
-	directory string
-	output    io.Writer
-}
-
-type upOptions struct {
-	commonOptions
-
-	toVersion string
-}
-
-type statusOptions struct {
-	commonOptions
-}
-
-// Option configures every method of Migrator.
-type Option interface {
-	UpOption
-	StatusOption
-}
-
-// UpOption configures Up.
-type UpOption interface {
-	applyUp(*upOptions)
-}
-
-// StatusOption configures Status.
-type StatusOption interface {
-	applyStatus(*statusOptions)
-}
-
-type commonOption func(*commonOptions)
-
-func (apply commonOption) applyUp(target *upOptions) {
-	apply(&target.commonOptions)
-}
-
-func (apply commonOption) applyStatus(target *statusOptions) {
-	apply(&target.commonOptions)
-}
-
-type upOption func(*upOptions)
-
-func (apply upOption) applyUp(target *upOptions) {
-	apply(target)
-}
+// MigratorOption configures NewMigrator and Driver.Migrator of the drivers package.
+type MigratorOption func(*Migrator)
 
 // WithTargetDataSource names the database that receives the migrations.
-func WithTargetDataSource(target ConnectionStringDataSource) Option {
-	return commonOption(func(merged *commonOptions) {
-		merged.target = target
-	})
+func WithTargetDataSource(target ConnectionStringDataSource) MigratorOption {
+	return func(migrator *Migrator) {
+		migrator.target = target
+	}
 }
 
 // WithMigrationDirectory names the directory that holds the migration files.
-func WithMigrationDirectory(directory string) Option {
-	return commonOption(func(merged *commonOptions) {
-		merged.directory = directory
-	})
+func WithMigrationDirectory(directory string) MigratorOption {
+	return func(migrator *Migrator) {
+		migrator.directory = directory
+	}
+}
+
+type upOptions struct {
+	toVersion string
+	output    io.Writer
+}
+
+// UpOption configures Up.
+type UpOption func(*upOptions)
+
+// WithToVersion stops Up after the file with the given version.
+func WithToVersion(version string) UpOption {
+	return func(merged *upOptions) {
+		merged.toVersion = version
+	}
 }
 
 // WithOutput names the writer that receives one progress line per applied file. Without
 // this option the lines go away.
-func WithOutput(output io.Writer) Option {
-	return commonOption(func(merged *commonOptions) {
+func WithOutput(output io.Writer) UpOption {
+	return func(merged *upOptions) {
 		merged.output = output
-	})
-}
-
-// WithToVersion stops Up after the file with the given version.
-func WithToVersion(version string) UpOption {
-	return upOption(func(merged *upOptions) {
-		merged.toVersion = version
-	})
+	}
 }
 
 type State string
@@ -134,10 +105,10 @@ func (m *Migrator) Up(ctx context.Context, options ...UpOption) error {
 	merged := &upOptions{}
 
 	for _, option := range options {
-		option.applyUp(merged)
+		option(merged)
 	}
 
-	migrator, set, err := m.open(ctx, &merged.commonOptions)
+	migrator, set, err := m.open(ctx)
 	if err != nil {
 		return err
 	}
@@ -153,14 +124,8 @@ func (m *Migrator) Up(ctx context.Context, options ...UpOption) error {
 }
 
 // Status reads the state of each migration file and of each history row.
-func (m *Migrator) Status(ctx context.Context, options ...StatusOption) ([]Entry, error) {
-	merged := &statusOptions{}
-
-	for _, option := range options {
-		option.applyStatus(merged)
-	}
-
-	migrator, set, err := m.open(ctx, &merged.commonOptions)
+func (m *Migrator) Status(ctx context.Context) ([]Entry, error) {
+	migrator, set, err := m.open(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -202,21 +167,21 @@ func stateOf(state coremigrations.MigrationState) State {
 	}
 }
 
-func (m *Migrator) open(ctx context.Context, merged *commonOptions) (coremigrations.Migrator, *coremigrations.MigrationSet, error) {
-	if merged.target.ConnectionString == "" {
+func (m *Migrator) open(ctx context.Context) (coremigrations.Migrator, *coremigrations.MigrationSet, error) {
+	if m.target.ConnectionString == "" {
 		return nil, nil, fmt.Errorf("name the target with the WithTargetDataSource option")
 	}
 
-	if merged.directory == "" {
+	if m.directory == "" {
 		return nil, nil, fmt.Errorf("name the migrations directory with the WithMigrationDirectory option")
 	}
 
-	migrator, err := coremigrations.NewMigrator(ctx, m.driver, merged.target, m.schema)
+	migrator, err := coremigrations.NewMigrator(ctx, m.driver, m.target, m.schema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open the database: %w", err)
 	}
 
-	set, err := coremigrations.LoadMigrationSet(ctx, migrator, merged.directory)
+	set, err := coremigrations.LoadMigrationSet(ctx, migrator, m.directory)
 	if err != nil {
 		_ = migrator.Close()
 
