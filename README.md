@@ -163,6 +163,8 @@ statements, err := driver.Diff(ctx,
 	drivers.NewConnectionStringDataSource("app.sqlite"),
 	drivers.NewFileDataSource("schema.sql"),
 )
+
+fmt.Println(statements.String())
 ```
 
 The package `migrations` applies the migrations, for example at the start of a server:
