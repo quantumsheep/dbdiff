@@ -2,7 +2,7 @@ package driversshared
 
 import "strings"
 
-func AnnotateInstructions(instructions []Instruction) []Instruction {
+func AnnotateInstructions(instructions Instructions) Instructions {
 	var annotated []Instruction
 
 	previous := ""

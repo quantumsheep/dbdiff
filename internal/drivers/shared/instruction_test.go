@@ -66,17 +66,17 @@ func TestInstructions(t *testing.T) {
 		require.False(t, isInstruction)
 	})
 
-	t.Run("RenderInstructionsJoinsWithOneNewline", func(t *testing.T) {
-		instructions := []Instruction{
+	t.Run("InstructionsJoinWithOneNewline", func(t *testing.T) {
+		instructions := Instructions{
 			&testInstruction{statement: "FIRST;"},
 			&testInstruction{statement: "SECOND;"},
 		}
 
-		require.Equal(t, "FIRST;\nSECOND;", RenderInstructions(instructions))
+		require.Equal(t, "FIRST;\nSECOND;", instructions.String())
 	})
 
-	t.Run("RenderInstructionsOfAnEmptyList", func(t *testing.T) {
-		require.Equal(t, "", RenderInstructions(nil))
+	t.Run("EmptyInstructionsGiveAnEmptyText", func(t *testing.T) {
+		require.Equal(t, "", Instructions(nil).String())
 	})
 
 	t.Run("Insert", func(t *testing.T) {

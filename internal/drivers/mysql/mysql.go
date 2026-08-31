@@ -140,7 +140,7 @@ func (d *MySQLDriver) dropScratchDatabases() error {
 }
 
 func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource, options driversshared.DiffOptions) ([]driversshared.Instruction, error) {
+	target driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
 	release, err := d.openSides(ctx, source, target)
 	if err != nil {
 		return nil, err

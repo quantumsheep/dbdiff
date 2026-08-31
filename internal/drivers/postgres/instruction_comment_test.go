@@ -503,7 +503,7 @@ func TestAnnotateInstructions(t *testing.T) {
 			},
 		}
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			commentInstruction(`Modify the table "users"`),
 			dropColumn,
 			dropConstraint,
@@ -516,7 +516,7 @@ func TestAnnotateInstructions(t *testing.T) {
 			TableName: "users",
 		}
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			note,
 			commentInstruction(`Change the rows of the table "users"`),
 			insert,

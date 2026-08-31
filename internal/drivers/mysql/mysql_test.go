@@ -203,14 +203,14 @@ func (d *TestingMySQLDriver) ExecOnSource(sqlStatements string) {
 	require.NoError(d.tb, err)
 }
 
-func (d *TestingMySQLDriver) RequireInstructions(expected []driversshared.Instruction) string {
+func (d *TestingMySQLDriver) RequireInstructions(expected driversshared.Instructions) string {
 	d.tb.Helper()
 
 	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
-	return driversshared.RenderInstructions(instructions)
+	return instructions.String()
 }
 
 // The driver of MySQL gives an int64 value for an integer column and a byte slice for

@@ -96,7 +96,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		instructions = driversshared.AnnotateInstructions(instructions)
 	}
 
-	fmt.Println(driversshared.RenderInstructions(instructions))
+	fmt.Println(instructions.String())
 
 	if command.Bool("exit-code") && len(instructions) > 0 {
 		return ErrDifferencesFound

@@ -107,7 +107,7 @@ func TestAnnotateInstructions(t *testing.T) {
 			Name: "audit",
 		}
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			commentInstruction(`Create the table "users"`),
 			createTable,
 			commentInstruction(`Drop the table "audit"`),
@@ -163,7 +163,7 @@ func TestAnnotateInstructions(t *testing.T) {
 			Name: "posts",
 		}
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			commentInstruction(`Recreate the table "users"`),
 			createTemporaryTable,
 			copyRows,
@@ -189,7 +189,7 @@ func TestAnnotateInstructions(t *testing.T) {
 			Name: "_users_temp",
 		}
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			commentInstruction(`Create the table "_users_temp"`),
 			createTemporaryTable,
 		}, driversshared.AnnotateInstructions([]driversshared.Instruction{createTemporaryTable}))

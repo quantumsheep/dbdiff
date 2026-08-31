@@ -37,7 +37,7 @@ func TrimSQLitePrefix(path string) string {
 }
 
 func (d *SQLiteDriver) Diff(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource, options driversshared.DiffOptions) ([]driversshared.Instruction, error) {
+	target driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
 	release, err := d.openSides(ctx, source, target)
 	if err != nil {
 		return nil, err

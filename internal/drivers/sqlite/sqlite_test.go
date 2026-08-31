@@ -87,14 +87,14 @@ func (d *TestingSQLiteDriver) database(source driversshared.DataSource, connecti
 	return *connection
 }
 
-func (d *TestingSQLiteDriver) RequireInstructions(expected []driversshared.Instruction) string {
+func (d *TestingSQLiteDriver) RequireInstructions(expected driversshared.Instructions) string {
 	d.tb.Helper()
 
 	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
-	return driversshared.RenderInstructions(instructions)
+	return instructions.String()
 }
 
 func (d *TestingSQLiteDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {

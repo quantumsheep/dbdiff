@@ -208,14 +208,14 @@ func (d *TestingPostgresDriver) ExecOnSource(sqlStatements string) {
 	require.NoError(d.tb, err)
 }
 
-func (d *TestingPostgresDriver) RequireInstructions(expected []driversshared.Instruction) string {
+func (d *TestingPostgresDriver) RequireInstructions(expected driversshared.Instructions) string {
 	d.tb.Helper()
 
 	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
-	return driversshared.RenderInstructions(instructions)
+	return instructions.String()
 }
 
 func (d *TestingPostgresDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {
@@ -4988,7 +4988,7 @@ func TestPostgresDriver(t *testing.T) {
 		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
-		diff := driversshared.RenderInstructions(instructions)
+		diff := instructions.String()
 		require.Equal(t, `CREATE TABLE "users" (
 	"id" integer NOT NULL
 );`, diff)
@@ -5037,7 +5037,7 @@ func TestPostgresDriver(t *testing.T) {
 		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -5052,7 +5052,7 @@ func TestPostgresDriver(t *testing.T) {
 		}, instructions)
 
 		verifyConnection := openVerificationConnection(t, sourcePath)
-		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
 
@@ -5073,14 +5073,14 @@ func TestPostgresDriver(t *testing.T) {
 		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			&driversshared.SQLDropTableInstruction{
 				Name: "users",
 			},
 		}, instructions)
 
 		verifyConnection := openVerificationConnection(t, sourcePath)
-		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
 
@@ -5113,14 +5113,14 @@ func TestPostgresDriver(t *testing.T) {
 		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			&PostgresCreateIndexInstruction{
 				Definition: `CREATE INDEX ix_users_email ON users USING btree (email)`,
 			},
 		}, instructions)
 
 		verifyConnection := openVerificationConnection(t, sourcePath)
-		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
 
@@ -5169,7 +5169,7 @@ func TestPostgresDriver(t *testing.T) {
 		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			&PostgresAlterTableInstruction{
 				Name: "mfa",
 				Actions: []driversshared.AlterTableAction{
@@ -5189,7 +5189,7 @@ func TestPostgresDriver(t *testing.T) {
 		}, instructions)
 
 		verifyConnection := openVerificationConnection(t, sourcePath)
-		_, err = verifyConnection.ExecContext(t.Context(), driversshared.RenderInstructions(instructions))
+		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
 
@@ -5287,7 +5287,7 @@ func TestPostgresDriver(t *testing.T) {
 		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
-		require.Equal(t, []driversshared.Instruction{
+		require.Equal(t, driversshared.Instructions{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -5301,7 +5301,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		harness.ExecOnSource(driversshared.RenderInstructions(instructions))
+		harness.ExecOnSource(instructions.String())
 	})
 
 	t.Run("HistoryTableStaysOutOfTheDiff", func(t *testing.T) {

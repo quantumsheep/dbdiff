@@ -15,7 +15,7 @@ type DiffOptions struct {
 // A driver value runs one diff at a time. Each Diff call binds the connection
 // fields of the driver on entry and clears them on exit.
 type Driver interface {
-	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) ([]Instruction, error)
+	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) (Instructions, error)
 }
 
 func FirstError(candidates ...error) error {

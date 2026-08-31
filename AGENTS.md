@@ -90,7 +90,7 @@ The SQLite driver needs CGO. If a build fails with an undefined symbol, set `CGO
 
 ```go
 type Driver interface {
-	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) ([]Instruction, error)
+	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) (Instructions, error)
 }
 ```
 
@@ -126,7 +126,7 @@ The shared generic `DiffByKey` in `internal/drivers/shared/diff_by_key.go` imple
 
 Rules for the output:
 
-- Build the output as `[]Instruction`. Append a value, and never format a string.
+- Build the output as `Instructions`. Append a value, and never format a string. `Instructions.String` renders the list as one SQL text.
 - Return the list at the end of the function. A section returns a `*SectionDiff`.
 - An instruction type holds one field for each part of its PostgreSQL synopsis. The type quotes every identifier, so no call site holds a format string.
 - Print the additions and the modifications first. Print the removals last.

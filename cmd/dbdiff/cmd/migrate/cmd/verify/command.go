@@ -104,7 +104,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return nil
 	}
 
-	fmt.Println(driversshared.RenderInstructions(instructions))
+	fmt.Println(instructions.String())
 
 	return fmt.Errorf("the database holds %s that no migration made", changeCountText(len(instructions)))
 }

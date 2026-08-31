@@ -27,7 +27,11 @@ type Condition interface {
 	ConditionClause() string
 }
 
-func RenderInstructions(instructions []Instruction) string {
+// Instructions holds the whole output of a diff.
+type Instructions []Instruction
+
+// String gives the instructions as one SQL text, one statement per line.
+func (instructions Instructions) String() string {
 	statements := lo.Map(instructions, func(instruction Instruction, _ int) string {
 		return instruction.String()
 	})

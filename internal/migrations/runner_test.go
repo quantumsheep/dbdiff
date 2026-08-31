@@ -890,7 +890,7 @@ func TestVerifyMigrations(t *testing.T) {
 			driversshared.ParseDataSource(directory), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, instructions)
-		require.Contains(t, driversshared.RenderInstructions(instructions), `DROP TABLE "audit"`)
+		require.Contains(t, instructions.String(), `DROP TABLE "audit"`)
 	})
 
 	t.Run("TheHistoryTableIsNoDrift", func(t *testing.T) {
@@ -914,7 +914,7 @@ func TestVerifyMigrations(t *testing.T) {
 		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
 			driversshared.ParseDataSource(directory), driversshared.DiffOptions{})
 		require.NoError(t, err)
-		require.NotContains(t, driversshared.RenderInstructions(instructions), "dbdiff_migrations")
+		require.NotContains(t, instructions.String(), "dbdiff_migrations")
 	})
 
 	t.Run("ADatabaseWithNoAppliedMigration", func(t *testing.T) {
