@@ -96,9 +96,7 @@ If you give no `--driver` flag, dbdiff reads the engine from the arguments. A `p
 
 An argument names SQL text when the path ends in `.sql`, or when the path is a directory. dbdiff applies the SQL to a temporary database, and then it compares that database. A directory gives its top-level `.sql` files in the order of the names, without the `.down.sql` files. A directory that holds no `.sql` file gives an empty schema.
 
-With the postgres driver, the temporary server downloads on the first run. It takes the major version of the database of the other side, or the `version` key of `dbdiff.yaml`.
-
-With the mysql driver, dbdiff builds the temporary database on the server of the other side, so that other side must be a database. The connection needs the privilege to create and to drop a database.
+With the postgres driver and the mysql driver, the temporary server downloads on the first run. It takes the version of the database of the other side, or the `version` key of `dbdiff.yaml`. If the other side runs MariaDB, the temporary server runs MariaDB too. MariaDB publishes no binaries for macOS and no binaries for Linux on arm64. On macOS, run `brew install mariadb` before you compare a MariaDB database against SQL text.
 
 dbdiff applies each file in one call. PostgreSQL refuses `CREATE INDEX CONCURRENTLY` and other statements of that kind inside such a call. Write the line `-- dbdiff:no-transaction` in such a file. dbdiff then runs one call for each statement. The line `-- atlas:txmode none` of Atlas gives the same result.
 
@@ -121,7 +119,7 @@ driver: postgres
 source: ./migrations   # the directory of the migration files
 target: ./schema.sql   # the wanted schema of `migrate generate`
 schema: app
-version: 17.11.0       # the version of the real PostgreSQL server
+version: 17.11.0       # the version of the temporary PostgreSQL or MySQL server
 ignore:
   tables:              # the tables that the diff ignores
     - example

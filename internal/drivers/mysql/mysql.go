@@ -8,20 +8,24 @@ import (
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	embeddedmysql "github.com/quantumsheep/embedded-mysql"
 	"github.com/samber/lo"
 )
 
 type MySQLDriverConfig struct {
-	ComparePrivileges bool
-	IgnoreTables      []string
+	ComparePrivileges    bool
+	ScratchServerVersion string
+	IgnoreTables         []string
 }
 
 type MySQLDriver struct {
 	TargetDatabaseConnection *sql.DB
 	SourceDatabaseConnection *sql.DB
 	ComparePrivileges        bool
+	ScratchServerVersion     string
 	IgnoreTables             []string
 
+	scratchServer       *embeddedmysql.EmbeddedMySQL
 	scratchDatabases    []*mysqlScratchDatabase
 	detailsByConnection map[*sql.DB]*mysqlConnectionDetails
 
@@ -42,8 +46,9 @@ type mysqlConnectionDetails struct {
 
 func NewMySQLDriver(config *MySQLDriverConfig) *MySQLDriver {
 	return &MySQLDriver{
-		ComparePrivileges: config.ComparePrivileges,
-		IgnoreTables:      config.IgnoreTables,
+		ComparePrivileges:    config.ComparePrivileges,
+		ScratchServerVersion: config.ScratchServerVersion,
+		IgnoreTables:         config.IgnoreTables,
 	}
 }
 
@@ -82,7 +87,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 
 	targetDatabaseConnection, err := d.OpenSide(ctx, target, source, "target")
 	if err != nil {
-		_ = d.dropScratchDatabases()
+		_ = d.releaseScratchResources()
 		return nil, err
 	}
 
@@ -91,7 +96,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 	err = d.registerConnection(ctx, targetDatabaseConnection)
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
-		_ = d.dropScratchDatabases()
+		_ = d.releaseScratchResources()
 
 		return nil, err
 	}
@@ -99,7 +104,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 	sourceDatabaseConnection, err := d.OpenSide(ctx, source, target, "source")
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
-		_ = d.dropScratchDatabases()
+		_ = d.releaseScratchResources()
 
 		return nil, err
 	}
@@ -110,7 +115,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
 		_ = d.SourceDatabaseConnection.Close()
-		_ = d.dropScratchDatabases()
+		_ = d.releaseScratchResources()
 
 		return nil, err
 	}
@@ -120,11 +125,11 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 		_ = d.SourceDatabaseConnection.Close()
 		d.TargetDatabaseConnection = nil
 		d.SourceDatabaseConnection = nil
-		_ = d.dropScratchDatabases()
+		_ = d.releaseScratchResources()
 	}, nil
 }
 
-func (d *MySQLDriver) dropScratchDatabases() error {
+func (d *MySQLDriver) releaseScratchResources() error {
 	var firstError error
 
 	for _, scratch := range d.scratchDatabases {
@@ -135,6 +140,11 @@ func (d *MySQLDriver) dropScratchDatabases() error {
 	}
 
 	d.scratchDatabases = nil
+
+	err := d.StopScratchServer()
+	if err != nil && firstError == nil {
+		firstError = err
+	}
 
 	return firstError
 }

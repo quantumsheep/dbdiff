@@ -28,7 +28,7 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 		}
 
 		if options.Version != "" {
-			return nil, fmt.Errorf("the version option applies to the postgres driver only")
+			return nil, fmt.Errorf("the version option applies to the postgres driver and to the mysql driver")
 		}
 
 		return driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{
@@ -39,13 +39,10 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 			return nil, fmt.Errorf("the schema option applies to the postgres driver only")
 		}
 
-		if options.Version != "" {
-			return nil, fmt.Errorf("the version option applies to the postgres driver only")
-		}
-
 		return driversmysql.NewMySQLDriver(&driversmysql.MySQLDriverConfig{
-			ComparePrivileges: options.ComparePrivileges,
-			IgnoreTables:      options.IgnoreTables,
+			ComparePrivileges:    options.ComparePrivileges,
+			ScratchServerVersion: options.Version,
+			IgnoreTables:         options.IgnoreTables,
 		}), nil
 	case driversshared.PostgresDriverName:
 		err := driverspostgres.ValidateScratchServerVersion(options.Version)

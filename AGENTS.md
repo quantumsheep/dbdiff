@@ -94,7 +94,7 @@ type Driver interface {
 }
 ```
 
-A driver value runs one diff at a time. Each `Diff` call binds `SourceDatabaseConnection` and `TargetDatabaseConnection`, the two `*sql.DB` fields of the driver, on entry, and it clears both on exit. A constructor is `New<Engine>Driver(config *<Engine>DriverConfig)`, with no context, no error, and no source. `OpenSide(ctx, source, ...)` reads a database, or it builds a temporary database from a SQL source, for the span of one `Diff` call. `Diff` releases every resource that the call opened before it returns: the two connections, and the sqlite temporary directory, the postgres scratch server, or the mysql scratch database that a SQL source needed.
+A driver value runs one diff at a time. Each `Diff` call binds `SourceDatabaseConnection` and `TargetDatabaseConnection`, the two `*sql.DB` fields of the driver, on entry, and it clears both on exit. A constructor is `New<Engine>Driver(config *<Engine>DriverConfig)`, with no context, no error, and no source. `OpenSide(ctx, source, ...)` reads a database, or it builds a temporary database from a SQL source, for the span of one `Diff` call. `Diff` releases every resource that the call opened before it returns: the two connections, and the sqlite temporary directory, the postgres scratch server, or the mysql scratch server and scratch database that a SQL source needed.
 
 `internal/drivers.NewDriver(driverName, DriverOptions{Version, Schema, ComparePrivileges, IgnoreTables})` builds the driver of that name. It takes no context and it detects no engine, so the caller detects the engine first, with `DetectDriver`, then names it. An option that the driver name does not use, for example a schema on the mysql driver, gives an error that names the option.
 
@@ -192,12 +192,12 @@ MySQL gives no creation order for the tables, so a diff that creates or drops a 
 
 `ParseDataSource(argument string) DataSource` in `internal/drivers/shared/data_source.go` reads a CLI argument into a `DataSource`: a `FileDataSource` when the path ends in `.sql`, a `FolderDataSource` when the path is a directory, and a `ConnectionStringDataSource` in every other case. A path that holds `://` never names SQL text. `IsSQLSource` reports a `FileDataSource` or a `FolderDataSource`, and `SQLSourcePath` reads its path. A directory gives its top-level `.sql` files in the order of the names, without the `.down.sql` files.
 
-Each engine materializes a source as a temporary database: SQLite as a file, PostgreSQL as a scratch server from `fergusstrange/embedded-postgres`, and MySQL as a scratch database on the server of the other side. The mysql driver refuses two SQL sources, because it then holds no server. The scratch server takes the major version of the database of the other side, or the `version` key of `dbdiff.yaml`. Do not name a version in the code. Four settings of the scratch server matter. Keep them:
+Each engine materializes a source as a temporary database: SQLite as a file, PostgreSQL as a scratch server from `fergusstrange/embedded-postgres`, and MySQL as a scratch database on a scratch server from `quantumsheep/embedded-mysql`. The scratch server takes the flavor and the version of the database of the other side, or the `version` key of `dbdiff.yaml`. A MariaDB other side gives a MariaDB scratch server. That server needs a Homebrew installation on macOS, and it starts on no Linux with arm64. Do not name a version in the code. Four settings of a scratch server matter. The postgres driver sets each one. The mysql library gives each one, so the mysql driver sets the flavor and the version only. Keep them:
 
-- The logger is `io.Discard`, because the default logger writes to the stream that holds the diff.
-- The port comes from a free-port lookup, because a real server holds the default port 5432.
-- `Version` stays absent for an empty version, because an empty value gives an invalid configuration.
-- `BinariesPath` names a stable cache directory whose name holds the version. Without it every run extracts the archive again.
+- The logger is `io.Discard`, because a default logger writes to the stream that holds the diff.
+- The port comes from a free-port lookup, because a real server holds the default port.
+- `Version` stays absent for an empty version, because an empty value gives an invalid configuration. The mysql library reads an empty version as the default of the flavor.
+- The binaries cache directory holds the version, `BinariesPath` for postgres and `CachePath` for mysql. Without that directory every run extracts the archive again.
 
 ## The no-transaction directive
 
@@ -253,7 +253,7 @@ One engine gets one top-level function for each type under test: `TestSQLiteDriv
 | `FetchAllFromSource(table, ...)`         | Reads the rows of the source as maps (SQLite)      |
 | `WriteSQLFile(directory, name, content)` | Writes one `.sql` file of a SQL source             |
 
-`NewTestSQLiteDriverWithPaths(tb, target, source)` builds a driver for two given paths. Use it for a test of a SQL source. A test that starts the temporary PostgreSQL server calls `t.Skip` under `testing.Short`, because the first run downloads the server.
+`NewTestSQLiteDriverWithPaths(tb, target, source)` builds a driver for two given paths. Use it for a test of a SQL source. A test that starts a temporary PostgreSQL, MySQL, or MariaDB server calls `t.Skip` under `testing.Short`, because the first run downloads the server.
 
 ## How to write a test
 

@@ -122,14 +122,26 @@ func newTestMySQLDriverWithServer(tb testing.TB, serverConnectionString string) 
 	}
 }
 
-// The driver materializes the target directory as a scratch database on the server of
-// the source side.
 func NewTestMySQLDriverWithTargetDirectory(tb testing.TB, directory string) *TestingMySQLDriver {
+	tb.Helper()
+
+	return newTestMySQLDriverWithTargetDirectory(tb, mysqlTestConnectionString, directory)
+}
+
+func NewTestMariaDBDriverWithTargetDirectory(tb testing.TB, directory string) *TestingMySQLDriver {
+	tb.Helper()
+
+	return newTestMySQLDriverWithTargetDirectory(tb, mariadbTestConnectionString, directory)
+}
+
+// The driver materializes the target directory as a scratch database on a temporary server.
+func newTestMySQLDriverWithTargetDirectory(tb testing.TB, serverConnectionString string,
+	directory string) *TestingMySQLDriver {
 	tb.Helper()
 
 	skipWithoutMySQLServer(tb)
 
-	conn, err := OpenMySQLConnection(mysqlTestConnectionString)
+	conn, err := OpenMySQLConnection(serverConnectionString)
 	require.NoError(tb, err)
 
 	err = conn.PingContext(tb.Context())
@@ -147,7 +159,7 @@ func NewTestMySQLDriverWithTargetDirectory(tb testing.TB, directory string) *Tes
 		require.NoError(tb, conn.Close())
 	})
 
-	sourceConnectionString := testConnectionStringWithDatabase(tb, mysqlTestConnectionString, sourceDatabase)
+	sourceConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, sourceDatabase)
 
 	sourceConnection, err := OpenMySQLConnection(sourceConnectionString)
 	require.NoError(tb, err)
@@ -1435,6 +1447,10 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("SQLSourceAsTarget", func(t *testing.T) {
 		skipWithoutMySQLServer(t)
 
+		if testing.Short() {
+			t.Skip("the temporary mysql server needs a download on the first run")
+		}
+
 		directory := t.TempDir()
 		sqltest.WriteSQLFile(t, directory, "001_users.sql",
 			"CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
@@ -1467,15 +1483,35 @@ func TestMySQLDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
-	t.Run("TwoSQLSourcesGiveAnError", func(t *testing.T) {
+	t.Run("TwoSQLSources", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("the temporary mysql server needs a download on the first run")
+		}
+
+		targetPath := sqltest.WriteSQLFile(t, t.TempDir(), "target.sql",
+			"CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
+		sourcePath := sqltest.WriteSQLFile(t, t.TempDir(), "source.sql",
+			"CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+
 		driver := NewMySQLDriver(&MySQLDriverConfig{})
 
-		target := driversshared.ParseDataSource(t.TempDir())
-		source := driversshared.ParseDataSource(t.TempDir())
+		target := driversshared.ParseDataSource(targetPath)
+		source := driversshared.ParseDataSource(sourcePath)
 
-		_, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		require.NoError(t, err)
 
-		require.EqualError(t, err, "the mysql driver builds a SQL source on the server of the other side. Give a database as the other argument")
+		require.Equal(t, driversshared.Instructions{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "name",
+						Type: "varchar(100)",
+					},
+				},
+			},
+		}, instructions)
 	})
 
 	t.Run("DataComparison", func(t *testing.T) {
@@ -1828,6 +1864,36 @@ func TestMySQLDriver(t *testing.T) {
 // MariaDB reads the same driver code, and its catalog reports the types, the defaults,
 // the check clauses, and the view definitions with another text.
 func TestMariaDBDriver(t *testing.T) {
+	// The type "int(11)" proves that the temporary server ran MariaDB. MySQL writes "int".
+	t.Run("SQLSourceAsTarget", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("the temporary mariadb server needs a download on the first run")
+		}
+
+		directory := t.TempDir()
+		sqltest.WriteSQLFile(t, directory, "001_users.sql",
+			"CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+
+		driver := NewTestMariaDBDriverWithTargetDirectory(t, directory)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLCreateTableInstruction{
+				Name: "users",
+				Columns: []*MySQLColumn{
+					{
+						Name:    "id",
+						Type:    "int(11)",
+						NotNull: true,
+					},
+				},
+				PrimaryKey: []string{"id"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CreateTableWithDefaults", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 

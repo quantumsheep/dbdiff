@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	embeddedmysql "github.com/quantumsheep/embedded-mysql"
 )
 
 // The replay of a SQL source and the apply of a migration send several statements in one
@@ -82,8 +83,7 @@ func OpenMySQLConnection(connectionString string) (*sql.DB, error) {
 	return db, nil
 }
 
-// A scratch database materializes a SQL source on the server of the other side, because
-// no library gives a temporary MySQL server.
+// A scratch database materializes a SQL source on a temporary server.
 type mysqlScratchDatabase struct {
 	serverConfig *mysql.Config
 	name         string
@@ -96,10 +96,6 @@ func (d *MySQLDriver) OpenSide(ctx context.Context, source driversshared.DataSou
 		return OpenMySQLConnection(connectionSource.ConnectionString)
 	}
 
-	if driversshared.IsSQLSource(otherSource) {
-		return nil, fmt.Errorf("the mysql driver builds a SQL source on the server of the other side. Give a database as the other argument")
-	}
-
 	path, _ := driversshared.SQLSourcePath(source)
 
 	sqlSource, err := driversshared.NewSQLSource(path)
@@ -107,9 +103,7 @@ func (d *MySQLDriver) OpenSide(ctx context.Context, source driversshared.DataSou
 		return nil, err
 	}
 
-	otherConnectionSource := otherSource.(driversshared.ConnectionStringDataSource)
-
-	serverConfig, err := ParseMySQLConnectionString(otherConnectionSource.ConnectionString)
+	serverConfig, err := d.scratchServerConfig(ctx, otherSource)
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +133,85 @@ func (d *MySQLDriver) OpenSide(ctx context.Context, source driversshared.DataSou
 	}
 
 	return connection, nil
+}
+
+func (d *MySQLDriver) scratchServerConfig(ctx context.Context, otherSource driversshared.DataSource) (*mysql.Config, error) {
+	flavor := embeddedmysql.MySQL
+	version := d.ScratchServerVersion
+
+	otherConnectionSource, isConnectionString := otherSource.(driversshared.ConnectionStringDataSource)
+	if isConnectionString {
+		otherVersion, mariadb := DetectMySQLScratchVersion(ctx, otherConnectionSource.ConnectionString)
+		if mariadb {
+			flavor = embeddedmysql.MariaDB
+		}
+
+		if version == "" {
+			version = otherVersion
+		}
+	}
+
+	server, err := d.ScratchServer(flavor, version)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseMySQLConnectionString(server.DSN())
+}
+
+// The flavor and the version apply at the first call only. One diff starts one server.
+func (d *MySQLDriver) ScratchServer(flavor embeddedmysql.Flavor, version string) (*embeddedmysql.EmbeddedMySQL, error) {
+	if d.scratchServer != nil {
+		return d.scratchServer, nil
+	}
+
+	server := embeddedmysql.NewDatabase(embeddedmysql.DefaultConfig().
+		Flavor(flavor).
+		Version(version))
+
+	err := server.Start()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start the temporary %s server: %w", flavor, err)
+	}
+
+	d.scratchServer = server
+
+	return server, nil
+}
+
+func DetectMySQLScratchVersion(ctx context.Context, connectionString string) (string, bool) {
+	connection, err := OpenMySQLConnection(connectionString)
+	if err != nil {
+		return "", false
+	}
+
+	defer func() { _ = connection.Close() }()
+
+	var version string
+
+	err = connection.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version)
+	if err != nil {
+		return "", false
+	}
+
+	mariadb := strings.Contains(strings.ToLower(version), "mariadb")
+
+	// A server writes a build suffix into the version, for example "8.0.43-0ubuntu0.22.04.1",
+	// and the download reads the three numbers alone.
+	numericVersion, _, _ := strings.Cut(version, "-")
+
+	return numericVersion, mariadb
+}
+
+func (d *MySQLDriver) StopScratchServer() error {
+	if d.scratchServer == nil {
+		return nil
+	}
+
+	server := d.scratchServer
+	d.scratchServer = nil
+
+	return server.Stop()
 }
 
 func (s *mysqlScratchDatabase) create(ctx context.Context) error {
