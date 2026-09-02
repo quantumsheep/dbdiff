@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -1868,6 +1869,10 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("SQLSourceAsTarget", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary mariadb server needs a download on the first run")
+		}
+
+		if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
+			t.Skip("MariaDB publishes no binaries for Linux on arm64")
 		}
 
 		directory := t.TempDir()
