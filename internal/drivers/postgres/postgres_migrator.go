@@ -1,4 +1,4 @@
-package migrations
+package driverspostgres
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
 // This value is a constant of dbdiff. Every dbdiff process takes the same lock, and no
@@ -22,7 +22,7 @@ type PostgresMigrator struct {
 // pg_advisory_lock holds a lock of the session, so every statement runs on one connection.
 // A lock that one pooled connection takes, and that another releases, does nothing.
 func NewPostgresMigrator(ctx context.Context, connectionString string, schema string) (*PostgresMigrator, error) {
-	database, err := driverspostgres.OpenPostgresConnection(connectionString, schema)
+	database, err := OpenPostgresConnection(connectionString, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (m *PostgresMigrator) EnsureHistoryTable(ctx context.Context) error {
 
 // A read must stay a read, so this method creates no table. The command status calls it
 // against a database that never ran a migration.
-func (m *PostgresMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigration, error) {
+func (m *PostgresMigrator) AppliedMigrations(ctx context.Context) ([]migrations.AppliedMigration, error) {
 	found, err := m.historyTableExists(ctx)
 	if err != nil {
 		return nil, err
@@ -116,10 +116,10 @@ func (m *PostgresMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigr
 
 	defer func() { _ = rows.Close() }()
 
-	var applied []AppliedMigration
+	var applied []migrations.AppliedMigration
 
 	for rows.Next() {
-		var row AppliedMigration
+		var row migrations.AppliedMigration
 
 		err := rows.Scan(&row.Version, &row.Name, &row.Checksum, &row.AppliedAt, &row.Dirty)
 		if err != nil {
@@ -177,7 +177,7 @@ func (m *PostgresMigrator) dirtyColumnExists(ctx context.Context) (bool, error) 
 	return found, nil
 }
 
-func (m *PostgresMigrator) RecordDirty(ctx context.Context, migration *Migration) error {
+func (m *PostgresMigrator) RecordDirty(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at", "dirty")
 		VALUES ($1, $2, $3, $4, true);
@@ -189,7 +189,7 @@ func (m *PostgresMigrator) RecordDirty(ctx context.Context, migration *Migration
 	return err
 }
 
-func (m *PostgresMigrator) ClearDirty(ctx context.Context, migration *Migration) error {
+func (m *PostgresMigrator) ClearDirty(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "dirty" = false WHERE "version" = $1;`,
 		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
@@ -198,7 +198,7 @@ func (m *PostgresMigrator) ClearDirty(ctx context.Context, migration *Migration)
 	return err
 }
 
-func (m *PostgresMigrator) UpdateChecksum(ctx context.Context, migration *Migration) error {
+func (m *PostgresMigrator) UpdateChecksum(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "checksum" = $1 WHERE "version" = $2;`,
 		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
@@ -241,7 +241,7 @@ func (m *PostgresMigrator) Unlock(ctx context.Context) error {
 	return err
 }
 
-func (m *PostgresMigrator) Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error) {
+func (m *PostgresMigrator) Begin(ctx context.Context, useTransaction bool) (migrations.MigrationTransaction, error) {
 	if !useTransaction {
 		return &PostgresMigrationTransaction{
 			Executor: m.Connection,
@@ -260,7 +260,7 @@ func (m *PostgresMigrator) Begin(ctx context.Context, useTransaction bool) (Migr
 }
 
 type PostgresMigrationTransaction struct {
-	Executor migrationExecutor
+	Executor migrations.MigrationExecutor
 
 	// This field is nil when the file holds the no-transaction directive. Commit and
 	// Rollback then do nothing, so the apply loop holds one path.
@@ -273,7 +273,7 @@ func (t *PostgresMigrationTransaction) Apply(ctx context.Context, statement stri
 	return err
 }
 
-func (t *PostgresMigrationTransaction) Record(ctx context.Context, migration *Migration) error {
+func (t *PostgresMigrationTransaction) Record(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at")
 		VALUES ($1, $2, $3, $4);

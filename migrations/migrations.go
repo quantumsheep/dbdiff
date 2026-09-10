@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
@@ -176,7 +177,7 @@ func (m *Migrator) open(ctx context.Context) (coremigrations.Migrator, *coremigr
 		return nil, nil, fmt.Errorf("name the migrations directory with the WithMigrationDirectory option")
 	}
 
-	migrator, err := coremigrations.NewMigrator(ctx, m.driver, m.target, m.schema)
+	migrator, err := internaldrivers.NewMigrator(ctx, m.driver, m.target, m.schema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open the database: %w", err)
 	}

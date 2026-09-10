@@ -3,10 +3,7 @@ package migrations
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
-
-	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
 type AppliedMigration struct {
@@ -19,23 +16,26 @@ type AppliedMigration struct {
 
 type Migrator interface {
 	Close() error
-	// A false value names an engine that commits every DDL statement at once. The command
-	// preview refuses such an engine, because its rollback rolls no schema change back.
-	// The commands up and step apply each of its files on the dirty-row path.
+
 	SupportsTransactionalDDL() bool
 	EnsureHistoryTable(ctx context.Context) error
 	AppliedMigrations(ctx context.Context) ([]AppliedMigration, error)
+
 	Lock(ctx context.Context) error
 	TryLock(ctx context.Context) (bool, error)
 	Unlock(ctx context.Context) error
+
 	Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error)
+
 	RecordDirty(ctx context.Context, migration *Migration) error
 	ClearDirty(ctx context.Context, migration *Migration) error
+
 	UpdateChecksum(ctx context.Context, migration *Migration) error
+
 	DeleteRecord(ctx context.Context, version string) error
 }
 
-type migrationExecutor interface {
+type MigrationExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
@@ -44,27 +44,4 @@ type MigrationTransaction interface {
 	Record(ctx context.Context, migration *Migration) error
 	Commit() error
 	Rollback() error
-}
-
-func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
-	schema string) (Migrator, error) {
-	if driverName == "" {
-		detected, err := driversshared.DetectDriverOfTarget(target)
-		if err != nil {
-			return nil, err
-		}
-
-		driverName = detected
-	}
-
-	switch driverName {
-	case driversshared.SQLiteDriverName:
-		return NewSQLiteMigrator(target.ConnectionString)
-	case driversshared.PostgresDriverName:
-		return NewPostgresMigrator(ctx, target.ConnectionString, schema)
-	case driversshared.MySQLDriverName:
-		return NewMySQLMigrator(ctx, target.ConnectionString)
-	default:
-		return nil, fmt.Errorf("unsupported driver: %s", driverName)
-	}
 }

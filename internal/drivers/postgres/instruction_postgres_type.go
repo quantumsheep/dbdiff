@@ -41,6 +41,10 @@ func (i *PostgresAlterTypeAddValueInstruction) Comment() string {
 	return driversshared.ObjectComment("Modify", "type", i.Name)
 }
 
+// PostgreSQL accepts ALTER TYPE ... ADD VALUE in a transaction, and it refuses the new
+// value in that same transaction.
+func (i *PostgresAlterTypeAddValueInstruction) SeparateMigrationFile() {}
+
 type PostgresDropTypeInstruction struct {
 	Name string
 }

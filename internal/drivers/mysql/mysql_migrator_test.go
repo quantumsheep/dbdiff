@@ -1,12 +1,87 @@
-package migrations
+package driversmysql
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"testing"
+	"time"
 
+	"github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
+
+type TestingMySQLMigrator struct {
+	*MySQLMigrator
+
+	tb testing.TB
+}
+
+func NewTestMySQLMigrator(tb testing.TB) *TestingMySQLMigrator {
+	tb.Helper()
+
+	skipWithoutMySQLServer(tb)
+
+	adminConnection, err := OpenMySQLConnection(mysqlTestConnectionString)
+	require.NoError(tb, err)
+
+	err = adminConnection.PingContext(tb.Context())
+	require.NoError(tb, err)
+
+	database := fmt.Sprintf("migrator_%d", time.Now().UnixNano())
+
+	_, err = adminConnection.ExecContext(tb.Context(), "CREATE DATABASE "+QuoteIdentifier(database))
+	require.NoError(tb, err)
+
+	tb.Cleanup(func() {
+		_, err := adminConnection.ExecContext(context.Background(), "DROP DATABASE "+QuoteIdentifier(database))
+		require.NoError(tb, err)
+
+		require.NoError(tb, adminConnection.Close())
+	})
+
+	migrator, err := NewMySQLMigrator(tb.Context(),
+		testConnectionStringWithDatabase(tb, mysqlTestConnectionString, database))
+	require.NoError(tb, err)
+	tb.Cleanup(func() {
+		require.NoError(tb, migrator.Close())
+	})
+
+	return &TestingMySQLMigrator{
+		MySQLMigrator: migrator,
+		tb:            tb,
+	}
+}
+
+func (m *TestingMySQLMigrator) TableNames() []string {
+	m.tb.Helper()
+
+	rows, err := m.Connection.QueryContext(m.tb.Context(), `
+		SELECT TABLE_NAME
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		ORDER BY TABLE_NAME;
+	`)
+	require.NoError(m.tb, err)
+
+	defer func() { require.NoError(m.tb, rows.Close()) }()
+
+	var names []string
+
+	for rows.Next() {
+		var name string
+
+		err := rows.Scan(&name)
+		require.NoError(m.tb, err)
+
+		names = append(names, name)
+	}
+
+	require.NoError(m.tb, rows.Err())
+
+	return names
+}
 
 func TestMySQLMigrator(t *testing.T) {
 	t.Run("AppliedMigrationsWithNoHistoryTable", func(t *testing.T) {
@@ -50,7 +125,7 @@ func TestMySQLMigrator(t *testing.T) {
 
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		migration := &Migration{
+		migration := &migrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -78,7 +153,7 @@ func TestMySQLMigrator(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), "CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));"))
-		require.NoError(t, transaction.Record(t.Context(), &Migration{
+		require.NoError(t, transaction.Record(t.Context(), &migrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -101,7 +176,7 @@ func TestMySQLMigrator(t *testing.T) {
 		transaction, err := migrator.Begin(t.Context(), true)
 		require.NoError(t, err)
 
-		require.NoError(t, transaction.Record(t.Context(), &Migration{
+		require.NoError(t, transaction.Record(t.Context(), &migrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -116,7 +191,7 @@ func TestMySQLMigrator(t *testing.T) {
 	t.Run("PreviewRefusesTheEngine", func(t *testing.T) {
 		migrator := NewTestMySQLMigrator(t)
 
-		set := NewMigrationSet([]*Migration{
+		set := migrations.NewMigrationSet([]*migrations.Migration{
 			{
 				Version:  "20260814101500",
 				Name:     "init",
@@ -124,7 +199,7 @@ func TestMySQLMigrator(t *testing.T) {
 			},
 		}, nil)
 
-		err := RunMigrationPreview(t.Context(), migrator, set, io.Discard)
+		err := migrations.RunMigrationPreview(t.Context(), migrator, set, io.Discard)
 		require.EqualError(t, err,
 			"the target engine commits every DDL statement at once, so preview cannot roll the pending files back")
 	})
@@ -132,7 +207,7 @@ func TestMySQLMigrator(t *testing.T) {
 	t.Run("PreviewWithNoPendingFileReportsNoError", func(t *testing.T) {
 		migrator := NewTestMySQLMigrator(t)
 
-		err := RunMigrationPreview(t.Context(), migrator, NewMigrationSet(nil, nil), io.Discard)
+		err := migrations.RunMigrationPreview(t.Context(), migrator, migrations.NewMigrationSet(nil, nil), io.Discard)
 		require.NoError(t, err)
 	})
 
@@ -143,10 +218,10 @@ func TestMySQLMigrator(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := migrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, migrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
 
 		applied, err := migrator.AppliedMigrations(t.Context())
@@ -163,10 +238,10 @@ func TestMySQLMigrator(t *testing.T) {
 			"CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));\n"+
 				"CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := migrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
+		err = migrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
 		require.EqualError(t, err, "20260814101500_init failed, and the statements before the failure stay applied. "+
 			"Repair the database, and run migrate repair: Error 1050 (42S01): Table 'users' already exists")
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
@@ -176,13 +251,13 @@ func TestMySQLMigrator(t *testing.T) {
 		require.Len(t, applied, 1)
 		require.True(t, applied[0].Dirty)
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = migrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationDirty, set.Entries[0].State)
+		require.Equal(t, migrations.MigrationDirty, set.Entries[0].State)
 	})
 
 	t.Run("SatisfiesTheMigratorInterface", func(t *testing.T) {
-		var migrator Migrator = &MySQLMigrator{}
+		var migrator migrations.Migrator = &MySQLMigrator{}
 		require.NotNil(t, migrator)
 		require.False(t, migrator.SupportsTransactionalDDL())
 	})

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
@@ -118,16 +117,21 @@ func usedMigrationVersions(directory string) (map[string]bool, error) {
 	return used, nil
 }
 
-// PostgreSQL accepts ALTER TYPE ... ADD VALUE in a transaction, and it refuses the new
-// value in that same transaction. The values take a file of their own for that reason.
+// The splitter puts every instruction with this method in a file of its own, before the
+// file of the other instructions.
+type SeparateFileInstruction interface {
+	driversshared.Instruction
+	SeparateMigrationFile()
+}
+
 func splitMigrationInstructions(instructions []driversshared.Instruction) [][]driversshared.Instruction {
-	var enumValues []driversshared.Instruction
+	var separate []driversshared.Instruction
 	var others []driversshared.Instruction
 
 	for _, instruction := range instructions {
-		_, isEnumValue := instruction.(*driverspostgres.PostgresAlterTypeAddValueInstruction)
-		if isEnumValue {
-			enumValues = append(enumValues, instruction)
+		_, isSeparate := instruction.(SeparateFileInstruction)
+		if isSeparate {
+			separate = append(separate, instruction)
 
 			continue
 		}
@@ -137,8 +141,8 @@ func splitMigrationInstructions(instructions []driversshared.Instruction) [][]dr
 
 	var groups [][]driversshared.Instruction
 
-	if len(enumValues) > 0 {
-		groups = append(groups, enumValues)
+	if len(separate) > 0 {
+		groups = append(groups, separate)
 	}
 
 	if len(others) > 0 {

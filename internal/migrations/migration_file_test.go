@@ -1,4 +1,4 @@
-package migrations
+package migrations_test
 
 import (
 	"os"
@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
+	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +24,7 @@ func TestGenerateMigration(t *testing.T) {
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		paths := GenerateSQLiteMigration(t, target, migrations)
+		paths := driverssqlite.GenerateSQLiteMigration(t, target, migrations)
 		require.Len(t, paths, 1)
 		require.Equal(t, filepath.Join(migrations, "20260822143000_add_users.sql"), paths[0])
 
@@ -37,11 +38,11 @@ func TestGenerateMigration(t *testing.T) {
 		directory := t.TempDir()
 		moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
 
-		first, err := WriteMigrationFiles(directory, "one", moment, "test",
+		first, err := coremigrations.WriteMigrationFiles(directory, "one", moment, "test",
 			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "users"}})
 		require.NoError(t, err)
 
-		second, err := WriteMigrationFiles(directory, "two", moment, "test",
+		second, err := coremigrations.WriteMigrationFiles(directory, "two", moment, "test",
 			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "notes"}})
 		require.NoError(t, err)
 
@@ -61,7 +62,7 @@ func TestGenerateMigration(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		paths := GenerateSQLiteMigration(t, target, migrations)
+		paths := driverssqlite.GenerateSQLiteMigration(t, target, migrations)
 		require.Empty(t, paths)
 
 		entries, err := os.ReadDir(migrations)
@@ -81,7 +82,7 @@ func TestGenerateMigration(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		paths := GenerateSQLiteMigration(t, target, migrations)
+		paths := driverssqlite.GenerateSQLiteMigration(t, target, migrations)
 		require.Len(t, paths, 1)
 
 		content, err := os.ReadFile(paths[0])
@@ -92,30 +93,43 @@ func TestGenerateMigration(t *testing.T) {
 }
 
 func TestSplitMigrationInstructions(t *testing.T) {
-	t.Run("OneGroupWithNoEnumValue", func(t *testing.T) {
-		instructions := []driversshared.Instruction{
-			&driversshared.SQLCommentInstruction{
-				Text: "a",
-			},
-		}
+	moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
 
-		groups := splitMigrationInstructions(instructions)
-		require.Len(t, groups, 1)
+	t.Run("OneFileWithNoSeparateInstruction", func(t *testing.T) {
+		directory := t.TempDir()
+
+		paths, err := coremigrations.WriteMigrationFiles(directory, "add_users", moment, "test",
+			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "users"}})
+		require.NoError(t, err)
+		require.Equal(t, []string{filepath.Join(directory, "20260822143000_add_users.sql")}, paths)
 	})
 
-	t.Run("TheEnumValuesTakeTheFirstGroup", func(t *testing.T) {
+	t.Run("TheSeparateInstructionsTakeTheFirstFile", func(t *testing.T) {
+		directory := t.TempDir()
+
 		enumValue := &driverspostgres.PostgresAlterTypeAddValueInstruction{
 			Name:  "mood",
-			Value: "'happy'",
+			Value: "happy",
 		}
 
-		other := &driversshared.SQLCommentInstruction{
-			Text: "a",
-		}
+		other := &driversshared.SQLDropTableInstruction{Name: "users"}
 
-		groups := splitMigrationInstructions([]driversshared.Instruction{other, enumValue})
-		require.Len(t, groups, 2)
-		require.Equal(t, []driversshared.Instruction{enumValue}, groups[0])
-		require.Equal(t, []driversshared.Instruction{other}, groups[1])
+		paths, err := coremigrations.WriteMigrationFiles(directory, "add_mood", moment, "test",
+			[]driversshared.Instruction{other, enumValue})
+		require.NoError(t, err)
+		require.Equal(t, []string{
+			filepath.Join(directory, "20260822143000_add_mood_types.sql"),
+			filepath.Join(directory, "20260822143001_add_mood.sql"),
+		}, paths)
+
+		first, err := os.ReadFile(paths[0])
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff test\n-- generated 2026-08-22T14:30:00Z\n\n"+
+			"-- Modify the type \"mood\"\nALTER TYPE \"mood\" ADD VALUE 'happy';\n", string(first))
+
+		second, err := os.ReadFile(paths[1])
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff test\n-- generated 2026-08-22T14:30:01Z\n\n"+
+			"-- Drop the table \"users\"\nDROP TABLE \"users\";\n", string(second))
 	})
 }

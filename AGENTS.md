@@ -29,12 +29,12 @@ Read this section before you write any code.
 | `cmd/dbdiff/internal/migrations/` | The flag and configuration reading of the eight migrate commands                                     |
 | `cmd/dbdiff/internal/clitest/`    | The helpers that build the binary and run it                                                         |
 | `internal/sqltest/`               | The writer of a `.sql` file, shared by the driver tests, the migrations tests, and `clitest`         |
-| `internal/drivers/`               | One file, `new_driver.go`. It holds `NewDriver(driverName, DriverOptions)`, the one driver switch of the program. |
+| `internal/drivers/`               | One file, `new_driver.go`. It holds `NewDriver(driverName, DriverOptions)` and `NewMigrator(ctx, driverName, target, schema)`, the two driver switches of the program. |
 | `internal/drivers/shared/`        | The engine-free core: `Driver`, the `SQL` instruction types, quoting, the SQL sources, the statement splitter, the comment builders, `DetectDriver`, `DiffByKey`, and `DiffData` |
-| `internal/drivers/sqlite/`        | The SQLite driver: the schema models, the `SQLite` instruction types, and the data comparison        |
+| `internal/drivers/sqlite/`        | The SQLite driver: the schema models, the `SQLite` instruction types, the data comparison, and the migrator |
 | `internal/drivers/postgres/`      | The PostgreSQL driver, with the same shape                                                           |
 | `internal/drivers/mysql/`         | The MySQL driver, with the same shape. It covers MariaDB too.                                        |
-| `internal/migrations/`            | The model of a migration and the migrator of each engine. It knows no command and no flag.           |
+| `internal/migrations/`            | The model of a migration, the `Migrator` interface, and the runner. It knows no engine, no command, and no flag. |
 | `drivers/`                        | The public package that runs a diff from a Go program. Its types stay stable.                        |
 | `migrations/`                     | The public package that applies the migrations from a Go program. Its types stay stable.             |
 
@@ -42,7 +42,7 @@ An engine package uses one file per schema object, with the name `<engine>_<obje
 
 Do not add a package for a schema object. Add a file to the engine package. A new engine adds one package under `internal/drivers/`, one case to `NewDriver`, one case to `NewMigrator`, one name to `SupportedDriverNames`, and one branch to `DetectDriver`.
 
-A subpackage of `internal/drivers` never imports its parent. `driverssqlite`, `driverspostgres`, and `driversmysql` import `driversshared` only.
+A subpackage of `internal/drivers` never imports its parent. `driverssqlite`, `driverspostgres`, and `driversmysql` import `driversshared` and `internal/migrations` only.
 
 ## Package names
 
@@ -207,9 +207,9 @@ A file that holds no directive runs in ONE call. A file that holds the line `-- 
 
 ## Migrations
 
-The public entry point is `Driver.Migrator()` of the `drivers` package, so the public `drivers` package imports the public `migrations` package. The public `migrations` package aliases its types from `internal/drivers/shared` and never imports `drivers`. An import of `drivers` there creates an import cycle.
+The public entry point is `Driver.Migrator()` of the `drivers` package, so the public `drivers` package imports the public `migrations` package. The public `migrations` package aliases its types from `internal/drivers/shared`, calls `NewMigrator` of `internal/drivers`, and never imports `drivers`. An import of `drivers` there creates an import cycle.
 
-`Migrator` in `internal/migrations` is a sibling of `Driver`, not a wrapper of it. `internal/migrations` imports `drivers`, and `drivers` imports nothing of it. `NewMigrator(ctx, driverName, target ConnectionStringDataSource, schema)` builds the migrator. An empty driver name detects the engine from the target, because a migration target is always a database, never a SQL source. The constant `MigrationHistoryTableName` stays in `drivers`, because the diff hides that table. The `migrate` commands give the word `source` to the migration directory, and the word `target` to the other side.
+`Migrator` in `internal/migrations` is the interface that each engine implements, in the file `<engine>_migrator.go` of its package. `internal/migrations` imports `driversshared` only, and no engine package, because each engine package imports `internal/migrations`. An instruction that takes a migration file of its own implements `SeparateFileInstruction` of `internal/migrations`, so the file writer names no engine. `NewMigrator(ctx, driverName, target ConnectionStringDataSource, schema)` of `internal/drivers` builds the migrator. An empty driver name detects the engine from the target, because a migration target is always a database, never a SQL source. The constant `MigrationHistoryTableName` stays in `drivers`, because the diff hides that table. The `migrate` commands give the word `source` to the migration directory, and the word `target` to the other side.
 
 A migration entry holds one of five states: `pending`, `applied`, `changed` (checksum differs), `missing` (a row without a file), and `out of order` (no row, and the version sorts before the last applied version).
 
@@ -244,6 +244,8 @@ The PostgreSQL tests need the database at `postgres://user:password@localhost:54
 One engine gets one top-level function for each type under test: `TestSQLiteDriver` and `TestSQLiteMigrator`, `TestPostgresDriver` and `TestPostgresMigrator`, `TestMySQLDriver` and `TestMySQLMigrator`. `TestMariaDBDriver` runs the MariaDB branches of the mysql driver. Each behavior gets one `t.Run` subtest, named with a short noun phrase in CamelCase, for example `AddColumn`.
 
 `TestingSQLiteDriver` and `TestingPostgresDriver` embed the driver, hold the `testing.TB` value, and store the two `DataSource` values of the harness. `Diff` clears the connection fields of the driver on exit, so the harness keeps its own `sourceConnection` and `targetConnection` for `ExecOnTarget` and `ExecOnSource`. A SQL source holds no such connection, and a helper that reads or writes it materializes a temporary database on first use. The constructor builds the databases and registers the cleanup with `tb.Cleanup`. The PostgreSQL harness creates one source schema and one target schema in one database, drops both in the cleanup, and checks each drop with `require.NoError`. Keep the connection of the harness open until the cleanup ends. Every harness method calls `d.tb.Helper()` on its first line.
+
+The runner tests of `internal/migrations` are an external test package, `migrations_test`, because an internal test that imports an engine package makes an import cycle. Those tests read `NewTestSQLiteMigrator` and `GenerateSQLiteMigration` from `sqlite_migrator_testing.go` of the sqlite package, a file with no `_test` suffix, because a test file exports nothing to another package. The postgres and the mysql migrator harnesses live in the migrator test file of their package.
 
 | Helper                                   | Purpose                                            |
 | ---------------------------------------- | -------------------------------------------------- |

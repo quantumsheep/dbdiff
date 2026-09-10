@@ -1,4 +1,4 @@
-package migrations
+package driversmysql
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	driversmysql "github.com/quantumsheep/dbdiff/internal/drivers/mysql"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
 // This name is a constant of dbdiff. Every dbdiff process takes the same lock, and no
@@ -22,7 +22,7 @@ type MySQLMigrator struct {
 // GET_LOCK holds a lock of the session, so every statement runs on one connection. A lock
 // that one pooled connection takes, and that another releases, does nothing.
 func NewMySQLMigrator(ctx context.Context, connectionString string) (*MySQLMigrator, error) {
-	database, err := driversmysql.OpenMySQLConnection(connectionString)
+	database, err := OpenMySQLConnection(connectionString)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (m *MySQLMigrator) EnsureHistoryTable(ctx context.Context) error {
 		"\t`checksum`   text NOT NULL,\n"+
 		"\t`applied_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"+
 		"\t`dirty`      tinyint(1) NOT NULL DEFAULT 0\n"+
-		");", driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		");", QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement)
 	if err != nil {
@@ -83,7 +83,7 @@ func (m *MySQLMigrator) ensureDirtyColumn(ctx context.Context) error {
 	}
 
 	statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN `dirty` tinyint(1) NOT NULL DEFAULT 0;",
-		driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err = m.Connection.ExecContext(ctx, statement)
 
@@ -128,7 +128,7 @@ func (m *MySQLMigrator) historyTableExists(ctx context.Context) (bool, error) {
 
 // A read must stay a read, so this method creates no table. The command status calls it
 // against a database that never ran a migration.
-func (m *MySQLMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigration, error) {
+func (m *MySQLMigrator) AppliedMigrations(ctx context.Context) ([]migrations.AppliedMigration, error) {
 	found, err := m.historyTableExists(ctx)
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func (m *MySQLMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrati
 	}
 
 	statement := fmt.Sprintf("SELECT `version`, `name`, `checksum`, `applied_at`, %s FROM %s ORDER BY `version`;",
-		dirtyColumn, driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		dirtyColumn, QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	rows, err := m.Connection.QueryContext(ctx, statement)
 	if err != nil {
@@ -161,10 +161,10 @@ func (m *MySQLMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrati
 
 	defer func() { _ = rows.Close() }()
 
-	var applied []AppliedMigration
+	var applied []migrations.AppliedMigration
 
 	for rows.Next() {
-		var row AppliedMigration
+		var row migrations.AppliedMigration
 
 		err := rows.Scan(&row.Version, &row.Name, &row.Checksum, &row.AppliedAt, &row.Dirty)
 		if err != nil {
@@ -182,9 +182,9 @@ func (m *MySQLMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrati
 	return applied, nil
 }
 
-func (m *MySQLMigrator) RecordDirty(ctx context.Context, migration *Migration) error {
+func (m *MySQLMigrator) RecordDirty(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf("INSERT INTO %s (`version`, `name`, `checksum`, `applied_at`, `dirty`) VALUES (?, ?, ?, ?, 1);",
-		driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement,
 		migration.Version, migration.Name, migration.Checksum, time.Now().UTC())
@@ -192,18 +192,18 @@ func (m *MySQLMigrator) RecordDirty(ctx context.Context, migration *Migration) e
 	return err
 }
 
-func (m *MySQLMigrator) ClearDirty(ctx context.Context, migration *Migration) error {
+func (m *MySQLMigrator) ClearDirty(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf("UPDATE %s SET `dirty` = 0 WHERE `version` = ?;",
-		driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, migration.Version)
 
 	return err
 }
 
-func (m *MySQLMigrator) UpdateChecksum(ctx context.Context, migration *Migration) error {
+func (m *MySQLMigrator) UpdateChecksum(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf("UPDATE %s SET `checksum` = ? WHERE `version` = ?;",
-		driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, migration.Checksum, migration.Version)
 
@@ -212,7 +212,7 @@ func (m *MySQLMigrator) UpdateChecksum(ctx context.Context, migration *Migration
 
 func (m *MySQLMigrator) DeleteRecord(ctx context.Context, version string) error {
 	statement := fmt.Sprintf("DELETE FROM %s WHERE `version` = ?;",
-		driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := m.Connection.ExecContext(ctx, statement, version)
 
@@ -244,7 +244,7 @@ func (m *MySQLMigrator) Unlock(ctx context.Context) error {
 	return err
 }
 
-func (m *MySQLMigrator) Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error) {
+func (m *MySQLMigrator) Begin(ctx context.Context, useTransaction bool) (migrations.MigrationTransaction, error) {
 	if !useTransaction {
 		return &MySQLMigrationTransaction{
 			Executor: m.Connection,
@@ -263,7 +263,7 @@ func (m *MySQLMigrator) Begin(ctx context.Context, useTransaction bool) (Migrati
 }
 
 type MySQLMigrationTransaction struct {
-	Executor migrationExecutor
+	Executor migrations.MigrationExecutor
 
 	// This field is nil when the file holds the no-transaction directive. Commit and
 	// Rollback then do nothing, so the apply loop holds one path.
@@ -276,9 +276,9 @@ func (t *MySQLMigrationTransaction) Apply(ctx context.Context, statement string)
 	return err
 }
 
-func (t *MySQLMigrationTransaction) Record(ctx context.Context, migration *Migration) error {
+func (t *MySQLMigrationTransaction) Record(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf("INSERT INTO %s (`version`, `name`, `checksum`, `applied_at`) VALUES (?, ?, ?, ?);",
-		driversmysql.QuoteIdentifier(driversshared.MigrationHistoryTableName))
+		QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
 	_, err := t.Executor.ExecContext(ctx, statement,
 		migration.Version, migration.Name, migration.Checksum, time.Now().UTC())

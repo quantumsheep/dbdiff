@@ -1,52 +1,50 @@
-package migrations
+package migrations_test
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
+	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMigrationStatusAndPreview(t *testing.T) {
 	t.Run("StatusOfADatabaseWithNoHistoryTable", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 		require.Len(t, set.Pending(), 1)
 
 		require.Empty(t, migrator.TableNames())
 
-		status := RenderMigrationStatus(set)
+		status := coremigrations.RenderMigrationStatus(set)
 		require.Contains(t, status, "20260814101500_init")
 		require.Contains(t, status, "pending")
 	})
 
 	t.Run("PreviewPrintsEachPendingFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\nCREATE INDEX users_id ON users (id);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		preview, err := RenderMigrationPreview(set)
+		preview, err := coremigrations.RenderMigrationPreview(set)
 		require.NoError(t, err)
 		require.Contains(t, preview, "20260814101500_init")
 		require.Contains(t, preview, "CREATE INDEX users_id")
@@ -54,40 +52,40 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("PreviewOfNoPendingMigration", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, t.TempDir())
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)
 
-		preview, err := RenderMigrationPreview(set)
+		preview, err := coremigrations.RenderMigrationPreview(set)
 		require.NoError(t, err)
 		require.Contains(t, preview, "up to date")
 	})
 
 	t.Run("PreviewNamesAnOutOfOrderFile", func(t *testing.T) {
-		outOfOrderFile := &Migration{
+		outOfOrderFile := &coremigrations.Migration{
 			Version: "20260814101500",
 			Name:    "init",
 			Path:    "20260814101500_init.sql",
 		}
 
-		appliedFile := &Migration{
+		appliedFile := &coremigrations.Migration{
 			Version:  "20260822143000",
 			Name:     "add_created_at",
 			Path:     "20260822143000_add_created_at.sql",
 			Checksum: "bbb",
 		}
 
-		set := NewMigrationSet([]*Migration{outOfOrderFile, appliedFile}, []AppliedMigration{
+		set := coremigrations.NewMigrationSet([]*coremigrations.Migration{outOfOrderFile, appliedFile}, []coremigrations.AppliedMigration{
 			{
 				Version:  "20260822143000",
 				Name:     "add_created_at",
 				Checksum: "bbb",
 			},
 		})
-		require.Equal(t, MigrationOutOfOrder, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationOutOfOrder, set.Entries[0].State)
 
-		preview, err := RenderMigrationPreview(set)
+		preview, err := coremigrations.RenderMigrationPreview(set)
 		require.NoError(t, err)
 		require.Contains(t, preview, "20260814101500_init")
 		require.Contains(t, preview, "out of order")
@@ -95,34 +93,34 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("RunPreviewChangesNothing", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.NoError(t, RunMigrationPreview(t.Context(), migrator, set, io.Discard))
+		require.NoError(t, coremigrations.RunMigrationPreview(t.Context(), migrator, set, io.Discard))
 		require.Empty(t, migrator.TableNames())
 	})
 
 	t.Run("RunPreviewReportsABadStatement", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"NOT SQL AT ALL;\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.Error(t, RunMigrationPreview(t.Context(), migrator, set, io.Discard))
+		require.Error(t, coremigrations.RunMigrationPreview(t.Context(), migrator, set, io.Discard))
 	})
 
 	t.Run("RunPreviewSeesTheFilesBeforeIt", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -130,25 +128,25 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "20260822143000_email.sql",
 			"ALTER TABLE users ADD COLUMN email TEXT;\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.NoError(t, RunMigrationPreview(t.Context(), migrator, set, io.Discard))
+		require.NoError(t, coremigrations.RunMigrationPreview(t.Context(), migrator, set, io.Discard))
 		require.Empty(t, migrator.TableNames())
 	})
 
 	t.Run("RunPreviewSkipsAFileThatOptsOutOfTheTransaction", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff:no-transaction\nCREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, RunMigrationPreview(t.Context(), migrator, set, output))
+		require.NoError(t, coremigrations.RunMigrationPreview(t.Context(), migrator, set, output))
 
 		require.Contains(t, output.String(), "20260814101500_init")
 		require.Empty(t, migrator.TableNames())
@@ -157,18 +155,18 @@ func TestMigrationStatusAndPreview(t *testing.T) {
 
 func TestApplyMigrations(t *testing.T) {
 	t.Run("ApplyOneFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", output))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", output))
 		require.Contains(t, output.String(), "20260814101500_init")
 
 		require.Equal(t, []string{"dbdiff_migrations", "notes", "users"}, migrator.TableNames())
@@ -179,28 +177,28 @@ func TestApplyMigrations(t *testing.T) {
 	})
 
 	t.Run("ApplyRunsOnlyThePendingFiles", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		require.Equal(t, []string{"dbdiff_migrations", "notes", "users"}, migrator.TableNames())
 	})
 
 	t.Run("ApplyStopsAfterTheNamedVersion", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -208,11 +206,11 @@ func TestApplyMigrations(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "20260814101500", output))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "20260814101500", output))
 		require.Contains(t, output.String(), "20260814101500_init")
 		require.NotContains(t, output.String(), "20260822143000_notes")
 
@@ -224,43 +222,43 @@ func TestApplyMigrations(t *testing.T) {
 	})
 
 	t.Run("ApplyRefusesAVersionThatNoFileHolds", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = ApplyMigrations(t.Context(), migrator, set, "20990101000000", io.Discard)
+		err = coremigrations.ApplyMigrations(t.Context(), migrator, set, "20990101000000", io.Discard)
 		require.ErrorContains(t, err, "no migration with the version 20990101000000")
 
 		require.Empty(t, migrator.TableNames())
 	})
 
 	t.Run("ApplyWithNoPendingFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, t.TempDir())
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", output))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", output))
 		require.Contains(t, output.String(), "up to date")
 	})
 
 	t.Run("ABadStatementRollsTheWholeFileBack", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\nNOT SQL AT ALL;\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
+		err = coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
 		require.ErrorContains(t, err, "20260814101500_init")
 
 		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
@@ -271,48 +269,48 @@ func TestApplyMigrations(t *testing.T) {
 	})
 
 	t.Run("AChangedFileStopsTheRun", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
+		err = coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
 		require.ErrorContains(t, err, "changed")
 	})
 
 	t.Run("ApplyToleratesAnotherProcessThatAppliedTheFileFirst", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 		require.Len(t, set.Pending(), 1)
 
-		other, err := NewSQLiteMigrator(migrator.Path)
+		other, err := driverssqlite.NewSQLiteMigrator(migrator.Path)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, other.Close()) }()
 
-		otherSet, err := LoadMigrationSet(t.Context(), other, directory)
+		otherSet, err := coremigrations.LoadMigrationSet(t.Context(), other, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), other, otherSet, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), other, otherSet, "", io.Discard))
 
 		output := &bytes.Buffer{}
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", output))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", output))
 		require.Contains(t, output.String(), "up to date")
 
 		applied, err := migrator.AppliedMigrations(t.Context())
@@ -330,19 +328,19 @@ func TestApplyMigrations(t *testing.T) {
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		paths := GenerateSQLiteMigration(t, schema, migrations)
+		paths := driverssqlite.GenerateSQLiteMigration(t, schema, migrations)
 		require.NotEmpty(t, paths)
 
 		sourcePath := filepath.Join(directory, "source.sqlite")
 
-		migrator, err := NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
 
-		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, migrations)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
@@ -353,16 +351,16 @@ func TestApplyMigrations(t *testing.T) {
 	})
 
 	t.Run("AFileThatOptsOutOfTheTransaction", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff:no-transaction\nCREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
 
 		applied, err := migrator.AppliedMigrations(t.Context())
@@ -371,7 +369,7 @@ func TestApplyMigrations(t *testing.T) {
 	})
 
 	t.Run("AFileWithoutATransactionThatFailsInTheMiddle", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -379,10 +377,10 @@ func TestApplyMigrations(t *testing.T) {
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
+		err = coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
 		require.EqualError(t, err, "20260814101500_init failed, and the statements before the failure stay applied. "+
 			"Repair the database, and run migrate repair: table users already exists")
 
@@ -391,11 +389,11 @@ func TestApplyMigrations(t *testing.T) {
 		require.Len(t, applied, 1)
 		require.True(t, applied[0].Dirty)
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationDirty, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationDirty, set.Entries[0].State)
 
-		err = ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
+		err = coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard)
 		require.EqualError(t, err, "the migrations of the database need attention: 20260814101500_init is dirty. "+
 			"The command migrate repair updates a changed row, and it deletes a missing row. "+
 			"An out of order file needs a delete and a new generate. "+
@@ -405,7 +403,7 @@ func TestApplyMigrations(t *testing.T) {
 
 func TestRunMigrationBaseline(t *testing.T) {
 	t.Run("RecordsEveryFileAndRunsNoFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -413,12 +411,12 @@ func TestRunMigrationBaseline(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
+		require.NoError(t, coremigrations.RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
 		require.Contains(t, output.String(), "Recorded 20260822143000_notes.")
 		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
@@ -428,32 +426,32 @@ func TestRunMigrationBaseline(t *testing.T) {
 		require.Len(t, applied, 2)
 		require.False(t, applied[0].Dirty)
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationApplied, set.Entries[0].State)
-		require.Equal(t, MigrationApplied, set.Entries[1].State)
+		require.Equal(t, coremigrations.MigrationApplied, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationApplied, set.Entries[1].State)
 	})
 
 	t.Run("SkipsAnAppliedFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
+		require.NoError(t, coremigrations.RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.NotContains(t, output.String(), "20260814101500_init")
 		require.Contains(t, output.String(), "Recorded 20260822143000_notes.")
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
@@ -464,35 +462,35 @@ func TestRunMigrationBaseline(t *testing.T) {
 	})
 
 	t.Run("RecordsAnOutOfOrderFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationOutOfOrder, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationOutOfOrder, set.Entries[0].State)
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
+		require.NoError(t, coremigrations.RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationApplied, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationApplied, set.Entries[0].State)
 	})
 
 	t.Run("StopsAfterTheNamedVersion", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -500,12 +498,12 @@ func TestRunMigrationBaseline(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "20260814101500", &output))
+		require.NoError(t, coremigrations.RunMigrationBaseline(t.Context(), migrator, set, "20260814101500", &output))
 		require.Contains(t, output.String(), "Recorded 20260814101500_init.")
 		require.NotContains(t, output.String(), "20260822143000_notes")
 
@@ -513,23 +511,23 @@ func TestRunMigrationBaseline(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, applied, 1)
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationApplied, set.Entries[0].State)
-		require.Equal(t, MigrationPending, set.Entries[1].State)
+		require.Equal(t, coremigrations.MigrationApplied, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationPending, set.Entries[1].State)
 	})
 
 	t.Run("RefusesAVersionThatNoFileHolds", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = RunMigrationBaseline(t.Context(), migrator, set, "20990101000000", io.Discard)
+		err = coremigrations.RunMigrationBaseline(t.Context(), migrator, set, "20990101000000", io.Discard)
 		require.EqualError(t, err, "the directory holds no migration with the version 20990101000000")
 
 		applied, err := migrator.AppliedMigrations(t.Context())
@@ -538,43 +536,43 @@ func TestRunMigrationBaseline(t *testing.T) {
 	})
 
 	t.Run("WithNoUnrecordedFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		var output bytes.Buffer
 
-		require.NoError(t, RunMigrationBaseline(t.Context(), migrator, set, "", &output))
+		require.NoError(t, coremigrations.RunMigrationBaseline(t.Context(), migrator, set, "", &output))
 		require.Contains(t, output.String(), "The record holds every file.")
 	})
 
 	t.Run("RefusesAChangedFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		path := sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		require.NoError(t, os.WriteFile(path,
 			[]byte("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n"), 0o600))
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = RunMigrationBaseline(t.Context(), migrator, set, "", io.Discard)
+		err = coremigrations.RunMigrationBaseline(t.Context(), migrator, set, "", io.Discard)
 		require.EqualError(t, err, "the migrations of the database need attention: 20260814101500_init is changed. "+
 			"The command migrate repair updates a changed row, and it deletes a missing row. "+
 			"An out of order file needs a delete and a new generate. "+
@@ -584,60 +582,60 @@ func TestRunMigrationBaseline(t *testing.T) {
 
 func TestRunMigrationRepair(t *testing.T) {
 	t.Run("AChangedFileTakesTheChecksumOfTheFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\n")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationChanged, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationChanged, set.Entries[0].State)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.NoError(t, coremigrations.RunMigrationRepair(t.Context(), migrator, set, output))
 		require.Contains(t, output.String(), "Updated the checksum")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationApplied, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationApplied, set.Entries[0].State)
 	})
 
 	t.Run("AMissingFileLosesItsRow", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		require.NoError(t, os.Remove(filepath.Join(directory, "20260814101500_init.sql")))
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationMissing, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationMissing, set.Entries[0].State)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.NoError(t, coremigrations.RunMigrationRepair(t.Context(), migrator, set, output))
 		require.Contains(t, output.String(), "Deleted the row")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 		require.Empty(t, set.Entries)
 	})
 
 	t.Run("ADirtyFileLosesItsRow", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -645,42 +643,42 @@ func TestRunMigrationRepair(t *testing.T) {
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Error(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.Error(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
 		_, err = migrator.Connection.ExecContext(t.Context(), "DROP TABLE users;")
 		require.NoError(t, err)
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationDirty, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationDirty, set.Entries[0].State)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.NoError(t, coremigrations.RunMigrationRepair(t.Context(), migrator, set, output))
 		require.Contains(t, output.String(), "Deleted the dirty row")
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, MigrationPending, set.Entries[0].State)
+		require.Equal(t, coremigrations.MigrationPending, set.Entries[0].State)
 	})
 
 	t.Run("ACleanRecordNeedsNoRepair", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		require.NoError(t, coremigrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
 
-		set, err = LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, RunMigrationRepair(t.Context(), migrator, set, output))
+		require.NoError(t, coremigrations.RunMigrationRepair(t.Context(), migrator, set, output))
 		require.Contains(t, output.String(), "The record needs no repair.")
 	})
 }
@@ -696,15 +694,15 @@ func TestStepMigration(t *testing.T) {
 	}
 
 	t.Run("ApplyEachFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, StepMigration(t.Context(), migrator, set, strings.NewReader("a\na\n"), output))
+		require.NoError(t, coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader("a\na\n"), output))
 
 		require.Equal(t, []string{"dbdiff_migrations", "notes", "users"}, migrator.TableNames())
 
@@ -714,27 +712,27 @@ func TestStepMigration(t *testing.T) {
 	})
 
 	t.Run("ApplyTheRest", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.NoError(t, StepMigration(t.Context(), migrator, set, strings.NewReader("r\n"), io.Discard))
+		require.NoError(t, coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader("r\n"), io.Discard))
 		require.Equal(t, []string{"dbdiff_migrations", "notes", "users"}, migrator.TableNames())
 	})
 
 	t.Run("QuitKeepsTheFilesThatCommitted", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, StepMigration(t.Context(), migrator, set, strings.NewReader("a\nq\n"), output))
+		require.NoError(t, coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader("a\nq\n"), output))
 
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
 
@@ -744,7 +742,7 @@ func TestStepMigration(t *testing.T) {
 	})
 
 	t.Run("AFileOfSeveralStatementsAppliesWhole", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -754,64 +752,64 @@ func TestStepMigration(t *testing.T) {
 				"  UPDATE users SET updated_at = 'now' WHERE id = NEW.id;\n"+
 				"END;\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.NoError(t, StepMigration(t.Context(), migrator, set, strings.NewReader("a\n"), io.Discard))
+		require.NoError(t, coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader("a\n"), io.Discard))
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
 	})
 
 	t.Run("AFileOfAnOlderDbdiffAppliesWhole", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
 			"-- dbdiff 1.0\n\n-- dbdiff:statement\nCREATE TABLE users (id INTEGER PRIMARY KEY);\n"+
 				"-- dbdiff:statement\nCREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		require.NoError(t, StepMigration(t.Context(), migrator, set, strings.NewReader("a\n"), io.Discard))
+		require.NoError(t, coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader("a\n"), io.Discard))
 		require.Equal(t, []string{"dbdiff_migrations", "notes", "users"}, migrator.TableNames())
 	})
 
 	t.Run("AnUnknownAnswerAsksAgain", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, StepMigration(t.Context(), migrator, set, strings.NewReader("x\nr\n"), output))
+		require.NoError(t, coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader("x\nr\n"), output))
 
 		require.Contains(t, output.String(), "Answer a, r, or q")
 		require.Equal(t, []string{"dbdiff_migrations", "notes", "users"}, migrator.TableNames())
 	})
 
 	t.Run("AClosedInputNamesTheUpCommand", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
-		err = StepMigration(t.Context(), migrator, set, strings.NewReader(""), io.Discard)
+		err = coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader(""), io.Discard)
 		require.ErrorContains(t, err, "up")
 		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
 	})
 
 	t.Run("StepWithNoPendingFile", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, t.TempDir())
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
-		require.NoError(t, StepMigration(t.Context(), migrator, set, strings.NewReader(""), output))
+		require.NoError(t, coremigrations.StepMigration(t.Context(), migrator, set, strings.NewReader(""), output))
 		require.Contains(t, output.String(), "up to date")
 	})
 }
@@ -830,15 +828,15 @@ func TestVerifyMigrations(t *testing.T) {
 
 		sourcePath := filepath.Join(directory, "source.sqlite")
 
-		migrator, err := NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
 			require.NoError(tb, migrator.Close())
 		})
 
-		set, err := LoadMigrationSet(tb.Context(), migrator, migrations)
+		set, err := coremigrations.LoadMigrationSet(tb.Context(), migrator, migrations)
 		require.NoError(tb, err)
-		require.NoError(tb, ApplyMigrations(tb.Context(), migrator, set, "", io.Discard))
+		require.NoError(tb, coremigrations.ApplyMigrations(tb.Context(), migrator, set, "", io.Discard))
 
 		return sourcePath, migrations
 	}
@@ -846,15 +844,15 @@ func TestVerifyMigrations(t *testing.T) {
 	t.Run("ACleanDatabaseGivesNoInstruction", func(t *testing.T) {
 		sourcePath, migrations := newAppliedSource(t)
 
-		migrator, err := NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
 
-		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, migrations)
 		require.NoError(t, err)
 
-		directory, cleanup, err := MigrationVerifyDirectory(set)
+		directory, cleanup, err := coremigrations.MigrationVerifyDirectory(set)
 		require.NoError(t, err)
 
 		defer cleanup()
@@ -870,7 +868,7 @@ func TestVerifyMigrations(t *testing.T) {
 	t.Run("AHandEditedDatabaseGivesTheDrift", func(t *testing.T) {
 		sourcePath, migrations := newAppliedSource(t)
 
-		migrator, err := NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
@@ -879,10 +877,10 @@ func TestVerifyMigrations(t *testing.T) {
 			`CREATE TABLE audit (id INTEGER PRIMARY KEY);`)
 		require.NoError(t, err)
 
-		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, migrations)
 		require.NoError(t, err)
 
-		directory, cleanup, err := MigrationVerifyDirectory(set)
+		directory, cleanup, err := coremigrations.MigrationVerifyDirectory(set)
 		require.NoError(t, err)
 
 		defer cleanup()
@@ -899,15 +897,15 @@ func TestVerifyMigrations(t *testing.T) {
 	t.Run("TheHistoryTableIsNoDrift", func(t *testing.T) {
 		sourcePath, migrations := newAppliedSource(t)
 
-		migrator, err := NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
 
-		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, migrations)
 		require.NoError(t, err)
 
-		directory, cleanup, err := MigrationVerifyDirectory(set)
+		directory, cleanup, err := coremigrations.MigrationVerifyDirectory(set)
 		require.NoError(t, err)
 
 		defer cleanup()
@@ -925,15 +923,15 @@ func TestVerifyMigrations(t *testing.T) {
 
 		sourcePath := filepath.Join(directory, "source.sqlite")
 
-		migrator, err := NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
 
-		set, err := LoadMigrationSet(t.Context(), migrator, t.TempDir())
+		set, err := coremigrations.LoadMigrationSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)
 
-		verifyDirectory, cleanup, err := MigrationVerifyDirectory(set)
+		verifyDirectory, cleanup, err := coremigrations.MigrationVerifyDirectory(set)
 		require.NoError(t, err)
 
 		defer cleanup()
@@ -942,83 +940,6 @@ func TestVerifyMigrations(t *testing.T) {
 
 		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
 			driversshared.ParseDataSource(verifyDirectory), driversshared.DiffOptions{})
-		require.NoError(t, err)
-		require.Empty(t, instructions)
-	})
-}
-
-func TestPostgresNoTransactionMigration(t *testing.T) {
-	migrator := NewTestPostgresMigrator(t)
-
-	_, err := migrator.Connection.ExecContext(t.Context(),
-		`CREATE TABLE users (id INT, email TEXT, username TEXT);`)
-	require.NoError(t, err)
-
-	directory := t.TempDir()
-	sqltest.WriteSQLFile(t, directory, "20260101000000_concurrent_index.sql",
-		`-- dbdiff:no-transaction
-DROP INDEX CONCURRENTLY IF EXISTS ix_users_email;
-ALTER TABLE users ALTER COLUMN username SET NOT NULL;
-CREATE INDEX CONCURRENTLY ix_users_email ON users (email);
-`)
-
-	set, err := LoadMigrationSet(t.Context(), migrator, directory)
-	require.NoError(t, err)
-
-	output := &bytes.Buffer{}
-
-	err = ApplyMigrations(t.Context(), migrator, set, "", output)
-	require.NoError(t, err)
-	require.Contains(t, output.String(), "Applied 20260101000000_concurrent_index.")
-	require.Contains(t, migrator.TableNames(), "users")
-
-	set, err = LoadMigrationSet(t.Context(), migrator, directory)
-	require.NoError(t, err)
-	require.Equal(t, MigrationApplied, set.Entries[0].State)
-}
-
-func TestPostgresMigrationRunner(t *testing.T) {
-	t.Run("GenerateThenApplyLeavesNoDiff", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("the temporary postgres server needs a download on the first run")
-		}
-
-		migrator := NewTestPostgresMigrator(t)
-
-		scratchVersion := driverspostgres.DetectPostgresScratchVersion(t.Context(), PostgresTestConnectionString)
-		require.NotEmpty(t, scratchVersion)
-
-		directory := t.TempDir()
-
-		schemaFile := sqltest.WriteSQLFile(t, directory, "schema.sql",
-			"CREATE TABLE users (id INT PRIMARY KEY, email TEXT NOT NULL);\n"+
-				"CREATE INDEX users_email ON users (email);\n")
-
-		migrations := filepath.Join(directory, "migrations")
-		require.NoError(t, os.Mkdir(migrations, 0o750))
-
-		generateDriver := driverspostgres.NewPostgresDriver(&driverspostgres.PostgresDriverConfig{
-			ScratchServerVersion: string(scratchVersion),
-		})
-
-		generatedInstructions, err := generateDriver.Diff(t.Context(), driversshared.ParseDataSource(migrations),
-			driversshared.ParseDataSource(schemaFile), driversshared.DiffOptions{})
-		require.NoError(t, err)
-
-		paths, err := WriteMigrationFiles(migrations, "add_users", time.Now(), "test", generatedInstructions)
-		require.NoError(t, err)
-		require.NotEmpty(t, paths)
-
-		set, err := LoadMigrationSet(t.Context(), migrator, migrations)
-		require.NoError(t, err)
-		require.NoError(t, ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
-
-		sourceConnectionString := fmt.Sprintf("%s&search_path=%s", PostgresTestConnectionString, migrator.Schema())
-
-		driver := driverspostgres.NewPostgresDriver(&driverspostgres.PostgresDriverConfig{})
-
-		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourceConnectionString),
-			driversshared.ParseDataSource(schemaFile), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})

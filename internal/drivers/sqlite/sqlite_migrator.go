@@ -1,4 +1,4 @@
-package migrations
+package driverssqlite
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
+	"github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
 type SQLiteMigrator struct {
@@ -17,7 +17,7 @@ type SQLiteMigrator struct {
 func NewSQLiteMigrator(path string) (*SQLiteMigrator, error) {
 	// The name holds no _foreign_keys parameter. A recreation of a table drops one table
 	// and renames another table, and PRAGMA foreign_keys does nothing inside a transaction.
-	connection, err := sql.Open("sqlite3", driverssqlite.TrimSQLitePrefix(path))
+	connection, err := sql.Open("sqlite3", TrimSQLitePrefix(path))
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (m *SQLiteMigrator) dirtyColumnExists(ctx context.Context) (bool, error) {
 	return found, nil
 }
 
-func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigration, error) {
+func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]migrations.AppliedMigration, error) {
 	found, err := m.historyTableExists(ctx)
 	if err != nil {
 		return nil, err
@@ -128,10 +128,10 @@ func (m *SQLiteMigrator) AppliedMigrations(ctx context.Context) ([]AppliedMigrat
 
 	defer func() { _ = rows.Close() }()
 
-	var applied []AppliedMigration
+	var applied []migrations.AppliedMigration
 
 	for rows.Next() {
-		var row AppliedMigration
+		var row migrations.AppliedMigration
 		var appliedAt string
 
 		err := rows.Scan(&row.Version, &row.Name, &row.Checksum, &appliedAt, &row.Dirty)
@@ -184,7 +184,7 @@ func (m *SQLiteMigrator) Unlock(ctx context.Context) error {
 	return nil
 }
 
-func (m *SQLiteMigrator) Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error) {
+func (m *SQLiteMigrator) Begin(ctx context.Context, useTransaction bool) (migrations.MigrationTransaction, error) {
 	if !useTransaction {
 		return &SQLiteMigrationTransaction{
 			Executor: m.Connection,
@@ -203,7 +203,7 @@ func (m *SQLiteMigrator) Begin(ctx context.Context, useTransaction bool) (Migrat
 }
 
 type SQLiteMigrationTransaction struct {
-	Executor migrationExecutor
+	Executor migrations.MigrationExecutor
 
 	Transaction *sql.Tx
 }
@@ -214,7 +214,7 @@ func (t *SQLiteMigrationTransaction) Apply(ctx context.Context, statement string
 	return err
 }
 
-func (t *SQLiteMigrationTransaction) Record(ctx context.Context, migration *Migration) error {
+func (t *SQLiteMigrationTransaction) Record(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at")
 		VALUES (?, ?, ?, ?);
@@ -226,7 +226,7 @@ func (t *SQLiteMigrationTransaction) Record(ctx context.Context, migration *Migr
 	return err
 }
 
-func (m *SQLiteMigrator) RecordDirty(ctx context.Context, migration *Migration) error {
+func (m *SQLiteMigrator) RecordDirty(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`
 		INSERT INTO %s ("version", "name", "checksum", "applied_at", "dirty")
 		VALUES (?, ?, ?, ?, 1);
@@ -238,7 +238,7 @@ func (m *SQLiteMigrator) RecordDirty(ctx context.Context, migration *Migration) 
 	return err
 }
 
-func (m *SQLiteMigrator) ClearDirty(ctx context.Context, migration *Migration) error {
+func (m *SQLiteMigrator) ClearDirty(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "dirty" = 0 WHERE "version" = ?;`,
 		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
@@ -247,7 +247,7 @@ func (m *SQLiteMigrator) ClearDirty(ctx context.Context, migration *Migration) e
 	return err
 }
 
-func (m *SQLiteMigrator) UpdateChecksum(ctx context.Context, migration *Migration) error {
+func (m *SQLiteMigrator) UpdateChecksum(ctx context.Context, migration *migrations.Migration) error {
 	statement := fmt.Sprintf(`UPDATE %s SET "checksum" = ? WHERE "version" = ?;`,
 		driversshared.QuoteIdentifier(driversshared.MigrationHistoryTableName))
 
