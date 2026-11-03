@@ -142,7 +142,7 @@ func sortRelationsByDependency(views []*PostgresView, materializedViews []*Postg
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {
 	// information_schema.views gives no definition of a view that the current role does not
 	// own, and it hides a view without a privilege, so the query reads pg_class.
-	viewRows, err := db.QueryContext(ctx, `
+	views, err := driversshared.QueryAll(ctx, db, `
 		SELECT c.relname, pg_get_viewdef(c.oid),
 			coalesce((
 				SELECT upper(substring(option FROM '^check_option=(.*)$'))
@@ -158,27 +158,13 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 			WHERE d.objid = c.oid AND d.deptype = 'e'
 		)
 		ORDER BY c.relname
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = viewRows.Close() }()
-
-	var views []*PostgresView
-
-	for viewRows.Next() {
+	`, func(rows *sql.Rows) (*PostgresView, error) {
 		view := &PostgresView{}
 
-		err := viewRows.Scan(&view.Name, &view.Def, &view.CheckOption, &view.Comment)
-		if err != nil {
-			return nil, err
-		}
+		err := rows.Scan(&view.Name, &view.Def, &view.CheckOption, &view.Comment)
 
-		views = append(views, view)
-	}
-
-	err = viewRows.Err()
+		return view, err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +181,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 
 // The type of each column comes with it, because a type change makes the view invalid.
 func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresViewColumn, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT DISTINCT
 			source_class.relname,
 			source_attribute.attname,
@@ -214,32 +200,13 @@ func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewNam
 		AND view_class.relname = $1
 		AND view_class.oid <> d.refobjid
 		ORDER BY source_class.relname, source_attribute.attname
-	`, viewName)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var columns []*PostgresViewColumn
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresViewColumn, error) {
 		column := &PostgresViewColumn{}
 
 		err := rows.Scan(&column.Table, &column.Column, &column.Type)
-		if err != nil {
-			return nil, err
-		}
 
-		columns = append(columns, column)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return columns, nil
+		return column, err
+	}, viewName)
 }
 
 // A view can read a materialized view, and a materialized view can read a view, so the

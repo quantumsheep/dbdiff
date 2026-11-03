@@ -85,39 +85,20 @@ func holdsAlwaysIdentityColumn(table *PostgresTable, columnNames []string) bool 
 }
 
 func (d *PostgresDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT a.attname
 		FROM pg_constraint c
 		JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, key_position) ON true
 		JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
 		WHERE c.conrelid = $1::regclass AND c.contype = 'p'
 		ORDER BY k.key_position
-	`, driversshared.QuoteIdentifier(tableName))
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var columnNames []string
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (string, error) {
 		var columnName string
 
 		err := rows.Scan(&columnName)
-		if err != nil {
-			return nil, err
-		}
 
-		columnNames = append(columnNames, columnName)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return columnNames, nil
+		return columnName, err
+	}, driversshared.QuoteIdentifier(tableName))
 }
 
 const postgresTimeLayout = "2006-01-02 15:04:05.999999-07:00"

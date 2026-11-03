@@ -89,7 +89,7 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*driversshared.Sect
 }
 
 func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*PostgresOperator, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			o.oprname,
 			CASE WHEN o.oprleft <> 0 THEN format_type(o.oprleft, NULL) END,
@@ -107,16 +107,7 @@ func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*Postg
 			SELECT 1 FROM pg_depend d WHERE d.objid = o.oid AND d.deptype = 'e'
 		)
 		ORDER BY o.oprname, o.oprleft, o.oprright
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var operators []*PostgresOperator
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresOperator, error) {
 		operator := &PostgresOperator{}
 
 		err := rows.Scan(
@@ -131,17 +122,7 @@ func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*Postg
 			&operator.CanHash,
 			&operator.CanMerge,
 		)
-		if err != nil {
-			return nil, err
-		}
 
-		operators = append(operators, operator)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return operators, nil
+		return operator, err
+	})
 }

@@ -132,7 +132,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 	// The regexp_replace call removes the schema prefix of the header. The target schema
 	// and the source schema hold a different name, and the diff compares the two texts.
 	// pg_get_function_result gives NULL for a procedure.
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			p.proname,
 			pg_get_function_identity_arguments(p.oid),
@@ -152,16 +152,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
 		)
 		ORDER BY p.proname, pg_get_function_identity_arguments(p.oid)
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var functions []*PostgresFunction
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresFunction, error) {
 		function := &PostgresFunction{}
 
 		err := rows.Scan(&function.Name, &function.Arguments, &function.ArgumentTypes,
@@ -172,13 +163,6 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 
 		function.Def = strings.TrimSpace(function.Def)
 
-		functions = append(functions, function)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return functions, nil
+		return function, nil
+	})
 }

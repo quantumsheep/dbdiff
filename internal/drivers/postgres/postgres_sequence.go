@@ -148,7 +148,7 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*driversshared.Sect
 func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*PostgresSequence, error) {
 	// A serial column and an identity column own their sequence, and the table creates it.
 	// s.last_value is NULL until the first call of nextval.
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT s.sequencename, s.data_type::text, s.start_value, s.min_value, s.max_value, s.increment_by, s.cache_size, s.cycle, s.last_value
 		FROM pg_sequences s
 		JOIN pg_class c ON c.relname = s.sequencename
@@ -159,16 +159,7 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 			SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype IN ('a', 'e', 'i')
 		)
 		ORDER BY s.sequencename
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var sequences []*PostgresSequence
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresSequence, error) {
 		sequence := &PostgresSequence{}
 
 		err := rows.Scan(
@@ -182,17 +173,7 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 			&sequence.Cycle,
 			&sequence.CurrentValue,
 		)
-		if err != nil {
-			return nil, err
-		}
 
-		sequences = append(sequences, sequence)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return sequences, nil
+		return sequence, err
+	})
 }

@@ -67,32 +67,18 @@ func (d *MySQLDriver) DiffEvents(ctx context.Context) ([]driversshared.Instructi
 }
 
 func (d *MySQLDriver) GetEvents(ctx context.Context, db *sql.DB) ([]*MySQLEvent, error) {
-	rows, err := db.QueryContext(ctx, `
+	names, err := driversshared.QueryAll(ctx, db, `
 		SELECT EVENT_NAME
 		FROM information_schema.EVENTS
 		WHERE EVENT_SCHEMA = DATABASE()
 		ORDER BY EVENT_NAME;
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var names []string
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (string, error) {
 		var name string
 
 		err := rows.Scan(&name)
-		if err != nil {
-			return nil, err
-		}
 
-		names = append(names, name)
-	}
-
-	err = rows.Err()
+		return name, err
+	})
 	if err != nil {
 		return nil, err
 	}

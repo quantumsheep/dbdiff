@@ -72,37 +72,23 @@ func (d *MySQLDriver) DiffRoutines(ctx context.Context) ([]driversshared.Instruc
 }
 
 func (d *MySQLDriver) GetRoutines(ctx context.Context, db *sql.DB) ([]*MySQLRoutine, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT ROUTINE_TYPE, ROUTINE_NAME
-		FROM information_schema.ROUTINES
-		WHERE ROUTINE_SCHEMA = DATABASE()
-		ORDER BY ROUTINE_TYPE, ROUTINE_NAME;
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
 	type routineRow struct {
 		Type string
 		Name string
 	}
 
-	var routineRows []routineRow
-
-	for rows.Next() {
+	routineRows, err := driversshared.QueryAll(ctx, db, `
+		SELECT ROUTINE_TYPE, ROUTINE_NAME
+		FROM information_schema.ROUTINES
+		WHERE ROUTINE_SCHEMA = DATABASE()
+		ORDER BY ROUTINE_TYPE, ROUTINE_NAME;
+	`, func(rows *sql.Rows) (routineRow, error) {
 		var row routineRow
 
 		err := rows.Scan(&row.Type, &row.Name)
-		if err != nil {
-			return nil, err
-		}
 
-		routineRows = append(routineRows, row)
-	}
-
-	err = rows.Err()
+		return row, err
+	})
 	if err != nil {
 		return nil, err
 	}

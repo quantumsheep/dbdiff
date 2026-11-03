@@ -109,7 +109,7 @@ func sortMaterializedViewsByDependency(views []*PostgresMaterializedView) []*Pos
 func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) ([]*PostgresMaterializedView, error) {
 	// Every query skips the objects that an extension owns (deptype 'e') and ends with a
 	// stable ORDER BY, because PostgreSQL gives no stable row order.
-	rows, err := db.QueryContext(ctx, `
+	views, err := driversshared.QueryAll(ctx, db, `
 		SELECT m.matviewname, m.definition,
 			coalesce(obj_description(c.oid, 'pg_class'), '')
 		FROM pg_matviews m
@@ -121,27 +121,13 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 			WHERE d.objid = c.oid AND d.deptype = 'e'
 		)
 		ORDER BY m.matviewname
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var views []*PostgresMaterializedView
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresMaterializedView, error) {
 		view := &PostgresMaterializedView{}
 
 		err := rows.Scan(&view.Name, &view.Def, &view.Comment)
-		if err != nil {
-			return nil, err
-		}
 
-		views = append(views, view)
-	}
-
-	err = rows.Err()
+		return view, err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +154,7 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresIndex, error) {
 	// Every query that reads a definition text removes the current_schema() prefix. Without
 	// this step the diff drops and recreates an object that did not change.
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			indexname,
 			regexp_replace(
@@ -185,32 +171,13 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql
 		FROM pg_indexes
 		WHERE schemaname = current_schema() AND tablename = $1
 		ORDER BY indexname
-	`, viewName)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var indexes []*PostgresIndex
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresIndex, error) {
 		index := &PostgresIndex{}
 
 		err := rows.Scan(&index.Name, &index.Def, &index.Comment)
-		if err != nil {
-			return nil, err
-		}
 
-		indexes = append(indexes, index)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return indexes, nil
+		return index, err
+	}, viewName)
 }
 
 func diffMaterializedViewIndexes(targetView *PostgresMaterializedView, sourceView *PostgresMaterializedView) []driversshared.Instruction {

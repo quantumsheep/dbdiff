@@ -82,32 +82,18 @@ func (d *MySQLDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*MySQLSeq
 		return nil, nil
 	}
 
-	rows, err := db.QueryContext(ctx, `
+	names, err := driversshared.QueryAll(ctx, db, `
 		SELECT TABLE_NAME
 		FROM information_schema.TABLES
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'SEQUENCE'
 		ORDER BY TABLE_NAME;
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var names []string
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (string, error) {
 		var name string
 
 		err := rows.Scan(&name)
-		if err != nil {
-			return nil, err
-		}
 
-		names = append(names, name)
-	}
-
-	err = rows.Err()
+		return name, err
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -25,7 +25,7 @@ func (t *SQLiteVirtualTable) DropInstruction() *driversshared.SQLDropTableInstru
 }
 
 func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQLiteVirtualTable, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT master.name, master.sql
 		FROM sqlite_master AS master
 		WHERE master.type = 'table' AND master.name NOT LIKE 'sqlite_%'
@@ -34,32 +34,13 @@ func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQL
 			WHERE list.schema = 'main' AND list.name = master.name AND list.type = 'virtual'
 		)
 		ORDER BY master.rowid;
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var tables []*SQLiteVirtualTable
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*SQLiteVirtualTable, error) {
 		table := &SQLiteVirtualTable{}
 
 		err := rows.Scan(&table.Name, &table.SQL)
-		if err != nil {
-			return nil, err
-		}
 
-		tables = append(tables, table)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return tables, nil
+		return table, err
+	})
 }
 
 func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]driversshared.Instruction, error) {

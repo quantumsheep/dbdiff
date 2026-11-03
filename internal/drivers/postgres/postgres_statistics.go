@@ -48,7 +48,7 @@ func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*driversshared.Sec
 }
 
 func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*PostgresStatistics, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			stxname,
 			regexp_replace(
@@ -64,30 +64,11 @@ func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*Post
 			WHERE d.objid = pg_statistic_ext.oid AND d.deptype = 'e'
 		)
 		ORDER BY stxname
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var statistics []*PostgresStatistics
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresStatistics, error) {
 		object := &PostgresStatistics{}
 
 		err := rows.Scan(&object.Name, &object.Def)
-		if err != nil {
-			return nil, err
-		}
 
-		statistics = append(statistics, object)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return statistics, nil
+		return object, err
+	})
 }

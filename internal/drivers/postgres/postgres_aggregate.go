@@ -111,7 +111,7 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*driversshared.Sec
 }
 
 func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*PostgresAggregate, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			p.proname,
 			pg_get_function_identity_arguments(p.oid),
@@ -142,16 +142,7 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
 		)
 		ORDER BY p.proname, pg_get_function_identity_arguments(p.oid)
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var aggregates []*PostgresAggregate
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresAggregate, error) {
 		aggregate := &PostgresAggregate{}
 
 		err := rows.Scan(
@@ -178,17 +169,7 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 			&aggregate.SortOperator,
 			&aggregate.Parallel,
 		)
-		if err != nil {
-			return nil, err
-		}
 
-		aggregates = append(aggregates, aggregate)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return aggregates, nil
+		return aggregate, err
+	})
 }

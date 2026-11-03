@@ -39,7 +39,7 @@ func getTableTriggers(ctx context.Context, db *sql.DB, table *PostgresTable) err
 	//
 	// A partition takes each row trigger of its parent, and tgparentid names that parent
 	// trigger. Without this filter a second CREATE TRIGGER statement of that trigger fails.
-	triggerRows, err := db.QueryContext(ctx, `
+	triggers, err := driversshared.QueryAll(ctx, db, `
 			SELECT
 				tgname,
 				regexp_replace(
@@ -57,23 +57,18 @@ func getTableTriggers(ctx context.Context, db *sql.DB, table *PostgresTable) err
 			FROM pg_trigger
 			WHERE tgrelid = $1::regclass AND tgisinternal = false AND tgparentid = 0
 			ORDER BY tgname
-		`, driversshared.QuoteIdentifier(table.Name))
+		`, func(rows *sql.Rows) (*PostgresTrigger, error) {
+		trigger := &PostgresTrigger{}
+
+		err := rows.Scan(&trigger.Name, &trigger.Def, &trigger.EnableMode)
+
+		return trigger, err
+	}, driversshared.QuoteIdentifier(table.Name))
 	if err != nil {
 		return err
 	}
 
-	defer func() { _ = triggerRows.Close() }()
+	table.Triggers = append(table.Triggers, triggers...)
 
-	for triggerRows.Next() {
-		trigger := &PostgresTrigger{}
-
-		err := triggerRows.Scan(&trigger.Name, &trigger.Def, &trigger.EnableMode)
-		if err != nil {
-			return err
-		}
-
-		table.Triggers = append(table.Triggers, trigger)
-	}
-
-	return triggerRows.Err()
+	return nil
 }

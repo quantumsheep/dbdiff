@@ -119,7 +119,7 @@ func (d *PostgresDriver) DiffCasts(ctx context.Context) (*driversshared.SectionD
 // A cast holds no schema, so the query scopes it to the schema of its source type or its
 // target type. c.oid >= 16384 excludes the casts that PostgreSQL creates at initdb.
 func (d *PostgresDriver) GetCasts(ctx context.Context, db *sql.DB) ([]*PostgresCast, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			format_type(c.castsource, NULL),
 			format_type(c.casttarget, NULL),
@@ -139,16 +139,7 @@ func (d *PostgresDriver) GetCasts(ctx context.Context, db *sql.DB) ([]*PostgresC
 			SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e'
 		)
 		ORDER BY format_type(c.castsource, NULL), format_type(c.casttarget, NULL)
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var casts []*PostgresCast
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresCast, error) {
 		cast := &PostgresCast{}
 
 		var function sql.NullString
@@ -160,13 +151,6 @@ func (d *PostgresDriver) GetCasts(ctx context.Context, db *sql.DB) ([]*PostgresC
 
 		cast.Function = function.String
 
-		casts = append(casts, cast)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return casts, nil
+		return cast, nil
+	})
 }

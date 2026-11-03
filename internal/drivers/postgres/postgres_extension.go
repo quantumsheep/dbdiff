@@ -50,35 +50,16 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*driversshared.Sec
 }
 
 func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*PostgresExtension, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT extname, extversion
 		FROM pg_extension
 		WHERE extnamespace = current_schema()::regnamespace
 		ORDER BY extname
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var extensions []*PostgresExtension
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresExtension, error) {
 		extension := &PostgresExtension{}
 
 		err := rows.Scan(&extension.Name, &extension.Version)
-		if err != nil {
-			return nil, err
-		}
 
-		extensions = append(extensions, extension)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return extensions, nil
+		return extension, err
+	})
 }

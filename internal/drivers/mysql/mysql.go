@@ -318,18 +318,6 @@ func needsForeignKeyChecksOff(targetTables []*MySQLTable, sourceTables []*MySQLT
 
 // Every catalog query needs a stable ORDER BY, because MySQL gives no stable row order.
 func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT TABLE_NAME, ENGINE, TABLE_COLLATION, CREATE_OPTIONS
-		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME <> ?
-		ORDER BY TABLE_NAME;
-	`, driversshared.MigrationHistoryTableName)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
 	type tableRow struct {
 		Name          string
 		Engine        sql.NullString
@@ -337,24 +325,18 @@ func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable,
 		CreateOptions sql.NullString
 	}
 
-	var tableRows []tableRow
-
-	for rows.Next() {
+	tableRows, err := driversshared.QueryAll(ctx, db, `
+		SELECT TABLE_NAME, ENGINE, TABLE_COLLATION, CREATE_OPTIONS
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME <> ?
+		ORDER BY TABLE_NAME;
+	`, func(rows *sql.Rows) (tableRow, error) {
 		var row tableRow
 
 		err := rows.Scan(&row.Name, &row.Engine, &row.Collation, &row.CreateOptions)
-		if err != nil {
-			return nil, err
-		}
 
-		if slices.Contains(d.IgnoreTables, row.Name) {
-			continue
-		}
-
-		tableRows = append(tableRows, row)
-	}
-
-	err = rows.Err()
+		return row, err
+	}, driversshared.MigrationHistoryTableName)
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +344,10 @@ func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable,
 	var tables []*MySQLTable
 
 	for _, row := range tableRows {
+		if slices.Contains(d.IgnoreTables, row.Name) {
+			continue
+		}
+
 		partitioned := strings.Contains(strings.ToLower(row.CreateOptions.String), "partitioned")
 
 		table, err := d.GetTable(ctx, db, row.Name, row.Engine, row.Collation, partitioned)
@@ -461,65 +447,33 @@ func parsePartitionClause(definition string) string {
 // The order of ACTION_ORDER keeps two triggers of one timing and one event in their
 // activation order, so the creation builds that order again without a FOLLOWS clause.
 func (d *MySQLDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableName string) ([]*MySQLTrigger, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
 		FROM information_schema.TRIGGERS
 		WHERE TRIGGER_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = ?
 		ORDER BY ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER;
-	`, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var triggers []*MySQLTrigger
-
-	for rows.Next() {
-		var name, timing, event, statement string
-
-		err := rows.Scan(&name, &timing, &event, &statement)
-		if err != nil {
-			return nil, err
+	`, func(rows *sql.Rows) (*MySQLTrigger, error) {
+		trigger := &MySQLTrigger{
+			Table: tableName,
 		}
 
-		triggers = append(triggers, &MySQLTrigger{
-			Table:     tableName,
-			Name:      name,
-			Timing:    timing,
-			Event:     event,
-			Statement: statement,
-		})
-	}
+		err := rows.Scan(&trigger.Name, &trigger.Timing, &trigger.Event, &trigger.Statement)
 
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return triggers, nil
+		return trigger, err
+	}, tableName)
 }
 
 func (d *MySQLDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string,
 	tableCollation sql.NullString) ([]*MySQLColumn, error) {
-	rows, err := db.QueryContext(ctx, `
+	mariadb := d.detailsByConnection[db].mariadb
+
+	return driversshared.QueryAll(ctx, db, `
 		SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA,
 			COLLATION_NAME, COLUMN_COMMENT, GENERATION_EXPRESSION
 		FROM information_schema.COLUMNS
 		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
 		ORDER BY ORDINAL_POSITION;
-	`, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	mariadb := d.detailsByConnection[db].mariadb
-
-	var columns []*MySQLColumn
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*MySQLColumn, error) {
 		var name, columnType, isNullable, extra string
 		var columnDefault, collationName, generationExpression sql.NullString
 		var columnComment string
@@ -556,15 +510,8 @@ func (d *MySQLDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName
 			column.Collation = collationName.String
 		}
 
-		columns = append(columns, column)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return columns, nil
+		return column, nil
+	}, tableName)
 }
 
 // MariaDB stores every default as an expression, and it stores the text NULL for the
@@ -801,16 +748,7 @@ func (d *MySQLDriver) GetTableCheckConstraints(ctx context.Context, db *sql.DB, 
 		`
 	}
 
-	rows, err := db.QueryContext(ctx, query, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var checkConstraints []*MySQLCheckConstraint
-
-	for rows.Next() {
+	return driversshared.QueryAll(ctx, db, query, func(rows *sql.Rows) (*MySQLCheckConstraint, error) {
 		var name, clause string
 
 		err := rows.Scan(&name, &clause)
@@ -818,18 +756,11 @@ func (d *MySQLDriver) GetTableCheckConstraints(ctx context.Context, db *sql.DB, 
 			return nil, err
 		}
 
-		checkConstraints = append(checkConstraints, &MySQLCheckConstraint{
+		return &MySQLCheckConstraint{
 			Name:       name,
 			Expression: unescapeCatalogText(mariadb, clause),
-		})
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return checkConstraints, nil
+		}, nil
+	}, tableName)
 }
 
 func (d *MySQLDriver) DiffViews(ctx context.Context) ([]driversshared.Instruction, error) {
@@ -869,23 +800,14 @@ func (d *MySQLDriver) DiffViews(ctx context.Context) ([]driversshared.Instructio
 // The definition text qualifies every name with the database, and the two sides hold two
 // database names. The removal of the qualifier keeps the two texts comparable.
 func (d *MySQLDriver) GetViews(ctx context.Context, db *sql.DB) ([]*MySQLView, error) {
-	rows, err := db.QueryContext(ctx, `
+	databaseQualifier := QuoteIdentifier(d.detailsByConnection[db].databaseName) + "."
+
+	return driversshared.QueryAll(ctx, db, `
 		SELECT TABLE_NAME, VIEW_DEFINITION
 		FROM information_schema.VIEWS
 		WHERE TABLE_SCHEMA = DATABASE()
 		ORDER BY TABLE_NAME;
-	`)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	databaseQualifier := QuoteIdentifier(d.detailsByConnection[db].databaseName) + "."
-
-	var views []*MySQLView
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*MySQLView, error) {
 		var name string
 		var definition sql.NullString
 
@@ -899,16 +821,9 @@ func (d *MySQLDriver) GetViews(ctx context.Context, db *sql.DB) ([]*MySQLView, e
 			return nil, fmt.Errorf("the view %q gives no definition. Grant the SHOW VIEW privilege", name)
 		}
 
-		views = append(views, &MySQLView{
+		return &MySQLView{
 			Name:       name,
 			Definition: strings.ReplaceAll(definition.String, databaseQualifier, ""),
-		})
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return views, nil
+		}, nil
+	})
 }

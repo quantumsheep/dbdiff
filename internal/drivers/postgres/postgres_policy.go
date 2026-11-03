@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"slices"
 	"strings"
+
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
 // PostgreSQL holds no action that changes a policy, so the diff prints a DROP statement
@@ -55,7 +57,7 @@ func (p *PostgresPolicy) DropInstruction() *PostgresDropPolicyInstruction {
 }
 
 func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresPolicy, error) {
-	rows, err := db.QueryContext(ctx, `
+	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			policyname,
 			permissive,
@@ -66,16 +68,7 @@ func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, table
 		FROM pg_policies
 		WHERE schemaname = current_schema() AND tablename = $1
 		ORDER BY policyname
-	`, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = rows.Close() }()
-
-	var policies []*PostgresPolicy
-
-	for rows.Next() {
+	`, func(rows *sql.Rows) (*PostgresPolicy, error) {
 		policy := &PostgresPolicy{Table: tableName}
 
 		var roles string
@@ -90,13 +83,6 @@ func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, table
 			policy.Roles = strings.Split(roles, ",")
 		}
 
-		policies = append(policies, policy)
-	}
-
-	err = rows.Err()
-	if err != nil {
-		return nil, err
-	}
-
-	return policies, nil
+		return policy, nil
+	}, tableName)
 }

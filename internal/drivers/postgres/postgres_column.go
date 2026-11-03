@@ -128,7 +128,7 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 	// names a column that keeps the default of its type. PostgreSQL 16 writes -1 for the
 	// default statistics source, and PostgreSQL 17 writes NULL. GetSequences excludes the
 	// sequence of a serial column, so the word of that column builds it again.
-	columnRows, err := db.QueryContext(ctx, `
+	columns, err := driversshared.QueryAll(ctx, db, `
 			SELECT
 				a.attname,
 				regexp_replace(
@@ -199,25 +199,18 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 			AND a.attnum > 0
 			AND NOT a.attisdropped
 			ORDER BY a.attnum
-		`, driversshared.QuoteIdentifier(table.Name))
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = columnRows.Close() }()
-
-	for columnRows.Next() {
+		`, func(rows *sql.Rows) (*PostgresColumn, error) {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
 		var identityOptions, storage, serial, serialSequenceName string
 		var notNull bool
 		var columnDefault sql.NullString
 		var statisticsTarget sql.NullInt64
 
-		err := columnRows.Scan(&columnName, &columnType, &notNull, &columnDefault,
+		err := rows.Scan(&columnName, &columnType, &notNull, &columnDefault,
 			&identity, &generatedExpression, &collation, &comment, &storage,
 			&statisticsTarget, &identityOptions, &serial, &serialSequenceName)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		// The word serial holds the default, so the definition writes no DEFAULT clause.
@@ -225,7 +218,7 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 			columnDefault = sql.NullString{}
 		}
 
-		column := &PostgresColumn{
+		return &PostgresColumn{
 			Name:                columnName,
 			Type:                columnType,
 			NotNull:             notNull,
@@ -239,9 +232,13 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 			StatisticsTarget:    statisticsTarget,
 			SerialSequenceName:  serialSequenceName,
 			Serial:              serial,
-		}
-		table.Columns = append(table.Columns, column)
+		}, nil
+	}, driversshared.QuoteIdentifier(table.Name))
+	if err != nil {
+		return err
 	}
 
-	return columnRows.Err()
+	table.Columns = append(table.Columns, columns...)
+
+	return nil
 }

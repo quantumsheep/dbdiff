@@ -34,7 +34,7 @@ func (i *PostgresIndex) Instructions() []driversshared.Instruction {
 func getTableIndexes(ctx context.Context, db *sql.DB, table *PostgresTable) error {
 	// The query removes the keyword ONLY. PostgreSQL writes it for the index of a partitioned
 	// table, and a statement that holds it builds no index on the partitions.
-	indexRows, err := db.QueryContext(ctx, `
+	indexes, err := driversshared.QueryAll(ctx, db, `
 			SELECT
 				indexname,
 				regexp_replace(
@@ -61,23 +61,18 @@ func getTableIndexes(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 				AND child.relnamespace = current_schema()::regnamespace
 			)
 			ORDER BY indexname
-		`, table.Name, driversshared.QuoteIdentifier(table.Name))
+		`, func(rows *sql.Rows) (*PostgresIndex, error) {
+		index := &PostgresIndex{}
+
+		err := rows.Scan(&index.Name, &index.Def, &index.Comment)
+
+		return index, err
+	}, table.Name, driversshared.QuoteIdentifier(table.Name))
 	if err != nil {
 		return err
 	}
 
-	defer func() { _ = indexRows.Close() }()
+	table.Indexes = append(table.Indexes, indexes...)
 
-	for indexRows.Next() {
-		index := &PostgresIndex{}
-
-		err := indexRows.Scan(&index.Name, &index.Def, &index.Comment)
-		if err != nil {
-			return err
-		}
-
-		table.Indexes = append(table.Indexes, index)
-	}
-
-	return indexRows.Err()
+	return nil
 }
