@@ -7,6 +7,7 @@ import (
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
+// MySQL quotes with the backtick, and the shared instruction types quote with the double quote.
 func QuoteIdentifier(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }

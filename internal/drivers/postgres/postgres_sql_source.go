@@ -42,6 +42,7 @@ type PostgresScratchServer struct {
 }
 
 func StartPostgresScratchServer(version embeddedpostgres.PostgresVersion) (*PostgresScratchServer, error) {
+	// A real PostgreSQL server can hold the default port.
 	port, err := findFreePort()
 	if err != nil {
 		return nil, fmt.Errorf("failed to find a free port for the temporary postgres server: %w", err)
@@ -62,6 +63,7 @@ func StartPostgresScratchServer(version embeddedpostgres.PostgresVersion) (*Post
 		DataPath(filepath.Join(temporaryDirectory, "data")).
 		Logger(io.Discard)
 
+	// An empty version gives an invalid configuration, so the default stays in place.
 	if version != "" {
 		configuration = configuration.Version(version)
 	}

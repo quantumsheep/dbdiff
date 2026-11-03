@@ -248,6 +248,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]driversshared.Instruction
 
 	var instructions []driversshared.Instruction
 
+	// SQLite holds no ALTER COLUMN, so a changed column or constraint recreates the table.
 	if columnsDiff.NeedsRecreation() {
 		tempTable := t.Copy()
 		tempTable.Name = "_" + t.Name + "_temp"

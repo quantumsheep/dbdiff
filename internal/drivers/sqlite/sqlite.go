@@ -391,6 +391,7 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 
 	parsed := parseTableDefinition(definition)
 
+	// A PRAGMA statement takes no placeholder, so QuoteIdentifier must quote every name.
 	rows, err := db.QueryContext(ctx, "PRAGMA table_xinfo("+driversshared.QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
@@ -870,6 +871,7 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 
 	foreignKeysSet := lo.Values(foreignKeysMap)
 
+	// PRAGMA foreign_key_list gives no stable order. Without this sort the output changes between two runs.
 	sort.SliceStable(foreignKeysSet, func(i, j int) bool {
 		first := foreignKeysSet[i]
 		second := foreignKeysSet[j]

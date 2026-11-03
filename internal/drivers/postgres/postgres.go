@@ -711,6 +711,8 @@ func diffMaterializedViewIndexes(targetView *PostgresMaterializedView, sourceVie
 }
 
 func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) ([]*PostgresMaterializedView, error) {
+	// Every query skips the objects that an extension owns (deptype 'e') and ends with a
+	// stable ORDER BY, because PostgreSQL gives no stable row order.
 	rows, err := db.QueryContext(ctx, `
 		SELECT m.matviewname, m.definition,
 			coalesce(obj_description(c.oid, 'pg_class'), '')
@@ -768,6 +770,8 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 }
 
 func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresIndex, error) {
+	// Every query that reads a definition text removes the current_schema() prefix. Without
+	// this step the diff drops and recreates an object that did not change.
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			indexname,

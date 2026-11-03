@@ -267,6 +267,7 @@ func (s *MigrationSet) Problems() []*MigrationEntry {
 	})
 }
 
+// An out of order file is no record error. Up and step refuse it in ProblemError, because it breaks the version order.
 func (s *MigrationSet) RecordError() error {
 	return migrationStateError(lo.Filter(s.Entries, func(entry *MigrationEntry, _ int) bool {
 		return entry.State == MigrationChanged ||

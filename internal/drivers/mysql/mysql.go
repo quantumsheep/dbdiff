@@ -316,6 +316,7 @@ func needsForeignKeyChecksOff(targetTables []*MySQLTable, sourceTables []*MySQLT
 	return false
 }
 
+// Every catalog query needs a stable ORDER BY, because MySQL gives no stable row order.
 func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT TABLE_NAME, ENGINE, TABLE_COLLATION, CREATE_OPTIONS

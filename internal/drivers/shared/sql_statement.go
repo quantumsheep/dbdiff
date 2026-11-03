@@ -7,6 +7,7 @@ const (
 	AtlasNoTransactionDirective = "-- atlas:txmode none"
 )
 
+// Only a directive line starts the split. Never read the SQL text to decide.
 func FileUsesTransaction(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)

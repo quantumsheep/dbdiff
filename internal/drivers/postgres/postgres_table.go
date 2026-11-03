@@ -593,6 +593,7 @@ func (t *PostgresTable) DiffRules(other *PostgresTable) []driversshared.Instruct
 			continue
 		}
 
+		// PostgreSQL holds no ALTER action for a rule. The DROP and CREATE pair stays one modification.
 		if targetRule.Def != sourceRule.Def {
 			instructions = append(instructions,
 				sourceRule.DropInstruction(), targetRule.CreateInstruction())

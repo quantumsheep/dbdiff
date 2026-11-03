@@ -311,6 +311,7 @@ func getTableData[Table any](ctx context.Context, db *sql.DB, table Table, colum
 		row := make(map[string]string, len(columnNames))
 
 		for i, name := range columnNames {
+			// The value becomes an SQL literal here, so NULL never equals the text 'NULL'.
 			row[name] = rules.FormatValue(values[i], columnTypes[i].DatabaseTypeName())
 		}
 

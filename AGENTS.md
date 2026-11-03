@@ -1,391 +1,84 @@
 # dbdiff - Agent Context
 
-## What dbdiff is
+dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the source schema equal to the target schema. dbdiff supports SQLite, PostgreSQL, MySQL, and MariaDB. Each side is a database, a `.sql` file, or a directory of `.sql` files.
 
-dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the source schema equal to the target schema. The source holds the current schema that the output changes. The target holds the wanted schema. Every diff walks the target objects first, and it prints the statements that change the source. dbdiff supports SQLite, PostgreSQL, and MySQL with MariaDB. An argument names a database, a `.sql` file, or a directory of `.sql` files.
+This file gives the principles. The code holds the details. Before you change a part of the code, read the files near it and copy their patterns. The code comments hold the engine rules and the order constraints.
 
-## The rules that matter most
+## Architecture
 
-Read this section before you write any code.
+- `cmd/dbdiff/` holds the CLI, with one package per command.
+- `internal/drivers/shared/` holds the engine-free core. `internal/drivers/<engine>/` holds one engine.
+- `internal/migrations/` holds the migration runner. It knows no engine.
+- `drivers/` and `migrations/` are the public Go packages. Keep their types stable.
 
-1. **Write for a human reader.** Use full words in names. Keep the format that `gofmt` produces.
-2. **Let the code explain itself.** Write no comment by default. A comment stays only when its removal lets a reader break the code. See [Comments](#comments).
-3. **Keep the file architecture.** One file holds one schema object of one engine. See [Repo layout](#repo-layout).
-4. **Copy the diff algorithm of the drivers that exist.** Every driver walks the target objects first and the source objects second. See [How a diff works](#how-a-diff-works).
-5. **Test every change of a driver.** Each new behavior gets a subtest. See [Tests](#tests).
-6. **Run the generated SQL in the test.** A test that only compares strings proves nothing.
-7. **Read the documentation of a library before you use it.** Read `go.mod` for the current version. Then read that version with `go doc <import path>`, never the version that you remember.
-8. **Write in Simplified Technical English (ASD-STE100).** This rule covers code comments, commit messages, documentation, CLI help text, and error messages. See [Writing style](#writing-style).
-9. **Delegate to subagents.** Split each task into scoped subtasks. Give each subagent a clean context. See [Delegation](#delegation).
-10. **Read the neighbor files before you change a driver.** The code comments hold the engine rules and the order constraints that this file does not repeat.
+Keep these rules:
 
-## Repo layout
-
-| Path                              | Content                                                                                              |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `cmd/dbdiff/`                     | `main.go` builds the root command. `main_test.go` runs the binary.                                   |
-| `cmd/dbdiff/cmd/`                 | One package per command: `<command>/command.go`, with a `command_test.go` beside it.                 |
-| `cmd/dbdiff/internal/helpers/`    | Version and the usage error handler                                                                  |
-| `cmd/dbdiff/internal/migrations/` | The flag and configuration reading of the eight migrate commands                                     |
-| `cmd/dbdiff/internal/clitest/`    | The helpers that build the binary and run it                                                         |
-| `internal/sqltest/`               | The writer of a `.sql` file, shared by the driver tests, the migrations tests, and `clitest`         |
-| `internal/drivers/`               | One file, `new_driver.go`. It holds `NewDriver(driverName, DriverOptions)` and `NewMigrator(ctx, driverName, target, schema)`, the two driver switches of the program. |
-| `internal/drivers/shared/`        | The engine-free core: `Driver`, the `SQL` instruction types, quoting, the SQL sources, the statement splitter, the comment builders, `DetectDriver`, `DiffByKey`, and `DiffData` |
-| `internal/drivers/sqlite/`        | The SQLite driver: the schema models, the `SQLite` instruction types, the data comparison, and the migrator |
-| `internal/drivers/postgres/`      | The PostgreSQL driver, with the same shape                                                           |
-| `internal/drivers/mysql/`         | The MySQL driver, with the same shape. It covers MariaDB too.                                        |
-| `internal/migrations/`            | The model of a migration, the `Migrator` interface, and the runner. It knows no engine, no command, and no flag. |
-| `drivers/`                        | The public package that runs a diff from a Go program. Its types stay stable.                        |
-| `migrations/`                     | The public package that applies the migrations from a Go program. Its types stay stable.             |
-
-An engine package uses one file per schema object, with the name `<engine>_<object>.go`, for example `sqlite/sqlite_index.go`. The instruction types live in its `instruction_*.go` files. Each engine package holds one main test file, `<engine>_test.go`.
-
-Do not add a package for a schema object. Add a file to the engine package. A new engine adds one package under `internal/drivers/`, one case to `NewDriver`, one case to `NewMigrator`, one name to `SupportedDriverNames`, and one branch to `DetectDriver`.
-
-A subpackage of `internal/drivers` never imports its parent. `driverssqlite`, `driverspostgres`, and `driversmysql` import `driversshared` and `internal/migrations` only.
-
-## Package names
-
-A command package takes the name of its path, with no separator: `cmd/dbdiff/cmd/diff` holds `package cmddiff`, and `cmd/dbdiff/cmd/migrate/cmd/generate` holds `package cmdmigrategenerate`. The driver packages follow the same rule: `driversshared`, `driverssqlite`, `driverspostgres`, and `driversmysql`. The name differs from the directory, so every import writes the name:
-
-```go
-driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-```
-
-Each package of `cmd/dbdiff/internal` keeps its plain name: `migrations`, `helpers`, and `clitest`. A file that imports both members of a name pair writes a prefix on one of them:
-
-| Import path                      | Name in a file that imports both members of the pair |
-| -------------------------------- | ---------------------------------------------------- |
-| `internal/drivers`               | `drivers`                                            |
-| `drivers`                        | `dbdiffdrivers`                                      |
-| `cmd/dbdiff/internal/migrations` | `migrations`                                         |
-| `internal/migrations`            | `coremigrations`                                     |
-
-## Build and run
-
-```bash
-go build -o ./bin/dbdiff ./cmd/dbdiff
-go run ./cmd/dbdiff diff <source> <target>
-```
-
-The `dbdiff` command holds `--driver`, `--schema`, and `--ignore-table`, with `Local` false, so every subcommand reads them. Every other flag belongs to the command that reads it:
-
-| Command                | Flags                                                 |
-| ---------------------- | ----------------------------------------------------- |
-| `diff`                 | `--privileges`, `--comments`, `--data`, `--exit-code` |
-| Each `migrate` command | `--config`, `--source`, `--target`                    |
-| `migrate preview`      | The three flags above, and `--run`                    |
-| `migrate up`           | The three flags above, and `--to`                     |
-| `migrate baseline`     | The three flags above, and `--to`                     |
-
-Each subcommand of `migrate` writes its flags in its own `Command` function, because each command needs its own flag instances. A change of the text of one of the three migration flags touches each of the eight files.
-
-The SQLite driver needs CGO. If a build fails with an undefined symbol, set `CGO_ENABLED=1` before the build.
-
----
-
-# Drivers
-
-## The Driver interface
-
-```go
-type Driver interface {
-	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) (Instructions, error)
-}
-```
-
-A driver value runs one diff at a time. Each `Diff` call binds `SourceDatabaseConnection` and `TargetDatabaseConnection`, the two `*sql.DB` fields of the driver, on entry, and it clears both on exit. A constructor is `New<Engine>Driver(config *<Engine>DriverConfig)`, with no context, no error, and no source. `OpenSide(ctx, source, ...)` reads a database, or it builds a temporary database from a SQL source, for the span of one `Diff` call. `Diff` releases every resource that the call opened before it returns: the two connections, and the sqlite temporary directory, the postgres scratch server, or the mysql scratch server and scratch database that a SQL source needed.
-
-`internal/drivers.NewDriver(driverName, DriverOptions{Version, Schema, ComparePrivileges, IgnoreTables})` builds the driver of that name. It takes no context and it detects no engine, so the caller detects the engine first, with `DetectDriver`, then names it. An option that the driver name does not use, for example a schema on the mysql driver, gives an error that names the option.
-
-`DetectDriver` in `internal/drivers/shared/driver_detection.go` reads two `DataSource` values and names the engine when the caller names none. A SQL source takes the engine of the other side. Two empty or two different names give an error that asks for the name of the driver. That error names no CLI flag, because a Go caller holds no flag. `helpers.DetectDriverName` of `cmd/dbdiff/internal/helpers` wraps the error with the `--driver` flag, and every command calls that wrap.
-
-## Naming
-
-| Element           | Pattern                                                           | Example                            |
-| ----------------- | ----------------------------------------------------------------- | ---------------------------------- |
-| Model type        | `<Engine><Object>`                                                | `SQLiteTable`, `PostgresView`      |
-| Read method       | `Get<Object>s(ctx, db, ...)`                                      | `GetTableColumns`                  |
-| Compare method    | `Diff<Object>s(other)`                                            | `DiffIndexes`                      |
-| Lookup method     | `<Object>ByName(name) (*T, bool)`                                 | `ColumnByName`                     |
-| Equality method   | `Equal(other *T) bool`                                            | `SQLiteIndex.Equal`                |
-| Statement method  | `String() string`                                                 | `SQLUpdateInstruction.String`      |
-| Fragment method   | `Definition()` or `Clause()`                                      | `SQLiteColumn.Definition`          |
-| Instruction list  | `Instructions() []Instruction`                                    | `SQLiteTable.Instructions`         |
-| Instruction maker | `CreateInstruction()`, `DropInstruction()`, `UpdateInstruction()` | `PostgresDomain.CreateInstruction` |
-| Instruction type  | `<Prefix><Statement>Instruction`                                  | `SQLUpdateInstruction`             |
-| Action type       | `<Prefix><Action>Action`                                          | `PostgresSetNotNullAction`         |
-
-`HasEqualAttributes` compares two objects and ignores the name. The rename detection of SQLite uses this method.
+- One engine package holds one file per schema object, `<engine>_<object>.go`. Do not add a package for a schema object.
+- An engine package never imports `internal/drivers` or another engine package.
+- A package takes the name of its path with no separator, for example `driverssqlite`. Every import uses that name.
 
 ## How a diff works
 
-Every diff function follows three steps. Read the objects of both sides. Walk the target objects: print a `CREATE` statement for an absent name, and an `ALTER` statement or a `DROP` and `CREATE` pair for a changed object. Walk the source objects and print a `DROP` statement for each object that the target does not hold.
+1. Read the objects of both sides.
+2. Walk the target objects. Create each absent object. Alter or recreate each changed object.
+3. Walk the source objects. Drop each object that the target does not hold.
 
-The shared generic `DiffByKey` in `internal/drivers/shared/diff_by_key.go` implements these steps once, with a `DiffRules` value per object. An engine writes its own three steps only where the object needs more than a key match.
+If a key match is sufficient, use `DiffByKey` for these steps. Print the additions and the modifications before the removals.
 
-Rules for the output:
+- Build the output as a list of instruction values. Never format SQL at the call site.
+- An instruction type renders one SQL statement and quotes its own identifiers. In the driver packages, only an instruction type has a `String()` method.
+- The output must be the same on each run. Give every catalog query a stable `ORDER BY`. Keep every stable sort.
 
-- Build the output as `Instructions`. Append a value, and never format a string. `Instructions.String` renders the list as one SQL text.
-- Return the list at the end of the function. A section returns a `*SectionDiff`.
-- An instruction type holds one field for each part of its PostgreSQL synopsis. The type quotes every identifier, so no call site holds a format string.
-- Print the additions and the modifications first. Print the removals last.
-
-Use `lo.Find`, `lo.Map`, and `lo.Values` from `samber/lo` for the list operations.
-
-## Instructions
-
-An `Instruction` is one complete SQL statement, or one comment line:
-
-```go
-type Instruction interface {
-	String() string
-	Comment() string
-}
-```
-
-`Comment` names the object that the statement changes, for example `Create the table "users"`. A `Comment` method calls one of the builders of `internal/drivers/shared/instruction_comment.go`, so it stays one line. An instruction that holds a comment text names the field `Text`, because a field named `Comment` cannot live beside the method.
-
-A new instruction type takes one `Comment` method below its `String` method, one subtest in `instruction_test.go`, and one subtest in `instruction_comment_test.go` of its package. Those files hold the SQL text of each statement. A driver test compares instructions, and it trusts those files.
-
-In the driver packages, `String() string` belongs to an instruction type only. A model type answers with an instruction, with a fragment, or with a list of instructions. This command finds a violation, so it must return nothing:
+## Tests
 
 ```bash
-rg -n 'func \([a-z][A-Za-z0-9]* \*?[A-Za-z]+\) String\(\) string' internal/drivers/ --glob '!**/instruction*.go'
-```
-
-A nested part renders through a method that names what the method returns, for example `TableActionClause()`. Each part interface takes a different method name, so no part satisfies another part.
-
-The prefix of a type name reports the portability of the syntax: `SQL` for both engines, `SQLite` and `Postgres` for a syntax that one engine holds or writes differently.
-
-## The SQLite driver
-
-The driver reads the schema with `PRAGMA` statements and `sqlite_master`. A `PRAGMA` statement takes no placeholder, so the driver puts every name through `QuoteIdentifier`. SQLite holds no `ALTER COLUMN`, so a changed column, foreign key, or table constraint recreates the table. The driver also detects a renamed column through `HasEqualAttributes`, with exactly one candidate.
-
-SQLite gives no stable order for the tables and the foreign keys, so the driver sorts them with a stable sort. Keep every such sort. Without it the output changes between two runs. The code comments of the package hold the other engine rules.
-
-## The PostgreSQL driver
-
-The driver connects through `pgx/v5/stdlib` and reads the `pg_catalog` tables. Give every catalog query a stable `ORDER BY`, because PostgreSQL gives no stable order. `Diff` verifies first that the schema exists on both sides. Without that check an absent schema reads as an empty schema, and the diff drops every object of the source.
-
-`Diff` prints twelve sections in a dependency order. Each `Diff<Object>s` function returns a `SectionDiff` with `EarlyRemovals`, `Additions`, and `Removals`. `Diff` prints every `EarlyRemovals` in the REVERSE section order, then every `Additions` in the section order, then every `Removals` in the REVERSE section order. A new section needs no other work to get a correct order.
-
-Three rules keep the output free of noise:
-
-- An object that an extension owns stays out of the diff.
-- A sequence that a `SERIAL` column or an identity column owns stays out of the diff.
-- A query that reads a definition text removes the prefix of `current_schema()`. Without that step the diff drops and recreates an object that did not change. Keep that step in every new query that reads a definition text.
-
-An object with no `ALTER` action, for example a policy or a rule, prints a `DROP` and `CREATE` pair, and that pair stays one modification in `Additions`. The code comments of the package hold the order rules of the tables section.
-
-## The MySQL driver
-
-The driver reads the information_schema tables with the connected database as the schema, and it covers MySQL and MariaDB. Give every catalog query a stable `ORDER BY`. The driver quotes an identifier with its own `QuoteIdentifier`, because MySQL uses the backtick. The shared instruction types quote with the double quote, so the mysql package holds its own instruction types.
-
-The driver reads `SELECT VERSION()` per side and branches on MariaDB where the catalog differs: the STATISTICS table of MariaDB holds no EXPRESSION column, the CHECK_CONSTRAINTS table of MariaDB holds the table name, MariaDB stores every column default as an expression, and the sequences exist on MariaDB only. MySQL escapes a quote and a backslash in a catalog expression text, and `unescapeCatalogText` removes that escape.
-
-MySQL gives no creation order for the tables, so a diff that creates or drops a table with a foreign key, or that adds a key to a table that another instruction creates, wraps the output in a `SET FOREIGN_KEY_CHECKS` pair. MySQL builds an index with the name of a foreign key, so the table creation and the index additions skip a CREATE INDEX statement with that name. The code comments of the package hold the other engine rules and the order rules of `DiffTable`.
-
-`Diff` prints the sections in this order: sequences, tables with their triggers, routines, views, events, privileges, data. A routine, an event, and the partition clause of a table come from `SHOW CREATE`, with the DEFINER clause and the final semicolon removed. The event comparison also removes the STARTS clause, because MySQL writes the creation time into an event without one. The engine and the collation of a table compare through a default flag, so two databases with two different defaults compare as equal. The data comparison gives the shared `DiffData` a backtick `Quote` hook and its own statement types, because the shared types quote with the double quote.
-
-## SQL sources
-
-`ParseDataSource(argument string) DataSource` in `internal/drivers/shared/data_source.go` reads a CLI argument into a `DataSource`: a `FileDataSource` when the path ends in `.sql`, a `FolderDataSource` when the path is a directory, and a `ConnectionStringDataSource` in every other case. A path that holds `://` never names SQL text. `IsSQLSource` reports a `FileDataSource` or a `FolderDataSource`, and `SQLSourcePath` reads its path. A directory gives its top-level `.sql` files in the order of the names, without the `.down.sql` files.
-
-Each engine materializes a source as a temporary database: SQLite as a file, PostgreSQL as a scratch server from `fergusstrange/embedded-postgres`, and MySQL as a scratch database on a scratch server from `quantumsheep/embedded-mysql`. The scratch server takes the flavor and the version of the database of the other side, or the `version` key of `dbdiff.yaml`. A MariaDB other side gives a MariaDB scratch server. That server needs a Homebrew installation on macOS, and it starts on no Linux with arm64. Do not name a version in the code. Four settings of a scratch server matter. The postgres driver sets each one. The mysql library gives each one, so the mysql driver sets the flavor and the version only. Keep them:
-
-- The logger is `io.Discard`, because a default logger writes to the stream that holds the diff.
-- The port comes from a free-port lookup, because a real server holds the default port.
-- `Version` stays absent for an empty version, because an empty value gives an invalid configuration. The mysql library reads an empty version as the default of the flavor.
-- The binaries cache directory holds the version, `BinariesPath` for postgres and `CachePath` for mysql. Without that directory every run extracts the archive again.
-
-## The no-transaction directive
-
-A file that holds no directive runs in ONE call. A file that holds the line `-- dbdiff:no-transaction`, or the line `-- atlas:txmode none` of Atlas, runs one call for each statement. The directive is the one signal that starts the split. Never read the SQL text to make that decision.
-
-`internal/drivers/shared/sql_statement.go` holds the directive and the statement splitter, because the replay of a SQL source and the apply of a migration both read them. The splitter understands comments, strings, quoted identifiers, and dollar quotes.
-
-## Migrations
-
-The public entry point is `Driver.Migrator()` of the `drivers` package, so the public `drivers` package imports the public `migrations` package. The public `migrations` package aliases its types from `internal/drivers/shared`, calls `NewMigrator` of `internal/drivers`, and never imports `drivers`. An import of `drivers` there creates an import cycle.
-
-`Migrator` in `internal/migrations` is the interface that each engine implements, in the file `<engine>_migrator.go` of its package. `internal/migrations` imports `driversshared` only, and no engine package, because each engine package imports `internal/migrations`. An instruction that takes a migration file of its own implements `SeparateFileInstruction` of `internal/migrations`, so the file writer names no engine. `NewMigrator(ctx, driverName, target ConnectionStringDataSource, schema)` of `internal/drivers` builds the migrator. An empty driver name detects the engine from the target, because a migration target is always a database, never a SQL source. The constant `MigrationHistoryTableName` stays in `drivers`, because the diff hides that table. The `migrate` commands give the word `source` to the migration directory, and the word `target` to the other side.
-
-A migration entry holds one of five states: `pending`, `applied`, `changed` (checksum differs), `missing` (a row without a file), and `out of order` (no row, and the version sorts before the last applied version).
-
-Three behavior rules. Keep them:
-
-- `status`, `preview`, and `verify` report an out of order file. `up` and `step` refuse it, because applying it breaks the version order.
-- The preview applies every pending file in ONE transaction and rolls it back at the end, because a file reads the objects of the files before it.
-- `up` and `step` commit one file at a time, and they roll back no earlier file. The one difference: `step` asks a question before each file.
-
-## Data comparison
-
-The `--data` flag sets the `CompareData` field of `DiffOptions`, the third argument of `Diff`. The schema output stays the same in every case. `driversshared.DiffData` in `internal/drivers/shared/data_diff.go` holds the comparison, and each engine gives it a `DataRules` value. The data section prints after the whole schema section. Format each value as an SQL literal before the comparison, so `NULL` never equals the text `'NULL'`.
-
----
-
-# Tests
-
-Every test lives beside the code. There is no `tests` folder. The tests use `github.com/stretchr/testify/require`.
-
-## Run the tests
-
-```bash
-docker compose up -d    # PostgreSQL on 5432, MySQL on 3306, and MariaDB on 3307
+docker compose up -d    # PostgreSQL, MySQL, and MariaDB
 go test ./...
-go test -run TestSQLiteDriver/RenameColumn ./internal/drivers/sqlite
 ```
 
-The PostgreSQL tests need the database at `postgres://user:password@localhost:5432/dbdiff`. The MySQL tests need `root:password@tcp(localhost:3306)/dbdiff`, and the MariaDB tests need the same on the port 3307. `DBDIFF_TEST_SKIP_POSTGRES=1` stops `TestPostgresDriver`, and `DBDIFF_TEST_SKIP_MYSQL=1` stops `TestMySQLDriver` and `TestMariaDBDriver`. The CI gives the two variables and the `-short` flag to macOS and to Windows. Keep the variables empty on Linux, because a silent skip hides a server failure there.
+`DBDIFF_TEST_SKIP_POSTGRES=1` and `DBDIFF_TEST_SKIP_MYSQL=1` skip the server tests. Do not set them on Linux, because a silent skip hides a server failure.
 
-## Structure
+- Put the test beside the code. Use `testify/require`.
+- Give each new behavior one `t.Run` subtest in the main test function of its package.
+- In a driver test, compare the whole instruction list. Then apply the diff to the source. This proves that the SQL runs.
+- If the change recreates a table or moves data, insert rows before the diff. Then compare the rows after the diff.
+- Compare the whole error message. Never use `require.Contains` on a message.
 
-One engine gets one top-level function for each type under test: `TestSQLiteDriver` and `TestSQLiteMigrator`, `TestPostgresDriver` and `TestPostgresMigrator`, `TestMySQLDriver` and `TestMySQLMigrator`. `TestMariaDBDriver` runs the MariaDB branches of the mysql driver. Each behavior gets one `t.Run` subtest, named with a short noun phrase in CamelCase, for example `AddColumn`.
+## Go conventions
 
-`TestingSQLiteDriver` and `TestingPostgresDriver` embed the driver, hold the `testing.TB` value, and store the two `DataSource` values of the harness. `Diff` clears the connection fields of the driver on exit, so the harness keeps its own `sourceConnection` and `targetConnection` for `ExecOnTarget` and `ExecOnSource`. A SQL source holds no such connection, and a helper that reads or writes it materializes a temporary database on first use. The constructor builds the databases and registers the cleanup with `tb.Cleanup`. The PostgreSQL harness creates one source schema and one target schema in one database, drops both in the cleanup, and checks each drop with `require.NoError`. Keep the connection of the harness open until the cleanup ends. Every harness method calls `d.tb.Helper()` on its first line.
-
-The runner tests of `internal/migrations` are an external test package, `migrations_test`, because an internal test that imports an engine package makes an import cycle. Those tests read `NewTestSQLiteMigrator` and `GenerateSQLiteMigration` from `sqlite_migrator_testing.go` of the sqlite package, a file with no `_test` suffix, because a test file exports nothing to another package. The postgres and the mysql migrator harnesses live in the migrator test file of their package.
-
-| Helper                                   | Purpose                                            |
-| ---------------------------------------- | -------------------------------------------------- |
-| `ExecOnTarget(sql)`                      | Builds the wanted schema                           |
-| `ExecOnSource(sql)`                      | Builds the old schema, or applies the diff         |
-| `RequireInstructions(expected)`          | Compares the whole instruction list and returns it |
-| `FetchAllFromSource(table, ...)`         | Reads the rows of the source as maps (SQLite)      |
-| `WriteSQLFile(directory, name, content)` | Writes one `.sql` file of a SQL source             |
-
-`NewTestSQLiteDriverWithPaths(tb, target, source)` builds a driver for two given paths. Use it for a test of a SQL source. A test that starts a temporary PostgreSQL, MySQL, or MariaDB server calls `t.Skip` under `testing.Short`, because the first run downloads the server.
-
-## How to write a test
-
-1. Create the harness with `NewTestSQLiteDriver(t)` or `NewTestPostgresDriver(t)`.
-2. Build the wanted schema with `ExecOnTarget`.
-3. Build the old schema with `ExecOnSource`. Insert rows when the change moves data.
-4. Compare the whole output with `RequireInstructions`. Write the expected instructions as Go values.
-5. Apply the diff with `driver.ExecOnSource(diff)`. This step proves that the SQL runs.
-6. If the change moves data, read the rows with `FetchAllFromSource` and compare them with `require.Equal`.
-
-Rules:
-
-- Compare the whole instruction list. Never compare one instruction, and never compare the SQL text.
-- Always apply the diff to the source after the comparison.
-- A test that recreates a table must insert rows first, and must compare the rows after.
-- Add a subtest for each new schema object and for each new kind of change.
-
-## CLI tests
-
-Each command package holds the tests of its own command. `TestDbdiffCommand` of `cmd/dbdiff/main_test.go` covers the root command and the `diff` command. `TestMigrateCommand` covers the flow that walks every subcommand of `migrate`. Add a subtest for each new flag and for each new error of the command. The `cmd/dbdiff/internal/clitest` package holds `Build`, `Run`, and the writers of the test fixtures.
-
-## Error assertions
-
-Compare the whole error output. A test of an error message writes the message in full, with `require.Equal` on `result.Stderr` of a CLI test, or with `require.EqualError` on an error value. Never assert on a part of a message with `require.Contains`. A part hides a change of the text near it, and the whole text keeps the output predictable. The CLI writes one line with the form `dbdiff: <message>\n`.
-
----
-
-# Go conventions
-
-- Run `gofmt -w .` and `golangci-lint run ./...` after every change. Correct every finding. `.golangci.yml` holds no exclusion and no `nolint` comment. If a linter reports the code, correct the code.
-- Name a variable with full words: `sourceDatabaseConnection`, not `srcConn`.
-- Return an error to the caller. Never call `os.Exit` or `panic` in the `drivers` package.
-- Wrap an error with context in a command package: `fmt.Errorf("failed to ...: %w", err)`.
-- Close every `*sql.Rows` with `defer func() { _ = rows.Close() }()`. After the `Next` loop, return the error of `rows.Err()`. Without that check the driver reads a truncated schema.
-- Drop the error of a cleanup call with the blank identifier: `_ = connection.Close()`. In a test, check that error with `require.NoError` instead.
-- Pass the `context.Context` to every query with `QueryContext` or `ExecContext`.
-- Use a placeholder for a value: `?` for SQLite and `$1` for PostgreSQL.
+- After every change, run `gofmt -w .` and `golangci-lint run ./...`. Correct every finding. Never add a `nolint` comment.
+- Name variables with full words: `sourceDatabaseConnection`, not `srcConn`.
+- Return errors. Never call `os.Exit` or `panic` outside `main`.
+- Close every `*sql.Rows`. After the loop, return the error of `rows.Err()`.
+- Pass the context to every query.
+- Never initialize a variable in the header of an `if`, `for`, `switch`, or `select`.
+- Put a blank line before and after a block. Do not put this line at the start or the end of a body. Do not put it between a block and the assignment that its condition checks.
+- In a struct literal, write each field on its own line.
+- Before you use a library, read its version in `go.mod`. Then read the documentation of that version with `go doc`.
 
 ## Comments
 
-Write no comment. That is the default. One test decides each comment: if the removal of the comment lets a reader break the code, keep the comment. In every other case, delete the comment.
+Write no comment by default. Keep a comment only if, without it, a reader can break the code. This applies to an order that a change can break, an engine rule that the code cannot show, and a step that looks unnecessary.
 
-Four kinds of comment pass the test:
+## Writing style
 
-- An order that a later change can break.
-- A rule of the engine that the code cannot show, for example "SQLite refuses an ADD COLUMN action that holds a STORED generated column."
-- A step that looks unnecessary. Name what breaks without the step.
-- A field or a branch that the code near it ignores.
+Write comments, commit messages, documentation, CLI help text, and error messages in ASD-STE100 Simplified Technical English.
 
-Every other comment fails the test: a sentence that repeats a name, a sentence that reads the code aloud, the SQL synopsis above an instruction type, the same reason in two places, and the empty value of a field. Write the reason alone, and do not open a comment with the name of the item below it. This rule covers a test file too. A subtest name replaces a comment above the subtest.
+- Write short sentences in the active voice, with the condition before the command.
+- Use only the modal verbs can, will, and must.
+- Use one name for one item.
+- Do not use a semicolon, a contraction, an em dash, "e.g.", "i.e.", or "etc.".
 
-## Blocks
+## Git
 
-An `if`, a `for`, a `switch`, and a `select` are blocks. Two rules cover every block.
-
-**Never initialize a variable in the header of a block.** Write `err := f()` and `if err != nil {` on two lines. Never write `if err := f(); err != nil {`. When the scope holds an `err` variable already, write `err = f()`.
-
-**Put a blank line before a block and after a block.** Three cases take no blank line:
-
-- The assignment that the condition checks stays on the line directly above the block, and the blank line goes before that assignment. A comment above the block belongs to the block in the same way.
-- A block that opens a body takes no blank line above it.
-- A block that closes a body takes no blank line below it. An `else` keeps `} else {` on one line.
-
-```go
-rows, err := db.QueryContext(ctx, query)
-if err != nil {
-	return nil, err
-}
-
-defer func() { _ = rows.Close() }()
-
-for rows.Next() {
-	var tableName string
-
-	err := rows.Scan(&tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	tables = append(tables, tableName)
-}
-
-err = rows.Err()
-if err != nil {
-	return nil, err
-}
-```
-
-## Struct literals
-
-**A struct literal declares one field per line.** A literal that sets one field or more splits every field onto its own line, with the closing brace on its own line. This rule covers a standard-library type such as `sql.NullString`, with no exception. **An empty literal stays on one line**: `&PostgresDropDomainDefaultAction{}`.
-
-# Writing style
-
-Write every text in ASD-STE100 Simplified Technical English. This rule covers code comments, commit messages, documentation, CLI help text, and error messages.
-
-- Write an instruction in the imperative. Use one instruction per sentence, and 20 words maximum.
-- Write a description in the simple present, simple past, or simple future. Use 25 words maximum per sentence.
-- Use the active voice. Name the actor.
-- Use only these modal verbs: can, will, must. Do not use should, would, may, might, or could.
-- Put the condition first, before the command: "If the build fails, read the log".
-- Use one name for one item. Do not write "config" in one place and "settings" in another.
-- Do not use a semicolon. Write two sentences instead.
-- Keep the articles and the conjunction "that". Do not use a contraction.
-- Delete a filler word: simply, just, seamlessly, robust, comprehensive, powerful.
-- Write "for example" for "e.g." and "that is" for "i.e.". Do not write "etc.".
-- Never use an em dash. Use a regular dash instead.
-- Do not change code, identifiers, commands, file paths, or a quoted error message.
-- Do not wrap a paragraph at a column limit. Write each paragraph on one line.
-
-# Git
-
-- Do not run `git commit` unless the user asks for it.
-- Use Conventional Commits with a scope: `feat(sqlite): add the view diff`. The scopes are `sqlite`, `postgres`, `drivers`, `cli`, `ci`, and `docs`. Omit the scope for a change that crosses several parts. Mark a breaking change with `!`.
-- Write the subject in lowercase, in the imperative, with no final period. Write the subject only, with no body and no trailer. Do not add a `Claude-Session:` trailer. This rule covers a new commit and a commit that you write again.
+- If the user does not ask for a commit, do not run `git commit`.
+- Use Conventional Commits with a scope, for example `feat(sqlite): add the view diff`. Write the subject only, in lowercase, with no body and no trailer.
 - Update the support table of `README.md` in the same commit as the feature.
-- A tag with the form `v*.*.*` starts the release workflow.
 
-# Delegation
+## Delegation
 
-This section speaks to the agent that answers the user. That agent is the parent.
+**If you are a subagent, do the work yourself and never spawn another subagent.**
 
-**If you are a subagent, stop here. Do the work yourself. Never spawn another subagent. Return your result to the parent.**
-
-Split a large task across subagents. A clean context gives a better result. Spawn a subagent to isolate context, to run independent work in parallel, or to do bulk mechanical work. Keep the work in the parent when the parent needs the reasoning. Pick the cheapest model that does the subtask well: Haiku for mechanical work, Sonnet for scoped research, Opus for planning. The parent owns the final answer.
-
-Rules for parallel work on one checkout:
-
-- Give each subagent a file list that no other subagent shares. Two agents must never edit one test file at the same time.
-- A subagent must never run `git checkout`, `git reset`, `git stash`, `git add`, or `git commit`. If a subagent finds work outside its scope, it reports the work. It never reverts the work.
-- For a bulk edit, ask each subagent for its decisions. Then apply every decision yourself, in one place.
-- Run `ListAgents` before any command that changes shared state, for example `git reset` or `gofmt -w .`. If an agent still runs, stop it with `TaskStop`.
-- A subagent reads the version of this file from the start of the session. If you change a rule here during a session, repeat that rule in the spawn prompt.
+- Give each subagent its own file list. Do not let two agents edit one file at the same time.
+- Do not let a subagent run a git command that changes the checkout or the index.
+- Before a command that changes shared state, for example `gofmt -w .`, make sure that no subagent still runs.

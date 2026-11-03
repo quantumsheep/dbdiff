@@ -271,6 +271,7 @@ func applyPendingMigrations(ctx context.Context, migrator Migrator, set *Migrati
 			applyTheRest = answer == "r"
 		}
 
+		// Each file commits alone. A failure must not roll back an earlier file.
 		err := applyOneMigration(ctx, migrator, entry, output)
 		if err != nil {
 			return err

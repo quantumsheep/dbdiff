@@ -165,6 +165,7 @@ func (d *MySQLDriver) ScratchServer(flavor embeddedmysql.Flavor, version string)
 		return d.scratchServer, nil
 	}
 
+	// The library sets the logger, the port, and the cache path by itself.
 	server := embeddedmysql.NewDatabase(embeddedmysql.DefaultConfig().
 		Flavor(flavor).
 		Version(version))
