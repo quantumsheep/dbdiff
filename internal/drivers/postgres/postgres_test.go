@@ -4426,6 +4426,149 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("RecreateTheViewsThatReadARecreatedView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users;
+			CREATE VIEW view_a AS SELECT id FROM view_b;
+		`)
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users WHERE id > 0;
+			CREATE VIEW view_a AS SELECT id FROM view_b;
+		`)
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "view_a"},
+			&driversshared.SQLDropViewInstruction{Name: "view_b"},
+			&PostgresCreateViewInstruction{
+				Name:  "view_b",
+				Query: " SELECT id\n   FROM users\n  WHERE (id > 0);",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "view_a",
+				Query: " SELECT id\n   FROM view_b;",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("RecreateAViewThatCountsTheRowsOfARecreatedView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users;
+			CREATE VIEW view_a AS SELECT count(*) AS total FROM view_b;
+		`)
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users WHERE id > 0;
+			CREATE VIEW view_a AS SELECT count(*) AS total FROM view_b;
+		`)
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "view_a"},
+			&driversshared.SQLDropViewInstruction{Name: "view_b"},
+			&PostgresCreateViewInstruction{
+				Name:  "view_b",
+				Query: " SELECT id\n   FROM users\n  WHERE (id > 0);",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "view_a",
+				Query: " SELECT count(*) AS total\n   FROM view_b;",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("RecreateAChainOfViewsAndMaterializedViews", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users;
+			CREATE MATERIALIZED VIEW view_a AS SELECT id FROM view_b;
+			CREATE VIEW view_c AS SELECT id FROM view_a;
+		`)
+		driver.ExecOnTarget(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW view_b AS SELECT id FROM users WHERE id > 0;
+			CREATE MATERIALIZED VIEW view_a AS SELECT id FROM view_b;
+			CREATE VIEW view_c AS SELECT id FROM view_a;
+		`)
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "view_c"},
+			&PostgresDropMaterializedViewInstruction{Name: "view_a"},
+			&driversshared.SQLDropViewInstruction{Name: "view_b"},
+			&PostgresCreateViewInstruction{
+				Name:  "view_b",
+				Query: " SELECT id\n   FROM users\n  WHERE (id > 0);",
+			},
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "view_a",
+				Query: " SELECT id\n   FROM view_b;",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "view_c",
+				Query: " SELECT id\n   FROM view_a;",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ARecreatedDependentViewKeepsItsGrants", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnSource(`
+			CREATE VIEW view_b AS SELECT 1 AS value;
+			CREATE VIEW view_a AS SELECT value FROM view_b;
+			GRANT SELECT ON view_a TO dbdiff_reader;
+		`)
+		driver.ExecOnTarget(`
+			CREATE VIEW view_b AS SELECT 2 AS value;
+			CREATE VIEW view_a AS SELECT value FROM view_b;
+			GRANT SELECT ON view_a TO dbdiff_reader;
+		`)
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "view_a"},
+			&driversshared.SQLDropViewInstruction{Name: "view_b"},
+			&PostgresCreateViewInstruction{
+				Name:  "view_b",
+				Query: " SELECT 2 AS value;",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "view_a",
+				Query: " SELECT value\n   FROM view_b;",
+			},
+			&PostgresSetOwnerInstruction{
+				ObjectType: "VIEW",
+				ObjectName: "view_a",
+				Owner:      "user",
+			},
+			&PostgresSetOwnerInstruction{
+				ObjectType: "VIEW",
+				ObjectName: "view_b",
+				Owner:      "user",
+			},
+			&PostgresGrantInstruction{
+				Privileges: []string{"SELECT"},
+				ObjectType: "TABLE",
+				ObjectName: "view_a",
+				Grantee:    "dbdiff_reader",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("CompareRows", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true

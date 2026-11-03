@@ -10,11 +10,12 @@ import (
 // A materialized view reads a table, a view, or a second materialized view, so the diff
 // keeps the order of the dependency.
 type PostgresMaterializedView struct {
-	Name    string
-	Def     string
-	Columns []*PostgresViewColumn
-	Indexes []*PostgresIndex
-	Comment string
+	Name            string
+	Def             string
+	Columns         []*PostgresViewColumn
+	DependencyNames []string
+	Indexes         []*PostgresIndex
+	Comment         string
 }
 
 func (v *PostgresMaterializedView) HasEqualColumns(other *PostgresMaterializedView) bool {
@@ -70,42 +71,6 @@ func (v *PostgresMaterializedView) IndexByName(name string) (*PostgresIndex, boo
 	return nil, false
 }
 
-func sortMaterializedViewsByDependency(views []*PostgresMaterializedView) []*PostgresMaterializedView {
-	viewByName := make(map[string]*PostgresMaterializedView, len(views))
-
-	for _, view := range views {
-		viewByName[view.Name] = view
-	}
-
-	sorted := make([]*PostgresMaterializedView, 0, len(views))
-	visited := make(map[string]bool, len(views))
-
-	var visit func(view *PostgresMaterializedView)
-
-	visit = func(view *PostgresMaterializedView) {
-		if visited[view.Name] {
-			return
-		}
-
-		visited[view.Name] = true
-
-		for _, column := range view.Columns {
-			dependency, isView := viewByName[column.Table]
-			if isView {
-				visit(dependency)
-			}
-		}
-
-		sorted = append(sorted, view)
-	}
-
-	for _, view := range views {
-		visit(view)
-	}
-
-	return sorted
-}
-
 func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) ([]*PostgresMaterializedView, error) {
 	// Every query skips the objects that an extension owns (deptype 'e') and ends with a
 	// stable ORDER BY, because PostgreSQL gives no stable row order.
@@ -140,6 +105,13 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 
 		view.Columns = columns
 
+		dependencyNames, err := d.GetViewDependencyNames(ctx, db, view.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		view.DependencyNames = dependencyNames
+
 		indexes, err := d.GetMaterializedViewIndexes(ctx, db, view.Name)
 		if err != nil {
 			return nil, err
@@ -148,7 +120,7 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 		view.Indexes = indexes
 	}
 
-	return sortMaterializedViewsByDependency(views), nil
+	return views, nil
 }
 
 func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresIndex, error) {

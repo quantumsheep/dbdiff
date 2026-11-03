@@ -246,3 +246,42 @@ func (d *PostgresDriver) markRecreated(name string) {
 
 	d.recreatedObjectNames[name] = true
 }
+
+// A depth-first walk puts each object after the objects that it depends on. Two
+// independent objects keep their order in the input. A name that is not in the input
+// does not count as a dependency.
+func sortByDependency[T any](objects []T, nameOf func(T) string, dependencyNamesOf func(T) []string) []T {
+	objectByName := make(map[string]T, len(objects))
+
+	for _, object := range objects {
+		objectByName[nameOf(object)] = object
+	}
+
+	sorted := make([]T, 0, len(objects))
+	visited := make(map[string]bool, len(objects))
+
+	var visit func(object T)
+
+	visit = func(object T) {
+		if visited[nameOf(object)] {
+			return
+		}
+
+		visited[nameOf(object)] = true
+
+		for _, dependencyName := range dependencyNamesOf(object) {
+			dependency, found := objectByName[dependencyName]
+			if found {
+				visit(dependency)
+			}
+		}
+
+		sorted = append(sorted, object)
+	}
+
+	for _, object := range objects {
+		visit(object)
+	}
+
+	return sorted
+}

@@ -584,51 +584,11 @@ func diffTriggers(targetTable *PostgresTable, sourceTable *PostgresTable) []driv
 // A statement needs the parent: a partition needs its parent, a table of INHERITS needs
 // each parent of it, and a foreign key needs the table that it names.
 func sortTablesByDependency(tables []*PostgresTable) []*PostgresTable {
-	tableByName := make(map[string]*PostgresTable, len(tables))
-
-	for _, table := range tables {
-		tableByName[table.Name] = table
-	}
-
-	sorted := make([]*PostgresTable, 0, len(tables))
-	visited := make(map[string]bool, len(tables))
-
-	var visit func(table *PostgresTable)
-
-	visit = func(table *PostgresTable) {
-		if visited[table.Name] {
-			return
-		}
-
-		visited[table.Name] = true
-
-		parent, isPartition := tableByName[table.PartitionParent]
-		if isPartition {
-			visit(parent)
-		}
-
-		for _, parentName := range table.Inherits {
-			parent, found := tableByName[parentName]
-			if found {
-				visit(parent)
-			}
-		}
-
-		for _, referenceName := range table.References {
-			reference, found := tableByName[referenceName]
-			if found {
-				visit(reference)
-			}
-		}
-
-		sorted = append(sorted, table)
-	}
-
-	for _, table := range tables {
-		visit(table)
-	}
-
-	return sorted
+	return sortByDependency(tables, func(table *PostgresTable) string {
+		return table.Name
+	}, func(table *PostgresTable) []string {
+		return slices.Concat([]string{table.PartitionParent}, table.Inherits, table.References)
+	})
 }
 
 func (t *PostgresTable) DiffRules(other *PostgresTable) []driversshared.Instruction {

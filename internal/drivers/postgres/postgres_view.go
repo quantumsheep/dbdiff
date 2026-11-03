@@ -22,6 +22,10 @@ type PostgresView struct {
 	Def     string
 	Columns []*PostgresViewColumn
 
+	// A view that names no column of a relation, for example with count(*), has no column
+	// of it in Columns. Thus the dependency order reads this field.
+	DependencyNames []string
+
 	// The query text of the view holds no check option, so the diff compares this field too.
 	CheckOption string
 
@@ -80,12 +84,44 @@ func (r *PostgresRelation) Name() string {
 	return r.MaterializedView.Name
 }
 
-func (r *PostgresRelation) Columns() []*PostgresViewColumn {
+func (r *PostgresRelation) DependencyNames() []string {
 	if r.View != nil {
-		return r.View.Columns
+		return r.View.DependencyNames
 	}
 
-	return r.MaterializedView.Columns
+	return r.MaterializedView.DependencyNames
+}
+
+// A view and a materialized view can have the same definition, so the comparison checks the
+// kind too. A type change of a column that the relation reads keeps the definition text
+// equal, so the comparison checks the columns too.
+func (r *PostgresRelation) HasEqualDefinition(other *PostgresRelation) bool {
+	if r.View != nil {
+		return other.View != nil &&
+			r.View.Def == other.View.Def &&
+			r.View.CheckOption == other.View.CheckOption &&
+			r.View.HasEqualColumns(other.View)
+	}
+
+	return other.MaterializedView != nil &&
+		r.MaterializedView.Def == other.MaterializedView.Def &&
+		r.MaterializedView.HasEqualColumns(other.MaterializedView)
+}
+
+func (r *PostgresRelation) DropInstruction() driversshared.Instruction {
+	if r.View != nil {
+		return &driversshared.SQLDropViewInstruction{Name: r.View.Name}
+	}
+
+	return r.MaterializedView.DropInstruction()
+}
+
+func (r *PostgresRelation) Instructions() []driversshared.Instruction {
+	if r.View != nil {
+		return r.View.Instructions()
+	}
+
+	return r.MaterializedView.Instructions()
 }
 
 // Two independent relations keep the order that the queries give.
@@ -104,39 +140,7 @@ func sortRelationsByDependency(views []*PostgresView, materializedViews []*Postg
 		})
 	}
 
-	relationByName := make(map[string]*PostgresRelation, len(relations))
-
-	for _, relation := range relations {
-		relationByName[relation.Name()] = relation
-	}
-
-	sorted := make([]*PostgresRelation, 0, len(relations))
-	visited := make(map[string]bool, len(relations))
-
-	var visit func(relation *PostgresRelation)
-
-	visit = func(relation *PostgresRelation) {
-		if visited[relation.Name()] {
-			return
-		}
-
-		visited[relation.Name()] = true
-
-		for _, column := range relation.Columns() {
-			dependency, isRelation := relationByName[column.Table]
-			if isRelation {
-				visit(dependency)
-			}
-		}
-
-		sorted = append(sorted, relation)
-	}
-
-	for _, relation := range relations {
-		visit(relation)
-	}
-
-	return sorted
+	return sortByDependency(relations, (*PostgresRelation).Name, (*PostgresRelation).DependencyNames)
 }
 
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {
@@ -174,9 +178,14 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 		if err != nil {
 			return nil, err
 		}
+
+		view.DependencyNames, err = d.GetViewDependencyNames(ctx, db, view.Name)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return sortViewsByDependency(views), nil
+	return views, nil
 }
 
 // The type of each column comes with it, because a type change makes the view invalid.
@@ -209,6 +218,30 @@ func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewNam
 	}, viewName)
 }
 
+// The query reads each relation that the view reads, also a relation of which the view
+// names no column.
+func (d *PostgresDriver) GetViewDependencyNames(ctx context.Context, db *sql.DB, viewName string) ([]string, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT DISTINCT source_class.relname
+		FROM pg_depend d
+		JOIN pg_rewrite view_rule ON view_rule.oid = d.objid
+		JOIN pg_class view_class ON view_class.oid = view_rule.ev_class
+		JOIN pg_class source_class ON source_class.oid = d.refobjid
+		WHERE d.classid = 'pg_rewrite'::regclass
+		AND d.refclassid = 'pg_class'::regclass
+		AND view_class.relnamespace = current_schema()::regnamespace
+		AND view_class.relname = $1
+		AND view_class.oid <> d.refobjid
+		ORDER BY source_class.relname
+	`, func(rows *sql.Rows) (string, error) {
+		var name string
+
+		err := rows.Scan(&name)
+
+		return name, err
+	}, viewName)
+}
+
 // A view can read a materialized view, and a materialized view can read a view, so the
 // two kinds share one section and one dependency order.
 func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*driversshared.SectionDiff, error) {
@@ -238,97 +271,65 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*dr
 	targetRelations := sortRelationsByDependency(targetViews, targetMaterializedViews)
 	sourceRelations := sortRelationsByDependency(sourceViews, sourceMaterializedViews)
 
-	for _, relation := range targetRelations {
-		if relation.View != nil {
-			targetView := relation.View
+	targetRelationByName := lo.KeyBy(targetRelations, (*PostgresRelation).Name)
+	sourceRelationByName := lo.KeyBy(sourceRelations, (*PostgresRelation).Name)
 
-			sourceView, found := lo.Find(sourceViews, func(view *PostgresView) bool {
-				return view.Name == targetView.Name
-			})
-			if !found {
-				additions = append(additions, targetView.Instructions()...)
-				continue
-			}
+	// PostgreSQL refuses to drop a relation while another relation reads it. CASCADE can
+	// drop objects that the diff does not see. Thus the diff also drops and creates again
+	// each relation that reads a dropped relation. The dependency order puts each relation
+	// after the relations that it reads, so one pass finds every indirect reader too.
+	droppedNames := map[string]bool{}
 
-			// A type change of a column that the view reads keeps the definition text equal.
-			if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
-				!targetView.HasEqualColumns(sourceView) {
-				d.markRecreated(targetView.Name)
-				additions = append(additions, targetView.Instructions()...)
-				continue
-			}
+	for _, sourceRelation := range sourceRelations {
+		targetRelation, found := targetRelationByName[sourceRelation.Name()]
+		readsADroppedRelation := lo.SomeBy(sourceRelation.DependencyNames(), func(name string) bool {
+			return droppedNames[name]
+		})
+		if !found || readsADroppedRelation || !targetRelation.HasEqualDefinition(sourceRelation) {
+			droppedNames[sourceRelation.Name()] = true
+		}
+	}
 
-			if targetView.Comment != sourceView.Comment {
+	for _, targetRelation := range targetRelations {
+		sourceRelation, found := sourceRelationByName[targetRelation.Name()]
+		if !found {
+			additions = append(additions, targetRelation.Instructions()...)
+			continue
+		}
+
+		// A DROP statement of a materialized view removes every index of it, and the
+		// create instructions give back the indexes.
+		if droppedNames[targetRelation.Name()] {
+			d.markRecreated(targetRelation.Name())
+			additions = append(additions, targetRelation.Instructions()...)
+			continue
+		}
+
+		if targetRelation.View != nil {
+			if targetRelation.View.Comment != sourceRelation.View.Comment {
 				additions = append(additions, &PostgresCommentOnViewInstruction{
-					Name: targetView.Name,
-					Text: targetView.Comment,
+					Name: targetRelation.View.Name,
+					Text: targetRelation.View.Comment,
 				})
 			}
 
 			continue
 		}
 
-		targetView := relation.MaterializedView
-
-		sourceView, found := lo.Find(sourceMaterializedViews, func(view *PostgresMaterializedView) bool {
-			return view.Name == targetView.Name
-		})
-		if !found {
-			additions = append(additions, targetView.Instructions()...)
-			continue
-		}
-
-		// A DROP statement of the view removes every index of it.
-		if targetView.Def != sourceView.Def || !targetView.HasEqualColumns(sourceView) {
-			d.markRecreated(targetView.Name)
-			additions = append(additions, targetView.Instructions()...)
-			continue
-		}
-
-		if targetView.Comment != sourceView.Comment {
+		if targetRelation.MaterializedView.Comment != sourceRelation.MaterializedView.Comment {
 			additions = append(additions, &PostgresCommentOnMaterializedViewInstruction{
-				Name: targetView.Name,
-				Text: targetView.Comment,
+				Name: targetRelation.MaterializedView.Name,
+				Text: targetRelation.MaterializedView.Comment,
 			})
 		}
 
-		additions = append(additions, diffMaterializedViewIndexes(targetView, sourceView)...)
+		additions = append(additions, diffMaterializedViewIndexes(targetRelation.MaterializedView, sourceRelation.MaterializedView)...)
 	}
 
-	// PostgreSQL refuses a DROP statement while another view still reads the object, so
-	// a backward walk drops each dependent view first.
-	for _, relation := range slices.Backward(sourceRelations) {
-		if relation.View != nil {
-			sourceView := relation.View
-
-			targetView, found := lo.Find(targetViews, func(view *PostgresView) bool {
-				return view.Name == sourceView.Name
-			})
-			if !found {
-				earlyRemovals = append(earlyRemovals, &driversshared.SQLDropViewInstruction{Name: sourceView.Name})
-				continue
-			}
-
-			if targetView.Def != sourceView.Def || targetView.CheckOption != sourceView.CheckOption ||
-				!targetView.HasEqualColumns(sourceView) {
-				earlyRemovals = append(earlyRemovals, &driversshared.SQLDropViewInstruction{Name: sourceView.Name})
-			}
-
-			continue
-		}
-
-		sourceView := relation.MaterializedView
-
-		targetView, found := lo.Find(targetMaterializedViews, func(view *PostgresMaterializedView) bool {
-			return view.Name == sourceView.Name
-		})
-		if !found {
-			earlyRemovals = append(earlyRemovals, sourceView.DropInstruction())
-			continue
-		}
-
-		if targetView.Def != sourceView.Def || !targetView.HasEqualColumns(sourceView) {
-			earlyRemovals = append(earlyRemovals, sourceView.DropInstruction())
+	// A backward walk drops each relation before the relations that it reads.
+	for _, sourceRelation := range slices.Backward(sourceRelations) {
+		if droppedNames[sourceRelation.Name()] {
+			earlyRemovals = append(earlyRemovals, sourceRelation.DropInstruction())
 		}
 	}
 
@@ -336,41 +337,4 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*dr
 		EarlyRemovals: earlyRemovals,
 		Additions:     additions,
 	}, nil
-}
-
-// Two independent views keep the order that the query gives.
-func sortViewsByDependency(views []*PostgresView) []*PostgresView {
-	viewByName := make(map[string]*PostgresView, len(views))
-
-	for _, view := range views {
-		viewByName[view.Name] = view
-	}
-
-	sorted := make([]*PostgresView, 0, len(views))
-	visited := make(map[string]bool, len(views))
-
-	var visit func(view *PostgresView)
-
-	visit = func(view *PostgresView) {
-		if visited[view.Name] {
-			return
-		}
-
-		visited[view.Name] = true
-
-		for _, column := range view.Columns {
-			dependency, isView := viewByName[column.Table]
-			if isView {
-				visit(dependency)
-			}
-		}
-
-		sorted = append(sorted, view)
-	}
-
-	for _, view := range views {
-		visit(view)
-	}
-
-	return sorted
 }
