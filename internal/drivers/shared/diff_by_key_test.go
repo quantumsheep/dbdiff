@@ -69,4 +69,69 @@ func TestDiffByKey(t *testing.T) {
 		require.Nil(t, additions)
 		require.Nil(t, removals)
 	})
+	replaceKey := func(object string) string {
+		return object[:1]
+	}
+	replaceEqual := func(target string, source string) bool {
+		return target == source
+	}
+	replaceCreate := func(target string) Instruction {
+		return &SQLCommentInstruction{
+			Text: "create " + target,
+		}
+	}
+	replaceDrop := func(source string) Instruction {
+		return &SQLCommentInstruction{
+			Text: "drop " + source,
+		}
+	}
+
+	t.Run("ReplaceRules", func(t *testing.T) {
+		additions, removals, err := DiffByKey([]string{"a1", "b2", "c3"}, []string{"b9", "c3", "d4"},
+			ReplaceRules(replaceKey, replaceEqual, replaceCreate, replaceDrop))
+		require.NoError(t, err)
+		require.Equal(t, []Instruction{
+			&SQLCommentInstruction{
+				Text: "create a1",
+			},
+			&SQLCommentInstruction{
+				Text: "drop b9",
+			},
+			&SQLCommentInstruction{
+				Text: "create b2",
+			},
+		}, additions)
+		require.Equal(t, []Instruction{
+			&SQLCommentInstruction{
+				Text: "drop d4",
+			},
+		}, removals)
+	})
+
+	t.Run("ReplaceByKey", func(t *testing.T) {
+		additions, removals := ReplaceByKey([]string{"a1", "e5", "b2", "c3"}, []string{"d4", "b9", "c3", "e8"},
+			replaceKey, replaceEqual, replaceCreate, replaceDrop)
+		require.Equal(t, []Instruction{
+			&SQLCommentInstruction{
+				Text: "create a1",
+			},
+			&SQLCommentInstruction{
+				Text: "create e5",
+			},
+			&SQLCommentInstruction{
+				Text: "create b2",
+			},
+		}, additions)
+		require.Equal(t, []Instruction{
+			&SQLCommentInstruction{
+				Text: "drop e8",
+			},
+			&SQLCommentInstruction{
+				Text: "drop b9",
+			},
+			&SQLCommentInstruction{
+				Text: "drop d4",
+			},
+		}, removals)
+	})
 }

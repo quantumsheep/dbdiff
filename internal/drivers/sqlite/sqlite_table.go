@@ -79,6 +79,10 @@ func (t *SQLiteTable) ColumnByName(name string) (*SQLiteColumn, bool) {
 	return nil, false
 }
 
+func columnName(column *SQLiteColumn) string {
+	return column.Name
+}
+
 func (t *SQLiteTable) CreateTableInstruction() *SQLiteCreateTableInstruction {
 	return &SQLiteCreateTableInstruction{
 		Name:               t.Name,
@@ -116,10 +120,10 @@ func (t *SQLiteTable) Instructions() []driversshared.Instruction {
 }
 
 type SQLiteTableColumnsDiff struct {
-	Added    []string
-	Modified []string
-	Removed  []string
-	Renamed  map[string]string
+	Added       []string
+	Modified    []string
+	Removed     []string
+	RenamedFrom map[string]string
 
 	ForeignKeysChanged  bool
 	ConstraintsChanged  bool
@@ -163,7 +167,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		Added:              []string{},
 		Modified:           []string{},
 		Removed:            []string{},
-		Renamed:            make(map[string]string),
+		RenamedFrom:        driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*SQLiteColumn).HasEqualAttributes),
 		ForeignKeysChanged: false,
 		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) ||
 			t.PrimaryKeyName != other.PrimaryKeyName ||
@@ -178,16 +182,8 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 	for _, targetColumn := range t.Columns {
 		sourceColumn, found := other.ColumnByName(targetColumn.Name)
 		if !found {
-			candidates := lo.Filter(other.Columns, func(column *SQLiteColumn, _ int) bool {
-				_, existsInTargetTable := t.ColumnByName(column.Name)
-				_, alreadyRenamed := diff.Renamed[column.Name]
-				return !existsInTargetTable && !alreadyRenamed && column.HasEqualAttributes(targetColumn)
-			})
-
-			// A rename is a guess. Two candidates make the guess unsafe, so the column
-			// becomes an addition and the old columns become removals.
-			if len(candidates) == 1 {
-				diff.Renamed[candidates[0].Name] = targetColumn.Name
+			_, renamed := diff.RenamedFrom[targetColumn.Name]
+			if renamed {
 				continue
 			}
 
@@ -220,7 +216,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 
 	for _, sourceColumn := range other.Columns {
 		_, found := t.ColumnByName(sourceColumn.Name)
-		_, renamed := diff.Renamed[sourceColumn.Name]
+		_, renamed := lo.FindKey(diff.RenamedFrom, sourceColumn.Name)
 		if !found && !renamed {
 			diff.Removed = append(diff.Removed, sourceColumn.Name)
 		}
@@ -255,8 +251,6 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]driversshared.Instruction
 
 		recreation := []driversshared.Instruction{tempTable.CreateTableInstruction()}
 
-		newToOld := lo.Invert(columnsDiff.Renamed)
-
 		var insertColumns []string
 		var selectColumns []string
 
@@ -274,7 +268,7 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]driversshared.Instruction
 				continue
 			}
 
-			oldName, ok := newToOld[newColumn.Name]
+			oldName, ok := columnsDiff.RenamedFrom[newColumn.Name]
 			if ok {
 				selectColumns = append(selectColumns, driversshared.QuoteIdentifier(oldName))
 				continue
@@ -319,10 +313,8 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]driversshared.Instruction
 
 	// The map gives no stable order. The loop walks the target columns instead, so the
 	// rename statements follow the shape of the target table on every run.
-	newNameToOldName := lo.Invert(columnsDiff.Renamed)
-
 	for _, column := range t.Columns {
-		oldName, renamed := newNameToOldName[column.Name]
+		oldName, renamed := columnsDiff.RenamedFrom[column.Name]
 		if !renamed {
 			continue
 		}
@@ -382,31 +374,19 @@ func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) ([]driversshared.Instruct
 }
 
 func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffByKey(t.Indexes, other.Indexes, driversshared.DiffRules[*SQLiteIndex]{
-		Key: func(index *SQLiteIndex) string {
+	additions, removals, err := driversshared.DiffByKey(t.Indexes, other.Indexes, driversshared.ReplaceRules(
+		func(index *SQLiteIndex) string {
 			return index.Name
 		},
-		Create: func(index *SQLiteIndex) []driversshared.Instruction {
-			return []driversshared.Instruction{index.CreateInstruction()}
+		(*SQLiteIndex).Equal,
+		func(index *SQLiteIndex) driversshared.Instruction {
+			return index.CreateInstruction()
 		},
-		Change: func(target *SQLiteIndex, source *SQLiteIndex) ([]driversshared.Instruction, error) {
-			if target.Equal(source) {
-				return nil, nil
-			}
-
-			return []driversshared.Instruction{
-				&driversshared.SQLDropIndexInstruction{
-					Name: source.Name,
-				},
-				target.CreateInstruction(),
-			}, nil
-		},
-		Drop: func(index *SQLiteIndex) []driversshared.Instruction {
-			return []driversshared.Instruction{&driversshared.SQLDropIndexInstruction{
+		func(index *SQLiteIndex) driversshared.Instruction {
+			return &driversshared.SQLDropIndexInstruction{
 				Name: index.Name,
-			}}
-		},
-	})
+			}
+		}))
 	if err != nil {
 		return nil, err
 	}

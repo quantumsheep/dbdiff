@@ -10,33 +10,21 @@ type SQLiteTrigger struct {
 }
 
 func diffTriggerRules() driversshared.DiffRules[*SQLiteTrigger] {
-	return driversshared.DiffRules[*SQLiteTrigger]{
-		Key: func(trigger *SQLiteTrigger) string {
+	return driversshared.ReplaceRules(
+		func(trigger *SQLiteTrigger) string {
 			return trigger.Name
 		},
-		Create: func(trigger *SQLiteTrigger) []driversshared.Instruction {
-			return []driversshared.Instruction{&SQLiteCreateTriggerInstruction{
+		func(target *SQLiteTrigger, source *SQLiteTrigger) bool {
+			return target.SQL == source.SQL
+		},
+		func(trigger *SQLiteTrigger) driversshared.Instruction {
+			return &SQLiteCreateTriggerInstruction{
 				Definition: trigger.SQL,
-			}}
-		},
-		Change: func(target *SQLiteTrigger, source *SQLiteTrigger) ([]driversshared.Instruction, error) {
-			if target.SQL == source.SQL {
-				return nil, nil
 			}
-
-			return []driversshared.Instruction{
-				&SQLiteDropTriggerInstruction{
-					Name: source.Name,
-				},
-				&SQLiteCreateTriggerInstruction{
-					Definition: target.SQL,
-				},
-			}, nil
 		},
-		Drop: func(trigger *SQLiteTrigger) []driversshared.Instruction {
-			return []driversshared.Instruction{&SQLiteDropTriggerInstruction{
+		func(trigger *SQLiteTrigger) driversshared.Instruction {
+			return &SQLiteDropTriggerInstruction{
 				Name: trigger.Name,
-			}}
-		},
-	}
+			}
+		})
 }

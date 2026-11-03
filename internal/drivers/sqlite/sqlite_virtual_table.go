@@ -54,24 +54,19 @@ func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]driversshared.I
 		return nil, err
 	}
 
-	additions, removals, err := driversshared.DiffByKey(targetTables, sourceTables, driversshared.DiffRules[*SQLiteVirtualTable]{
-		Key: func(table *SQLiteVirtualTable) string {
+	additions, removals, err := driversshared.DiffByKey(targetTables, sourceTables, driversshared.ReplaceRules(
+		func(table *SQLiteVirtualTable) string {
 			return table.Name
 		},
-		Create: func(table *SQLiteVirtualTable) []driversshared.Instruction {
-			return []driversshared.Instruction{table.CreateInstruction()}
+		func(target *SQLiteVirtualTable, source *SQLiteVirtualTable) bool {
+			return target.SQL == source.SQL
 		},
-		Change: func(target *SQLiteVirtualTable, source *SQLiteVirtualTable) ([]driversshared.Instruction, error) {
-			if target.SQL == source.SQL {
-				return nil, nil
-			}
-
-			return []driversshared.Instruction{source.DropInstruction(), target.CreateInstruction()}, nil
+		func(table *SQLiteVirtualTable) driversshared.Instruction {
+			return table.CreateInstruction()
 		},
-		Drop: func(table *SQLiteVirtualTable) []driversshared.Instruction {
-			return []driversshared.Instruction{table.DropInstruction()}
-		},
-	})
+		func(table *SQLiteVirtualTable) driversshared.Instruction {
+			return table.DropInstruction()
+		}))
 	if err != nil {
 		return nil, err
 	}

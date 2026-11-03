@@ -30,29 +30,17 @@ func (t *MySQLTrigger) CreateInstruction() *MySQLCreateTriggerInstruction {
 }
 
 func diffTriggerRules() driversshared.DiffRules[*MySQLTrigger] {
-	return driversshared.DiffRules[*MySQLTrigger]{
-		Key: func(trigger *MySQLTrigger) string {
+	return driversshared.ReplaceRules(
+		func(trigger *MySQLTrigger) string {
 			return trigger.Name
 		},
-		Create: func(trigger *MySQLTrigger) []driversshared.Instruction {
-			return []driversshared.Instruction{trigger.CreateInstruction()}
+		(*MySQLTrigger).Equal,
+		func(trigger *MySQLTrigger) driversshared.Instruction {
+			return trigger.CreateInstruction()
 		},
-		Change: func(target *MySQLTrigger, source *MySQLTrigger) ([]driversshared.Instruction, error) {
-			if target.Equal(source) {
-				return nil, nil
-			}
-
-			return []driversshared.Instruction{
-				&MySQLDropTriggerInstruction{
-					Name: source.Name,
-				},
-				target.CreateInstruction(),
-			}, nil
-		},
-		Drop: func(trigger *MySQLTrigger) []driversshared.Instruction {
-			return []driversshared.Instruction{&MySQLDropTriggerInstruction{
+		func(trigger *MySQLTrigger) driversshared.Instruction {
+			return &MySQLDropTriggerInstruction{
 				Name: trigger.Name,
-			}}
-		},
-	}
+			}
+		})
 }

@@ -39,18 +39,6 @@ func (t *MySQLTable) ForeignKeyByName(name string) (*MySQLForeignKey, bool) {
 	})
 }
 
-func (t *MySQLTable) IndexByName(name string) (*MySQLIndex, bool) {
-	return lo.Find(t.Indexes, func(index *MySQLIndex) bool {
-		return index.Name == name
-	})
-}
-
-func (t *MySQLTable) CheckConstraintByName(name string) (*MySQLCheckConstraint, bool) {
-	return lo.Find(t.CheckConstraints, func(check *MySQLCheckConstraint) bool {
-		return check.Name == name
-	})
-}
-
 func (t *MySQLTable) CreateTableInstruction() *MySQLCreateTableInstruction {
 	instruction := &MySQLCreateTableInstruction{
 		Name:             t.Name,
@@ -104,30 +92,22 @@ func (t *MySQLTable) Instructions() []driversshared.Instruction {
 }
 
 type MySQLTableColumnsDiff struct {
-	Added    []string
-	Modified []string
-	Removed  []string
-	Renamed  map[string]string
+	Added       []string
+	Modified    []string
+	Removed     []string
+	RenamedFrom map[string]string
 }
 
 func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 	diff := &MySQLTableColumnsDiff{
-		Renamed: make(map[string]string),
+		RenamedFrom: driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*MySQLColumn).HasEqualAttributes),
 	}
 
 	for _, targetColumn := range t.Columns {
 		sourceColumn, found := other.ColumnByName(targetColumn.Name)
 		if !found {
-			candidates := lo.Filter(other.Columns, func(column *MySQLColumn, _ int) bool {
-				_, existsInTargetTable := t.ColumnByName(column.Name)
-				_, alreadyRenamed := diff.Renamed[column.Name]
-				return !existsInTargetTable && !alreadyRenamed && column.HasEqualAttributes(targetColumn)
-			})
-
-			// A rename is a guess. Two candidates make the guess unsafe, so the column
-			// becomes an addition and the old columns become removals.
-			if len(candidates) == 1 {
-				diff.Renamed[candidates[0].Name] = targetColumn.Name
+			_, renamed := diff.RenamedFrom[targetColumn.Name]
+			if renamed {
 				continue
 			}
 
@@ -154,13 +134,17 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 
 	for _, sourceColumn := range other.Columns {
 		_, found := t.ColumnByName(sourceColumn.Name)
-		_, renamed := diff.Renamed[sourceColumn.Name]
+		_, renamed := lo.FindKey(diff.RenamedFrom, sourceColumn.Name)
 		if !found && !renamed {
 			diff.Removed = append(diff.Removed, sourceColumn.Name)
 		}
 	}
 
 	return diff
+}
+
+func columnName(column *MySQLColumn) string {
+	return column.Name
 }
 
 func generatedKindChanged(target *MySQLColumn, source *MySQLColumn) bool {
@@ -178,10 +162,8 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 
 	// The map gives no stable order. The loop walks the target columns instead, so the
 	// rename statements follow the shape of the target table on every run.
-	newNameToOldName := lo.Invert(columnsDiff.Renamed)
-
 	for _, column := range t.Columns {
-		oldName, renamed := newNameToOldName[column.Name]
+		oldName, renamed := columnsDiff.RenamedFrom[column.Name]
 		if !renamed {
 			continue
 		}
@@ -342,107 +324,67 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 }
 
 func (t *MySQLTable) foreignKeyChanges(other *MySQLTable) ([]driversshared.Instruction, []driversshared.Instruction) {
-	var additions []driversshared.Instruction
-	var removals []driversshared.Instruction
-
-	for _, targetForeignKey := range t.ForeignKeys {
-		sourceForeignKey, found := other.ForeignKeyByName(targetForeignKey.Name)
-		if found && targetForeignKey.Equal(sourceForeignKey) {
-			continue
-		}
-
-		if found {
-			removals = append(removals, &MySQLAlterTableInstruction{
+	return driversshared.ReplaceByKey(t.ForeignKeys, other.ForeignKeys,
+		func(foreignKey *MySQLForeignKey) string {
+			return foreignKey.Name
+		},
+		(*MySQLForeignKey).Equal,
+		func(foreignKey *MySQLForeignKey) driversshared.Instruction {
+			return &MySQLAlterTableInstruction{
 				Name:   t.Name,
-				Action: &MySQLDropForeignKeyAction{Name: sourceForeignKey.Name},
-			})
-		}
-
-		additions = append(additions, &MySQLAlterTableInstruction{
-			Name:   t.Name,
-			Action: &MySQLAddForeignKeyAction{ForeignKey: targetForeignKey},
+				Action: &MySQLAddForeignKeyAction{ForeignKey: foreignKey},
+			}
+		},
+		func(foreignKey *MySQLForeignKey) driversshared.Instruction {
+			return &MySQLAlterTableInstruction{
+				Name:   t.Name,
+				Action: &MySQLDropForeignKeyAction{Name: foreignKey.Name},
+			}
 		})
-	}
-
-	for _, sourceForeignKey := range other.ForeignKeys {
-		_, found := t.ForeignKeyByName(sourceForeignKey.Name)
-		if !found {
-			removals = append(removals, &MySQLAlterTableInstruction{
-				Name:   t.Name,
-				Action: &MySQLDropForeignKeyAction{Name: sourceForeignKey.Name},
-			})
-		}
-	}
-
-	return additions, removals
 }
 
 func (t *MySQLTable) checkConstraintChanges(other *MySQLTable) ([]driversshared.Instruction, []driversshared.Instruction) {
-	var additions []driversshared.Instruction
-	var removals []driversshared.Instruction
-
-	for _, targetCheck := range t.CheckConstraints {
-		sourceCheck, found := other.CheckConstraintByName(targetCheck.Name)
-		if found && targetCheck.Equal(sourceCheck) {
-			continue
-		}
-
-		if found {
-			removals = append(removals, &MySQLAlterTableInstruction{
+	return driversshared.ReplaceByKey(t.CheckConstraints, other.CheckConstraints,
+		func(check *MySQLCheckConstraint) string {
+			return check.Name
+		},
+		(*MySQLCheckConstraint).Equal,
+		func(check *MySQLCheckConstraint) driversshared.Instruction {
+			return &MySQLAlterTableInstruction{
 				Name:   t.Name,
-				Action: &MySQLDropCheckConstraintAction{Name: sourceCheck.Name},
-			})
-		}
-
-		additions = append(additions, &MySQLAlterTableInstruction{
-			Name:   t.Name,
-			Action: &MySQLAddCheckConstraintAction{CheckConstraint: targetCheck},
+				Action: &MySQLAddCheckConstraintAction{CheckConstraint: check},
+			}
+		},
+		func(check *MySQLCheckConstraint) driversshared.Instruction {
+			return &MySQLAlterTableInstruction{
+				Name:   t.Name,
+				Action: &MySQLDropCheckConstraintAction{Name: check.Name},
+			}
 		})
-	}
-
-	for _, sourceCheck := range other.CheckConstraints {
-		_, found := t.CheckConstraintByName(sourceCheck.Name)
-		if !found {
-			removals = append(removals, &MySQLAlterTableInstruction{
-				Name:   t.Name,
-				Action: &MySQLDropCheckConstraintAction{Name: sourceCheck.Name},
-			})
-		}
-	}
-
-	return additions, removals
 }
 
 func (t *MySQLTable) indexChanges(other *MySQLTable) ([]driversshared.Instruction, []driversshared.Instruction) {
-	var additions []driversshared.Instruction
-	var removals []driversshared.Instruction
+	// The ADD of a foreign key builds the index of the key by itself, like the CREATE
+	// TABLE path of IndexInstructions. The source does not hold such an index, so the
+	// removal from the target list changes no drop.
+	targetIndexes := lo.Reject(t.Indexes, func(index *MySQLIndex, _ int) bool {
+		_, ownedByForeignKey := t.ForeignKeyByName(index.Name)
+		_, foundInSource := lo.Find(other.Indexes, func(sourceIndex *MySQLIndex) bool {
+			return sourceIndex.Name == index.Name
+		})
 
-	for _, targetIndex := range t.Indexes {
-		sourceIndex, found := other.IndexByName(targetIndex.Name)
-		if found && targetIndex.Equal(sourceIndex) {
-			continue
-		}
+		return ownedByForeignKey && !foundInSource
+	})
 
-		if found {
-			removals = append(removals, sourceIndex.DropInstruction())
-		}
-
-		// The ADD of a foreign key builds the index of the key by itself, like the CREATE
-		// TABLE path of IndexInstructions.
-		_, ownedByForeignKey := t.ForeignKeyByName(targetIndex.Name)
-		if !found && ownedByForeignKey {
-			continue
-		}
-
-		additions = append(additions, targetIndex.CreateInstruction())
-	}
-
-	for _, sourceIndex := range other.Indexes {
-		_, found := t.IndexByName(sourceIndex.Name)
-		if !found {
-			removals = append(removals, sourceIndex.DropInstruction())
-		}
-	}
-
-	return additions, removals
+	return driversshared.ReplaceByKey(targetIndexes, other.Indexes,
+		func(index *MySQLIndex) string {
+			return index.Name
+		},
+		(*MySQLIndex).Equal,
+		func(index *MySQLIndex) driversshared.Instruction {
+			return index.CreateInstruction()
+		},
+		func(index *MySQLIndex) driversshared.Instruction {
+			return index.DropInstruction()
+		})
 }
