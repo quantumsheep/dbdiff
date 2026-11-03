@@ -26,7 +26,7 @@ func (d *PostgresDriver) DiffData(ctx context.Context) ([]driversshared.Instruct
 	}
 
 	return driversshared.DiffData(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection,
-		targetTables, sourceTables, driversshared.DataRules[*PostgresTable]{
+		targetTables, sourceTables, driversshared.DataRules[*PostgresTable, driversshared.DoubleQuote]{
 			TableName: func(table *PostgresTable) string {
 				return table.Name
 			},
@@ -41,8 +41,7 @@ func (d *PostgresDriver) DiffData(ctx context.Context) ([]driversshared.Instruct
 			WritableColumns: func(table *PostgresTable) []string {
 				return writablePostgresColumnNames(table.Columns)
 			},
-			SelectExpression: driversshared.QuoteIdentifier,
-			FormatValue:      formatPostgresValue,
+			FormatValue: formatPostgresValue,
 			// PostgreSQL refuses a plain value for a GENERATED ALWAYS identity column.
 			Insert: func(table *PostgresTable, columnNames []string, expressions []string) driversshared.Instruction {
 				if holdsAlwaysIdentityColumn(table, columnNames) {

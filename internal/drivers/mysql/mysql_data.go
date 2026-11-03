@@ -14,6 +14,20 @@ import (
 	"github.com/samber/lo"
 )
 
+type Backtick struct{}
+
+func (Backtick) QuoteIdentifier(name string) string {
+	return QuoteIdentifier(name)
+}
+
+type (
+	MySQLEqualityCondition = driversshared.EqualityCondition[Backtick]
+	MySQLSetClause         = driversshared.SetClause[Backtick]
+	MySQLInsertInstruction = driversshared.InsertInstruction[Backtick]
+	MySQLUpdateInstruction = driversshared.UpdateInstruction[Backtick]
+	MySQLDeleteInstruction = driversshared.DeleteInstruction[Backtick]
+)
+
 // The schema section already creates or drops the other tables.
 func (d *MySQLDriver) DiffData(ctx context.Context) ([]driversshared.Instruction, error) {
 	targetTables := d.targetTables
@@ -38,7 +52,7 @@ func (d *MySQLDriver) DiffData(ctx context.Context) ([]driversshared.Instruction
 	}
 
 	return driversshared.DiffData(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection,
-		targetTables, sourceTables, driversshared.DataRules[*MySQLTable]{
+		targetTables, sourceTables, driversshared.DataRules[*MySQLTable, Backtick]{
 			TableName: func(table *MySQLTable) string {
 				return table.Name
 			},
@@ -48,40 +62,7 @@ func (d *MySQLDriver) DiffData(ctx context.Context) ([]driversshared.Instruction
 			WritableColumns: func(table *MySQLTable) []string {
 				return writableMySQLColumnNames(table.Columns)
 			},
-			SelectExpression: func(columnName string) string {
-				return QuoteIdentifier(columnName)
-			},
 			FormatValue: formatMySQLValue,
-			Quote:       QuoteIdentifier,
-			Insert: func(table *MySQLTable, columnNames []string, expressions []string) driversshared.Instruction {
-				return &MySQLInsertInstruction{
-					TableName:   table.Name,
-					ColumnNames: columnNames,
-					Expressions: expressions,
-				}
-			},
-			Update: func(table *MySQLTable, changes []driversshared.DataChange,
-				primaryKeyColumnNames []string, row map[string]string) driversshared.Instruction {
-				setClauses := lo.Map(changes, func(change driversshared.DataChange, _ int) *MySQLSetClause {
-					return &MySQLSetClause{
-						ColumnName: change.ColumnName,
-						Expression: change.Expression,
-					}
-				})
-
-				return &MySQLUpdateInstruction{
-					TableName:  table.Name,
-					SetClauses: setClauses,
-					Condition:  MySQLRowKeyCondition(primaryKeyColumnNames, row),
-				}
-			},
-			Delete: func(table *MySQLTable, primaryKeyColumnNames []string,
-				row map[string]string) driversshared.Instruction {
-				return &MySQLDeleteInstruction{
-					TableName: table.Name,
-					Condition: MySQLRowKeyCondition(primaryKeyColumnNames, row),
-				}
-			},
 		})
 }
 

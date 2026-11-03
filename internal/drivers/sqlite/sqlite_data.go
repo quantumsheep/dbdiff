@@ -41,7 +41,7 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]driversshared.Instructio
 	}
 
 	return driversshared.DiffData(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection,
-		targetTables, sourceTables, driversshared.DataRules[*SQLiteTable]{
+		targetTables, sourceTables, driversshared.DataRules[*SQLiteTable, driversshared.DoubleQuote]{
 			TableName: func(table *SQLiteTable) string {
 				return table.Name
 			},
@@ -59,13 +59,6 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]driversshared.Instructio
 			},
 			FormatValue: func(value any, databaseTypeName string) string {
 				return formatSQLiteValue(value)
-			},
-			Insert: func(table *SQLiteTable, columnNames []string, expressions []string) driversshared.Instruction {
-				return &driversshared.SQLInsertInstruction{
-					TableName:   table.Name,
-					ColumnNames: columnNames,
-					Expressions: expressions,
-				}
 			},
 		})
 }

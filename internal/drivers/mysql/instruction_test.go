@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/stretchr/testify/require"
 )
 
@@ -473,7 +474,7 @@ func TestInstructions(t *testing.T) {
 					Expression: "'Alice'",
 				},
 			},
-			Condition: MySQLRowKeyCondition([]string{"id", "tenant"},
+			Condition: driversshared.RowKeyCondition[Backtick]([]string{"id", "tenant"},
 				map[string]string{"id": "1", "tenant": "NULL"}),
 		}
 
@@ -484,7 +485,7 @@ func TestInstructions(t *testing.T) {
 	t.Run("MySQLDelete", func(t *testing.T) {
 		instruction := &MySQLDeleteInstruction{
 			TableName: "users",
-			Condition: MySQLRowKeyCondition([]string{"id"}, map[string]string{"id": "2"}),
+			Condition: driversshared.RowKeyCondition[Backtick]([]string{"id"}, map[string]string{"id": "2"}),
 		}
 
 		require.Equal(t, "DELETE FROM `users` WHERE `id` = 2;", instruction.String())

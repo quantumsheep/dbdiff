@@ -41,21 +41,38 @@ func (instructions Instructions) String() string {
 
 const SQLNullLiteral = "NULL"
 
-type SQLEqualityCondition struct {
+// A quoter is a zero-size type, so an instruction value stays comparable in a test.
+type IdentifierQuoter interface {
+	QuoteIdentifier(name string) string
+}
+
+type DoubleQuote struct{}
+
+func (DoubleQuote) QuoteIdentifier(name string) string {
+	return QuoteIdentifier(name)
+}
+
+func quoteWith[Quoter IdentifierQuoter](name string) string {
+	var quoter Quoter
+
+	return quoter.QuoteIdentifier(name)
+}
+
+type EqualityCondition[Quoter IdentifierQuoter] struct {
 	ColumnName string
 	Expression string
 }
 
-func (c *SQLEqualityCondition) ConditionClause() string {
-	return fmt.Sprintf("%s = %s", QuoteIdentifier(c.ColumnName), c.Expression)
+func (c *EqualityCondition[Quoter]) ConditionClause() string {
+	return fmt.Sprintf("%s = %s", quoteWith[Quoter](c.ColumnName), c.Expression)
 }
 
-type SQLIsNullCondition struct {
+type IsNullCondition[Quoter IdentifierQuoter] struct {
 	ColumnName string
 }
 
-func (c *SQLIsNullCondition) ConditionClause() string {
-	return fmt.Sprintf("%s IS NULL", QuoteIdentifier(c.ColumnName))
+func (c *IsNullCondition[Quoter]) ConditionClause() string {
+	return fmt.Sprintf("%s IS NULL", quoteWith[Quoter](c.ColumnName))
 }
 
 type SQLConjunctionCondition struct {
@@ -70,29 +87,33 @@ func (c *SQLConjunctionCondition) ConditionClause() string {
 	return strings.Join(clauses, " AND ")
 }
 
-type SQLSetClause struct {
+type SetClause[Quoter IdentifierQuoter] struct {
 	ColumnName string
 	Expression string
 }
 
-func (c *SQLSetClause) Clause() string {
-	return fmt.Sprintf("%s = %s", QuoteIdentifier(c.ColumnName), c.Expression)
+func (c *SetClause[Quoter]) Clause() string {
+	return fmt.Sprintf("%s = %s", quoteWith[Quoter](c.ColumnName), c.Expression)
 }
 
-type SQLInsertInstruction struct {
+type InsertInstruction[Quoter IdentifierQuoter] struct {
 	TableName   string
 	ColumnNames []string
 	Expressions []string
 }
 
-func (i *SQLInsertInstruction) String() string {
+func (i *InsertInstruction[Quoter]) String() string {
+	quotedColumnNames := lo.Map(i.ColumnNames, func(name string, _ int) string {
+		return quoteWith[Quoter](name)
+	})
+
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
-		QuoteIdentifier(i.TableName),
-		strings.Join(QuoteIdentifiers(i.ColumnNames), ", "),
+		quoteWith[Quoter](i.TableName),
+		strings.Join(quotedColumnNames, ", "),
 		strings.Join(i.Expressions, ", "))
 }
 
-func (i *SQLInsertInstruction) Comment() string {
+func (i *InsertInstruction[Quoter]) Comment() string {
 	return OwnedObjectComment("Change", "rows", "table", i.TableName)
 }
 
@@ -115,19 +136,19 @@ func (i *SQLInsertSelectInstruction) Comment() string {
 	return OwnedObjectComment("Change", "rows", "table", i.TableName)
 }
 
-type SQLUpdateInstruction struct {
+type UpdateInstruction[Quoter IdentifierQuoter] struct {
 	TableName  string
-	SetClauses []*SQLSetClause
+	SetClauses []*SetClause[Quoter]
 	Condition  Condition
 }
 
-func (i *SQLUpdateInstruction) String() string {
-	clauses := lo.Map(i.SetClauses, func(clause *SQLSetClause, _ int) string {
+func (i *UpdateInstruction[Quoter]) String() string {
+	clauses := lo.Map(i.SetClauses, func(clause *SetClause[Quoter], _ int) string {
 		return clause.Clause()
 	})
 
 	statement := fmt.Sprintf("UPDATE %s SET %s",
-		QuoteIdentifier(i.TableName), strings.Join(clauses, ", "))
+		quoteWith[Quoter](i.TableName), strings.Join(clauses, ", "))
 
 	if i.Condition != nil {
 		statement += " WHERE " + i.Condition.ConditionClause()
@@ -136,17 +157,17 @@ func (i *SQLUpdateInstruction) String() string {
 	return statement + ";"
 }
 
-func (i *SQLUpdateInstruction) Comment() string {
+func (i *UpdateInstruction[Quoter]) Comment() string {
 	return OwnedObjectComment("Change", "rows", "table", i.TableName)
 }
 
-type SQLDeleteInstruction struct {
+type DeleteInstruction[Quoter IdentifierQuoter] struct {
 	TableName string
 	Condition Condition
 }
 
-func (i *SQLDeleteInstruction) String() string {
-	statement := "DELETE FROM " + QuoteIdentifier(i.TableName)
+func (i *DeleteInstruction[Quoter]) String() string {
+	statement := "DELETE FROM " + quoteWith[Quoter](i.TableName)
 
 	if i.Condition != nil {
 		statement += " WHERE " + i.Condition.ConditionClause()
@@ -155,9 +176,18 @@ func (i *SQLDeleteInstruction) String() string {
 	return statement + ";"
 }
 
-func (i *SQLDeleteInstruction) Comment() string {
+func (i *DeleteInstruction[Quoter]) Comment() string {
 	return OwnedObjectComment("Change", "rows", "table", i.TableName)
 }
+
+type (
+	SQLEqualityCondition = EqualityCondition[DoubleQuote]
+	SQLIsNullCondition   = IsNullCondition[DoubleQuote]
+	SQLSetClause         = SetClause[DoubleQuote]
+	SQLInsertInstruction = InsertInstruction[DoubleQuote]
+	SQLUpdateInstruction = UpdateInstruction[DoubleQuote]
+	SQLDeleteInstruction = DeleteInstruction[DoubleQuote]
+)
 
 type SQLDropTableInstruction struct {
 	Name string
@@ -237,15 +267,15 @@ func (a *SQLRenameTableAction) TableActionClause() string {
 }
 
 // A NULL value needs IS NULL, because a comparison with NULL matches no row.
-func RowKeyCondition(primaryKeyColumnNames []string, row map[string]string) Condition {
+func RowKeyCondition[Quoter IdentifierQuoter](primaryKeyColumnNames []string, row map[string]string) Condition {
 	conditions := lo.Map(primaryKeyColumnNames, func(name string, _ int) Condition {
 		if row[name] == SQLNullLiteral {
-			return &SQLIsNullCondition{
+			return &IsNullCondition[Quoter]{
 				ColumnName: name,
 			}
 		}
 
-		return &SQLEqualityCondition{
+		return &EqualityCondition[Quoter]{
 			ColumnName: name,
 			Expression: row[name],
 		}

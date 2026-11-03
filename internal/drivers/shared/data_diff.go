@@ -15,31 +15,22 @@ type tableData struct {
 	Rows map[string]map[string]string
 }
 
-type DataRules[Table any] struct {
-	TableName        func(table Table) string
-	SkipTable        func(table Table) bool
-	PrimaryKey       func(ctx context.Context, db *sql.DB, table Table) ([]string, error)
-	WritableColumns  func(table Table) []string
+type DataRules[Table any, Quoter IdentifierQuoter] struct {
+	TableName       func(table Table) string
+	SkipTable       func(table Table) bool
+	PrimaryKey      func(ctx context.Context, db *sql.DB, table Table) ([]string, error)
+	WritableColumns func(table Table) []string
+	FormatValue     func(value any, databaseTypeName string) string
+	SkipUpdate      func(table Table, columnName string) bool
+
+	// The two hooks below are optional. If they are nil, the diff uses the quoter.
 	SelectExpression func(columnName string) string
-	FormatValue      func(value any, databaseTypeName string) string
 	Insert           func(table Table, columnNames []string, expressions []string) Instruction
-	SkipUpdate       func(table Table, columnName string) bool
-
-	// The three hooks below stay nil for an engine that quotes with the double quote.
-	// MySQL quotes with the backtick, so it gives its own quote and its own statements.
-	Quote  func(name string) string
-	Update func(table Table, changes []DataChange, primaryKeyColumnNames []string, row map[string]string) Instruction
-	Delete func(table Table, primaryKeyColumnNames []string, row map[string]string) Instruction
-}
-
-type DataChange struct {
-	ColumnName string
-	Expression string
 }
 
 // The schema section already creates or drops the other tables.
-func DiffData[Table any](ctx context.Context, targetDatabaseConnection *sql.DB, sourceDatabaseConnection *sql.DB,
-	targetTables []Table, sourceTables []Table, rules DataRules[Table]) ([]Instruction, error) {
+func DiffData[Table any, Quoter IdentifierQuoter](ctx context.Context, targetDatabaseConnection *sql.DB, sourceDatabaseConnection *sql.DB,
+	targetTables []Table, sourceTables []Table, rules DataRules[Table, Quoter]) ([]Instruction, error) {
 	var instructions []Instruction
 	var removalsPerTable [][]Instruction
 
@@ -80,8 +71,8 @@ func DiffData[Table any](ctx context.Context, targetDatabaseConnection *sql.DB, 
 	return instructions, nil
 }
 
-func diffTableData[Table any](ctx context.Context, targetDatabaseConnection *sql.DB, sourceDatabaseConnection *sql.DB,
-	targetTable Table, sourceTable Table, rules DataRules[Table]) ([]Instruction, []Instruction, error) {
+func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, targetDatabaseConnection *sql.DB, sourceDatabaseConnection *sql.DB,
+	targetTable Table, sourceTable Table, rules DataRules[Table, Quoter]) ([]Instruction, []Instruction, error) {
 	primaryKeyColumnNames, err := rules.PrimaryKey(ctx, targetDatabaseConnection, targetTable)
 	if err != nil {
 		return nil, nil, err
@@ -139,16 +130,12 @@ func diffTableData[Table any](ctx context.Context, targetDatabaseConnection *sql
 
 		sourceRow, found := sourceData.Rows[key]
 		if !found {
-			values := lo.Map(targetColumnNames, func(name string, _ int) string {
-				return targetRow[name]
-			})
-
-			insertions = append(insertions, rules.Insert(targetTable, targetColumnNames, values))
+			insertions = append(insertions, insertRowInstruction(rules, targetTable, targetColumnNames, targetRow))
 
 			continue
 		}
 
-		var changes []DataChange
+		var setClauses []*SetClause[Quoter]
 
 		for _, name := range commonColumnNames {
 			if targetRow[name] == sourceRow[name] {
@@ -159,18 +146,21 @@ func diffTableData[Table any](ctx context.Context, targetDatabaseConnection *sql
 				continue
 			}
 
-			changes = append(changes, DataChange{
+			setClauses = append(setClauses, &SetClause[Quoter]{
 				ColumnName: name,
 				Expression: targetRow[name],
 			})
 		}
 
-		if len(changes) == 0 {
+		if len(setClauses) == 0 {
 			continue
 		}
 
-		modifications = append(modifications,
-			dataUpdateInstruction(rules, targetTable, changes, primaryKeyColumnNames, targetRow))
+		modifications = append(modifications, &UpdateInstruction[Quoter]{
+			TableName:  rules.TableName(targetTable),
+			SetClauses: setClauses,
+			Condition:  RowKeyCondition[Quoter](primaryKeyColumnNames, targetRow),
+		})
 	}
 
 	for _, key := range sourceData.Keys {
@@ -179,49 +169,36 @@ func diffTableData[Table any](ctx context.Context, targetDatabaseConnection *sql
 			continue
 		}
 
-		removals = append(removals,
-			dataDeleteInstruction(rules, sourceTable, primaryKeyColumnNames, sourceData.Rows[key]))
+		removals = append(removals, &DeleteInstruction[Quoter]{
+			TableName: rules.TableName(sourceTable),
+			Condition: RowKeyCondition[Quoter](primaryKeyColumnNames, sourceData.Rows[key]),
+		})
 	}
 
 	return slices.Concat(insertions, modifications), removals, nil
 }
 
-func dataUpdateInstruction[Table any](rules DataRules[Table], table Table, changes []DataChange,
-	primaryKeyColumnNames []string, row map[string]string) Instruction {
-	if rules.Update != nil {
-		return rules.Update(table, changes, primaryKeyColumnNames, row)
-	}
-
-	setClauses := lo.Map(changes, func(change DataChange, _ int) *SQLSetClause {
-		return &SQLSetClause{
-			ColumnName: change.ColumnName,
-			Expression: change.Expression,
-		}
+func insertRowInstruction[Table any, Quoter IdentifierQuoter](rules DataRules[Table, Quoter], table Table,
+	columnNames []string, row map[string]string) Instruction {
+	values := lo.Map(columnNames, func(name string, _ int) string {
+		return row[name]
 	})
 
-	return &SQLUpdateInstruction{
-		TableName:  rules.TableName(table),
-		SetClauses: setClauses,
-		Condition:  RowKeyCondition(primaryKeyColumnNames, row),
-	}
-}
-
-func dataDeleteInstruction[Table any](rules DataRules[Table], table Table,
-	primaryKeyColumnNames []string, row map[string]string) Instruction {
-	if rules.Delete != nil {
-		return rules.Delete(table, primaryKeyColumnNames, row)
+	if rules.Insert != nil {
+		return rules.Insert(table, columnNames, values)
 	}
 
-	return &SQLDeleteInstruction{
-		TableName: rules.TableName(table),
-		Condition: RowKeyCondition(primaryKeyColumnNames, row),
+	return &InsertInstruction[Quoter]{
+		TableName:   rules.TableName(table),
+		ColumnNames: columnNames,
+		Expressions: values,
 	}
 }
 
 // The schema section creates this table with no row, so every target row becomes an
 // INSERT statement.
-func tableDataInstructions[Table any](ctx context.Context, db *sql.DB, targetTable Table,
-	rules DataRules[Table]) ([]Instruction, error) {
+func tableDataInstructions[Table any, Quoter IdentifierQuoter](ctx context.Context, db *sql.DB, targetTable Table,
+	rules DataRules[Table, Quoter]) ([]Instruction, error) {
 	targetColumnNames := rules.WritableColumns(targetTable)
 	if len(targetColumnNames) == 0 {
 		return nil, nil
@@ -245,13 +222,7 @@ func tableDataInstructions[Table any](ctx context.Context, db *sql.DB, targetTab
 	var instructions []Instruction
 
 	for _, key := range targetData.Keys {
-		targetRow := targetData.Rows[key]
-
-		values := lo.Map(targetColumnNames, func(name string, _ int) string {
-			return targetRow[name]
-		})
-
-		instructions = append(instructions, rules.Insert(targetTable, targetColumnNames, values))
+		instructions = append(instructions, insertRowInstruction(rules, targetTable, targetColumnNames, targetData.Rows[key]))
 	}
 
 	return instructions, nil
@@ -259,24 +230,24 @@ func tableDataInstructions[Table any](ctx context.Context, db *sql.DB, targetTab
 
 // The engines give no stable order, so the ORDER BY clause keeps the output equal
 // between two runs.
-func getTableData[Table any](ctx context.Context, db *sql.DB, table Table, columnNames []string,
-	primaryKeyColumnNames []string, rules DataRules[Table]) (*tableData, error) {
-	quote := rules.Quote
-	if quote == nil {
-		quote = QuoteIdentifier
+func getTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, db *sql.DB, table Table, columnNames []string,
+	primaryKeyColumnNames []string, rules DataRules[Table, Quoter]) (*tableData, error) {
+	selectExpression := rules.SelectExpression
+	if selectExpression == nil {
+		selectExpression = quoteWith[Quoter]
 	}
 
 	selectExpressions := lo.Map(columnNames, func(name string, _ int) string {
-		return rules.SelectExpression(name)
+		return selectExpression(name)
 	})
 
 	quotedKeyColumnNames := lo.Map(primaryKeyColumnNames, func(name string, _ int) string {
-		return quote(name)
+		return quoteWith[Quoter](name)
 	})
 
 	statement := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s;",
 		strings.Join(selectExpressions, ", "),
-		quote(rules.TableName(table)),
+		quoteWith[Quoter](rules.TableName(table)),
 		strings.Join(quotedKeyColumnNames, ", "))
 
 	rows, err := db.QueryContext(ctx, statement)

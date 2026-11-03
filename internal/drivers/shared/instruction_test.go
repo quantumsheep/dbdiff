@@ -238,7 +238,7 @@ func TestInstructions(t *testing.T) {
 	t.Run("RowKeyConditionOfOneColumn", func(t *testing.T) {
 		row := map[string]string{"id": "1"}
 
-		condition := RowKeyCondition([]string{"id"}, row)
+		condition := RowKeyCondition[DoubleQuote]([]string{"id"}, row)
 
 		require.Equal(t, `"id" = 1`, condition.ConditionClause())
 	})
@@ -246,7 +246,7 @@ func TestInstructions(t *testing.T) {
 	t.Run("RowKeyConditionOfTwoColumns", func(t *testing.T) {
 		row := map[string]string{"team": "'red'", "member": "'Alice'"}
 
-		condition := RowKeyCondition([]string{"team", "member"}, row)
+		condition := RowKeyCondition[DoubleQuote]([]string{"team", "member"}, row)
 
 		require.Equal(t, `"team" = 'red' AND "member" = 'Alice'`, condition.ConditionClause())
 	})
@@ -254,7 +254,7 @@ func TestInstructions(t *testing.T) {
 	t.Run("RowKeyConditionOfANullValue", func(t *testing.T) {
 		row := map[string]string{"id": "1", "email": SQLNullLiteral}
 
-		condition := RowKeyCondition([]string{"id", "email"}, row)
+		condition := RowKeyCondition[DoubleQuote]([]string{"id", "email"}, row)
 
 		require.Equal(t, `"id" = 1 AND "email" IS NULL`, condition.ConditionClause())
 	})
