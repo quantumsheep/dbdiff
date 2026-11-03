@@ -3,7 +3,9 @@ package internalmigrations
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,7 +93,7 @@ func Checksum(content []byte) string {
 
 func ReadDirectory(directory string) ([]*Migration, error) {
 	entries, err := os.ReadDir(directory)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 
@@ -269,7 +271,7 @@ func (s *Set) Problems() []*Entry {
 
 // An out of order file is no record error. Up and step refuse it in ProblemError, because it breaks the version order.
 func (s *Set) RecordError() error {
-	return migrationStateError(lo.Filter(s.Entries, func(entry *Entry, _ int) bool {
+	return stateError(lo.Filter(s.Entries, func(entry *Entry, _ int) bool {
 		return entry.State == StateChanged ||
 			entry.State == StateMissing ||
 			entry.State == StateDirty
@@ -277,10 +279,10 @@ func (s *Set) RecordError() error {
 }
 
 func (s *Set) ProblemError() error {
-	return migrationStateError(s.Problems())
+	return stateError(s.Problems())
 }
 
-func migrationStateError(entries []*Entry) error {
+func stateError(entries []*Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}

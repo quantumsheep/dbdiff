@@ -903,6 +903,27 @@ func TestRunnerVerify(t *testing.T) {
 		require.NotContains(t, output, "dbdiff_migrations")
 	})
 
+	t.Run("AFileThatChangesAfterTheLoadStopsTheReplay", func(t *testing.T) {
+		sourcePath, migrations := newAppliedSource(t)
+
+		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		require.NoError(t, err)
+
+		defer func() { require.NoError(t, migrator.Close()) }()
+
+		set, err := internalmigrations.LoadSet(t.Context(), migrator, migrations)
+		require.NoError(t, err)
+
+		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n")
+
+		err = newRunner(migrator, set, io.Discard).Verify(t.Context(),
+			func(context.Context, driversshared.DataSource) (driversshared.Instructions, error) {
+				return nil, nil
+			})
+		require.EqualError(t, err, "the file 20260814101500_init changed while dbdiff read it")
+	})
+
 	t.Run("ADatabaseWithNoAppliedMigration", func(t *testing.T) {
 		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -27,7 +28,7 @@ type IgnoreConfig struct {
 
 func ReadConfig(path string, optional bool) (*Config, error) {
 	content, err := os.ReadFile(path)
-	if os.IsNotExist(err) && optional {
+	if errors.Is(err, fs.ErrNotExist) && optional {
 		return &Config{}, nil
 	}
 

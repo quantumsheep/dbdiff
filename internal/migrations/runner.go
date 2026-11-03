@@ -163,12 +163,12 @@ func (r *Runner) Step(ctx context.Context, input io.Reader) error {
 }
 
 func pendingUpTo(set *Set, lastVersion string) ([]*Entry, error) {
-	return migrationsUpTo(set, set.Pending(), lastVersion)
+	return upTo(set, set.Pending(), lastVersion)
 }
 
 // An empty version keeps every entry. A named version keeps the entries up to that
 // version, and it must name a file of the directory.
-func migrationsUpTo(set *Set, entries []*Entry, lastVersion string) ([]*Entry, error) {
+func upTo(set *Set, entries []*Entry, lastVersion string) ([]*Entry, error) {
 	if lastVersion == "" {
 		return entries, nil
 	}
@@ -373,7 +373,7 @@ func (r *Runner) Baseline(ctx context.Context, lastVersion string) error {
 		return entry.State == StatePending || entry.State == StateOutOfOrder
 	})
 
-	unrecorded, err = migrationsUpTo(set, unrecorded, lastVersion)
+	unrecorded, err = upTo(set, unrecorded, lastVersion)
 	if err != nil {
 		return err
 	}
@@ -436,10 +436,10 @@ func (r *Runner) reload(ctx context.Context) (*Set, error) {
 		return nil, err
 	}
 
-	return NewSet(migrationFilesOf(r.Set), applied), nil
+	return NewSet(filesOf(r.Set), applied), nil
 }
 
-func migrationFilesOf(set *Set) []*Migration {
+func filesOf(set *Set) []*Migration {
 	var files []*Migration
 
 	for _, entry := range set.Entries {
@@ -583,14 +583,14 @@ func copyAppliedMigrations(set *Set, directory string) error {
 			continue
 		}
 
-		content, err := os.ReadFile(entry.Migration.Path)
+		content, err := entry.Content()
 		if err != nil {
 			return err
 		}
 
 		path := filepath.Join(directory, filepath.Base(entry.Migration.Path))
 
-		err = os.WriteFile(path, content, 0o600)
+		err = os.WriteFile(path, []byte(content), 0o600)
 		if err != nil {
 			return err
 		}
