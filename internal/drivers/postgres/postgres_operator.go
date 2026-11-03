@@ -1,6 +1,7 @@
 package driverspostgres
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -67,4 +68,80 @@ func (o *PostgresOperator) Diff(other *PostgresOperator) []driversshared.Instruc
 	}
 
 	return []driversshared.Instruction{other.DropInstruction(), o.CreateInstruction()}
+}
+
+func (d *PostgresDriver) DiffOperators(ctx context.Context) (*driversshared.SectionDiff, error) {
+	return diffSection(ctx, d, sectionRules[*PostgresOperator]{
+		Get: d.GetOperators,
+		Key: func(operator *PostgresOperator) string {
+			return operator.Signature()
+		},
+		Create: func(operator *PostgresOperator) []driversshared.Instruction {
+			return []driversshared.Instruction{operator.CreateInstruction()}
+		},
+		Change: func(target *PostgresOperator, source *PostgresOperator) []driversshared.Instruction {
+			return target.Diff(source)
+		},
+		Drop: func(source *PostgresOperator) driversshared.Instruction {
+			return source.DropInstruction()
+		},
+	})
+}
+
+func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*PostgresOperator, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			o.oprname,
+			CASE WHEN o.oprleft <> 0 THEN format_type(o.oprleft, NULL) END,
+			CASE WHEN o.oprright <> 0 THEN format_type(o.oprright, NULL) END,
+			o.oprcode::regproc::text,
+			CASE WHEN o.oprcom <> 0 THEN (SELECT c.oprname FROM pg_operator c WHERE c.oid = o.oprcom) END,
+			CASE WHEN o.oprnegate <> 0 THEN (SELECT n.oprname FROM pg_operator n WHERE n.oid = o.oprnegate) END,
+			CASE WHEN o.oprrest <> 0 THEN o.oprrest::regproc::text END,
+			CASE WHEN o.oprjoin <> 0 THEN o.oprjoin::regproc::text END,
+			o.oprcanhash,
+			o.oprcanmerge
+		FROM pg_operator o
+		WHERE o.oprnamespace = current_schema()::regnamespace
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = o.oid AND d.deptype = 'e'
+		)
+		ORDER BY o.oprname, o.oprleft, o.oprright
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var operators []*PostgresOperator
+
+	for rows.Next() {
+		operator := &PostgresOperator{}
+
+		err := rows.Scan(
+			&operator.Name,
+			&operator.LeftArgument,
+			&operator.RightArgument,
+			&operator.Function,
+			&operator.Commutator,
+			&operator.Negator,
+			&operator.RestrictFunction,
+			&operator.JoinFunction,
+			&operator.CanHash,
+			&operator.CanMerge,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		operators = append(operators, operator)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return operators, nil
 }

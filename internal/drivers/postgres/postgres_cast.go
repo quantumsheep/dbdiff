@@ -3,6 +3,8 @@ package driverspostgres
 import (
 	"context"
 	"database/sql"
+
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
 // PostgreSQL holds no action that changes a cast, so a new definition prints a DROP
@@ -90,4 +92,81 @@ func (d *PostgresDriver) HasAutomaticCast(ctx context.Context, db *sql.DB, oldTy
 	}
 
 	return automatic, nil
+}
+
+func (d *PostgresDriver) DiffCasts(ctx context.Context) (*driversshared.SectionDiff, error) {
+	return diffSection(ctx, d, sectionRules[*PostgresCast]{
+		Get: d.GetCasts,
+		Key: func(cast *PostgresCast) string {
+			return cast.SourceType + " AS " + cast.TargetType
+		},
+		Create: func(cast *PostgresCast) []driversshared.Instruction {
+			return []driversshared.Instruction{cast.CreateInstruction()}
+		},
+		Change: func(target *PostgresCast, source *PostgresCast) []driversshared.Instruction {
+			if target.Equal(source) {
+				return nil
+			}
+
+			return []driversshared.Instruction{source.DropInstruction(), target.CreateInstruction()}
+		},
+		Drop: func(source *PostgresCast) driversshared.Instruction {
+			return source.DropInstruction()
+		},
+	})
+}
+
+// A cast holds no schema, so the query scopes it to the schema of its source type or its
+// target type. c.oid >= 16384 excludes the casts that PostgreSQL creates at initdb.
+func (d *PostgresDriver) GetCasts(ctx context.Context, db *sql.DB) ([]*PostgresCast, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			format_type(c.castsource, NULL),
+			format_type(c.casttarget, NULL),
+			c.castmethod,
+			c.castcontext,
+			CASE WHEN c.castfunc <> 0
+				THEN p.proname || '(' || pg_get_function_identity_arguments(c.castfunc) || ')'
+			END
+		FROM pg_cast c
+		LEFT JOIN pg_proc p ON p.oid = c.castfunc
+		LEFT JOIN pg_type source_type ON source_type.oid = c.castsource
+		LEFT JOIN pg_type target_type ON target_type.oid = c.casttarget
+		WHERE c.oid >= 16384
+		AND (source_type.typnamespace = current_schema()::regnamespace
+			OR target_type.typnamespace = current_schema()::regnamespace)
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e'
+		)
+		ORDER BY format_type(c.castsource, NULL), format_type(c.casttarget, NULL)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var casts []*PostgresCast
+
+	for rows.Next() {
+		cast := &PostgresCast{}
+
+		var function sql.NullString
+
+		err := rows.Scan(&cast.SourceType, &cast.TargetType, &cast.Method, &cast.Context, &function)
+		if err != nil {
+			return nil, err
+		}
+
+		cast.Function = function.String
+
+		casts = append(casts, cast)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return casts, nil
 }

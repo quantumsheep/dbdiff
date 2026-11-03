@@ -1,6 +1,11 @@
 package driverspostgres
 
-import "slices"
+import (
+	"context"
+	"database/sql"
+	"slices"
+	"strings"
+)
 
 // PostgreSQL holds no action that changes a policy, so the diff prints a DROP statement
 // and a CREATE statement.
@@ -47,4 +52,51 @@ func (p *PostgresPolicy) DropInstruction() *PostgresDropPolicyInstruction {
 		Name:      p.Name,
 		TableName: p.Table,
 	}
+}
+
+func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresPolicy, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			policyname,
+			permissive,
+			cmd,
+			array_to_string(roles, ','),
+			coalesce(qual, ''),
+			coalesce(with_check, '')
+		FROM pg_policies
+		WHERE schemaname = current_schema() AND tablename = $1
+		ORDER BY policyname
+	`, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var policies []*PostgresPolicy
+
+	for rows.Next() {
+		policy := &PostgresPolicy{Table: tableName}
+
+		var roles string
+
+		err := rows.Scan(&policy.Name, &policy.Permissive, &policy.Command, &roles,
+			&policy.Using, &policy.WithCheck)
+		if err != nil {
+			return nil, err
+		}
+
+		if roles != "" {
+			policy.Roles = strings.Split(roles, ",")
+		}
+
+		policies = append(policies, policy)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return policies, nil
 }

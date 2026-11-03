@@ -1,11 +1,14 @@
 package driverspostgres
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 type PostgresTable struct {
@@ -897,4 +900,242 @@ func (t *PostgresTable) Instructions() []driversshared.Instruction {
 	}
 
 	return instructions
+}
+
+func (d *PostgresDriver) DiffTables(ctx context.Context) (*driversshared.SectionDiff, error) {
+	var earlyRemovals []driversshared.Instruction
+	var additions []driversshared.Instruction
+	var removals []driversshared.Instruction
+
+	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	hasAutomaticCast := func(oldType string, newType string) (bool, error) {
+		return d.HasAutomaticCast(ctx, d.SourceDatabaseConnection, oldType, newType)
+	}
+
+	// The action of a rule can name a second table, so every rule comes after every table.
+	var ruleInstructions []driversshared.Instruction
+
+	// Two tables can name each other, so every foreign key comes after every table.
+	var foreignKeyInstructions []driversshared.Instruction
+
+	for _, targetTable := range targetTables {
+		sourceTable, found := lo.Find(sourceTables, func(table *PostgresTable) bool {
+			return table.Name == targetTable.Name
+		})
+		if !found {
+			additions = append(additions, targetTable.Instructions()...)
+			foreignKeyInstructions = append(foreignKeyInstructions,
+				targetTable.ForeignKeyInstructions()...)
+			ruleInstructions = append(ruleInstructions, targetTable.RuleInstructions()...)
+
+			continue
+		}
+
+		subInstructions, err := targetTable.DiffTable(sourceTable, hasAutomaticCast)
+		if err != nil {
+			return nil, err
+		}
+
+		additions = append(additions, subInstructions...)
+		ruleInstructions = append(ruleInstructions, targetTable.DiffRules(sourceTable)...)
+
+		// PostgreSQL attaches an own index of a partition to a new index of the parent that
+		// matches it, and then refuses to drop it. So these removals come before every addition.
+		if targetTable.IsPartition() {
+			earlyRemovals = append(earlyRemovals, diffIndexRemovals(targetTable, sourceTable)...)
+		}
+	}
+
+	additions = append(additions, foreignKeyInstructions...)
+	additions = append(additions, ruleInstructions...)
+
+	// The reverse order gives each DROP TABLE statement before the table that it names.
+	for _, sourceTable := range slices.Backward(sourceTables) {
+		_, found := lo.Find(targetTables, func(table *PostgresTable) bool {
+			return table.Name == sourceTable.Name
+		})
+		if found {
+			continue
+		}
+
+		// A DROP TABLE statement of a parent removes every partition of it.
+		if sourceTable.IsPartition() && isTableDropped(sourceTable.PartitionParent, targetTables) {
+			continue
+		}
+
+		removals = append(removals, &driversshared.SQLDropTableInstruction{Name: sourceTable.Name})
+	}
+
+	return &driversshared.SectionDiff{
+		EarlyRemovals: earlyRemovals,
+		Additions:     additions,
+		Removals:      removals,
+	}, nil
+}
+
+func isTableDropped(name string, targetTables []*PostgresTable) bool {
+	_, found := lo.Find(targetTables, func(table *PostgresTable) bool {
+		return table.Name == name
+	})
+
+	return !found
+}
+
+// information_schema reports no partition key, no partition bound, and no replica
+// identity, so the query reads pg_class.
+//
+// pg_inherits names the parent of a partition and the parent of a table of INHERITS, so
+// relispartition separates the two. Without that test a table of INHERITS takes the
+// statement of a partition, and that statement holds no bound.
+func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*PostgresTable, error) {
+	tableRows, err := db.QueryContext(ctx, `
+		SELECT
+			c.relname,
+			coalesce(pg_get_partkeydef(c.oid), ''),
+			CASE WHEN c.relispartition THEN coalesce((
+				SELECT parent.relname
+				FROM pg_inherits i
+				JOIN pg_class parent ON parent.oid = i.inhparent
+				WHERE i.inhrelid = c.oid
+			), '') ELSE '' END,
+			coalesce(pg_get_expr(c.relpartbound, c.oid), ''),
+			coalesce((
+				SELECT array_to_string(array_agg(parent.relname ORDER BY i.inhseqno), ',')
+				FROM pg_inherits i
+				JOIN pg_class parent ON parent.oid = i.inhparent
+				WHERE i.inhrelid = c.oid AND NOT c.relispartition
+			), ''),
+			coalesce(obj_description(c.oid, 'pg_class'), ''),
+			c.relrowsecurity,
+			c.relforcerowsecurity,
+			c.relpersistence = 'u',
+			coalesce(array_to_string(c.reloptions, ','), ''),
+			CASE c.relreplident
+				WHEN 'd' THEN 'DEFAULT'
+				WHEN 'n' THEN 'NOTHING'
+				WHEN 'f' THEN 'FULL'
+				WHEN 'i' THEN 'USING INDEX'
+				ELSE ''
+			END,
+			coalesce((
+				SELECT replica_index.relname
+				FROM pg_index i
+				JOIN pg_class replica_index ON replica_index.oid = i.indexrelid
+				WHERE i.indrelid = c.oid AND i.indisreplident
+			), '')
+		FROM pg_class c
+		WHERE c.relnamespace = current_schema()::regnamespace
+		AND c.relkind IN ('r', 'p')
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = c.oid AND d.deptype = 'e'
+		)
+		AND c.relname <> $1
+		ORDER BY c.relname
+	`, driversshared.MigrationHistoryTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = tableRows.Close() }()
+
+	var tables []*PostgresTable
+
+	for tableRows.Next() {
+		var tableName, partitionKey, partitionParent, partitionBound, inherits, comment string
+		var rowLevelSecurity, forceRowLevelSecurity, unlogged bool
+		var storageParameters, replicaIdentity, replicaIdentityIndex string
+
+		err := tableRows.Scan(&tableName, &partitionKey, &partitionParent, &partitionBound,
+			&inherits, &comment, &rowLevelSecurity, &forceRowLevelSecurity, &unlogged,
+			&storageParameters, &replicaIdentity, &replicaIdentityIndex)
+		if err != nil {
+			return nil, err
+		}
+
+		if slices.Contains(d.IgnoreTables, tableName) {
+			continue
+		}
+
+		table, err := d.GetTable(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
+		table.PartitionKey = partitionKey
+		table.PartitionParent = partitionParent
+		table.PartitionBound = partitionBound
+		table.Comment = comment
+
+		if inherits != "" {
+			table.Inherits = strings.Split(inherits, ",")
+		}
+		table.Unlogged = unlogged
+
+		if storageParameters != "" {
+			table.StorageParameters = strings.Split(storageParameters, ",")
+		}
+		table.ReplicaIdentity = replicaIdentity
+		table.ReplicaIdentityIndex = replicaIdentityIndex
+		table.RowLevelSecurity = rowLevelSecurity
+		table.ForceRowLevelSecurity = forceRowLevelSecurity
+
+		policies, err := d.GetTablePolicies(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
+		table.Policies = policies
+
+		tables = append(tables, table)
+	}
+
+	err = tableRows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return sortTablesByDependency(tables), nil
+}
+
+func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*PostgresTable, error) {
+	table := &PostgresTable{Name: tableName}
+
+	err := getTableColumns(ctx, db, table)
+	if err != nil {
+		return nil, err
+	}
+
+	err = getTableConstraints(ctx, db, table)
+	if err != nil {
+		return nil, err
+	}
+
+	err = getTableIndexes(ctx, db, table)
+	if err != nil {
+		return nil, err
+	}
+
+	err = getTableTriggers(ctx, db, table)
+	if err != nil {
+		return nil, err
+	}
+
+	rules, err := d.GetTableRules(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	table.Rules = rules
+
+	return table, nil
 }

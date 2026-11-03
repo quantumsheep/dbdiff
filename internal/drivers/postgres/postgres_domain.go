@@ -1,9 +1,11 @@
 package driverspostgres
 
 import (
+	"context"
 	"database/sql"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 type PostgresDomainConstraint struct {
@@ -124,4 +126,88 @@ func (d *PostgresDomain) Diff(other *PostgresDomain) []driversshared.Instruction
 	}
 
 	return instructions
+}
+
+func (d *PostgresDriver) DiffDomains(ctx context.Context) (*driversshared.SectionDiff, error) {
+	return diffSection(ctx, d, sectionRules[*PostgresDomain]{
+		Get: d.GetDomains,
+		Key: func(domain *PostgresDomain) string {
+			return domain.Name
+		},
+		Create: func(domain *PostgresDomain) []driversshared.Instruction {
+			return []driversshared.Instruction{domain.CreateInstruction()}
+		},
+		Change: func(target *PostgresDomain, source *PostgresDomain) []driversshared.Instruction {
+			return target.Diff(source)
+		},
+		Drop: func(source *PostgresDomain) driversshared.Instruction {
+			return source.DropInstruction()
+		},
+	})
+}
+
+func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*PostgresDomain, error) {
+	// PostgreSQL 17 keeps the NOT NULL flag of a domain in pg_constraint too. This query
+	// reads the check constraints only, because typnotnull holds that flag already.
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			t.typname,
+			format_type(t.typbasetype, t.typtypmod),
+			t.typnotnull,
+			t.typdefault,
+			c.conname,
+			pg_get_constraintdef(c.oid)
+		FROM pg_type t
+		LEFT JOIN pg_constraint c ON c.contypid = t.oid AND c.contype = 'c'
+		WHERE t.typnamespace = current_schema()::regnamespace
+		AND t.typtype = 'd'
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e'
+		)
+		ORDER BY t.typname, c.conname
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var domains []*PostgresDomain
+
+	for rows.Next() {
+		var domainName, baseType string
+		var notNull bool
+		var defaultValue, constraintName, constraintDef sql.NullString
+
+		err := rows.Scan(&domainName, &baseType, &notNull, &defaultValue, &constraintName, &constraintDef)
+		if err != nil {
+			return nil, err
+		}
+
+		lastDomain, _ := lo.Last(domains)
+		if lastDomain == nil || lastDomain.Name != domainName {
+			lastDomain = &PostgresDomain{
+				Name:     domainName,
+				BaseType: baseType,
+				NotNull:  notNull,
+				Default:  defaultValue,
+			}
+			domains = append(domains, lastDomain)
+		}
+
+		if constraintName.Valid {
+			constraint := &PostgresDomainConstraint{
+				Name: constraintName.String,
+				Def:  constraintDef.String,
+			}
+			lastDomain.Constraints = append(lastDomain.Constraints, constraint)
+		}
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return domains, nil
 }

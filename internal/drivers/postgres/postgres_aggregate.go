@@ -1,6 +1,7 @@
 package driverspostgres
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -89,4 +90,105 @@ func (a *PostgresAggregate) Diff(other *PostgresAggregate) []driversshared.Instr
 	}
 
 	return []driversshared.Instruction{other.DropInstruction(), a.CreateInstruction()}
+}
+
+func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*driversshared.SectionDiff, error) {
+	return diffSection(ctx, d, sectionRules[*PostgresAggregate]{
+		Get: d.GetAggregates,
+		Key: func(aggregate *PostgresAggregate) string {
+			return aggregate.Signature()
+		},
+		Create: func(aggregate *PostgresAggregate) []driversshared.Instruction {
+			return []driversshared.Instruction{aggregate.CreateInstruction()}
+		},
+		Change: func(target *PostgresAggregate, source *PostgresAggregate) []driversshared.Instruction {
+			return target.Diff(source)
+		},
+		Drop: func(source *PostgresAggregate) driversshared.Instruction {
+			return source.DropInstruction()
+		},
+	})
+}
+
+func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*PostgresAggregate, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			p.proname,
+			pg_get_function_identity_arguments(p.oid),
+			format_type(a.aggtranstype, NULL),
+			a.aggtransfn::regproc::text,
+			a.aggtransspace,
+			CASE WHEN a.aggfinalfn <> 0 THEN a.aggfinalfn::regproc::text END,
+			a.aggfinalextra,
+			CASE WHEN a.aggfinalmodify <> 'r' THEN a.aggfinalmodify::text ELSE '' END,
+			CASE WHEN a.aggcombinefn <> 0 THEN a.aggcombinefn::regproc::text END,
+			CASE WHEN a.aggserialfn <> 0 THEN a.aggserialfn::regproc::text END,
+			CASE WHEN a.aggdeserialfn <> 0 THEN a.aggdeserialfn::regproc::text END,
+			a.agginitval,
+			CASE WHEN a.aggmtransfn <> 0 THEN a.aggmtransfn::regproc::text END,
+			CASE WHEN a.aggminvtransfn <> 0 THEN a.aggminvtransfn::regproc::text END,
+			CASE WHEN a.aggmtranstype <> 0 THEN format_type(a.aggmtranstype, NULL) END,
+			a.aggmtransspace,
+			CASE WHEN a.aggmfinalfn <> 0 THEN a.aggmfinalfn::regproc::text END,
+			a.aggmfinalextra,
+			CASE WHEN a.aggmfinalmodify <> 'r' THEN a.aggmfinalmodify::text ELSE '' END,
+			a.aggminitval,
+			CASE WHEN a.aggsortop <> 0 THEN (SELECT s.oprname FROM pg_operator s WHERE s.oid = a.aggsortop) END,
+			CASE WHEN p.proparallel <> 'u' THEN p.proparallel::text ELSE '' END
+		FROM pg_aggregate a
+		JOIN pg_proc p ON p.oid = a.aggfnoid
+		WHERE p.pronamespace = current_schema()::regnamespace
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
+		)
+		ORDER BY p.proname, pg_get_function_identity_arguments(p.oid)
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var aggregates []*PostgresAggregate
+
+	for rows.Next() {
+		aggregate := &PostgresAggregate{}
+
+		err := rows.Scan(
+			&aggregate.Name,
+			&aggregate.Arguments,
+			&aggregate.StateType,
+			&aggregate.TransitionFunction,
+			&aggregate.TransitionSpace,
+			&aggregate.FinalFunction,
+			&aggregate.FinalFunctionExtra,
+			&aggregate.FinalFunctionModify,
+			&aggregate.CombineFunction,
+			&aggregate.SerializeFunction,
+			&aggregate.DeserializeFunction,
+			&aggregate.InitialCondition,
+			&aggregate.MovingTransitionFunction,
+			&aggregate.MovingInverseTransitionFunction,
+			&aggregate.MovingStateType,
+			&aggregate.MovingTransitionSpace,
+			&aggregate.MovingFinalFunction,
+			&aggregate.MovingFinalFunctionExtra,
+			&aggregate.MovingFinalFunctionModify,
+			&aggregate.MovingInitialCondition,
+			&aggregate.SortOperator,
+			&aggregate.Parallel,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		aggregates = append(aggregates, aggregate)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return aggregates, nil
 }
