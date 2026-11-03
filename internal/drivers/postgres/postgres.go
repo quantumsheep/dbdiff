@@ -464,6 +464,7 @@ func isTableDropped(name string, targetTables []*PostgresTable) bool {
 }
 
 func (d *PostgresDriver) DiffTables(ctx context.Context) (*driversshared.SectionDiff, error) {
+	var earlyRemovals []driversshared.Instruction
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
 
@@ -507,6 +508,12 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*driversshared.Section
 
 		additions = append(additions, subInstructions...)
 		ruleInstructions = append(ruleInstructions, targetTable.DiffRules(sourceTable)...)
+
+		// PostgreSQL attaches an own index of a partition to a new index of the parent that
+		// matches it, and then refuses to drop it. So these removals come before every addition.
+		if targetTable.IsPartition() {
+			earlyRemovals = append(earlyRemovals, diffIndexRemovals(targetTable, sourceTable)...)
+		}
 	}
 
 	additions = append(additions, foreignKeyInstructions...)
@@ -530,8 +537,9 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*driversshared.Section
 	}
 
 	return &driversshared.SectionDiff{
-		Additions: additions,
-		Removals:  removals,
+		EarlyRemovals: earlyRemovals,
+		Additions:     additions,
+		Removals:      removals,
 	}, nil
 }
 
@@ -1669,26 +1677,24 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 }
 
 func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresView, error) {
+	// information_schema.views gives no definition of a view that the current role does not
+	// own, and it hides a view without a privilege, so the query reads pg_class.
 	viewRows, err := db.QueryContext(ctx, `
-		SELECT table_name, view_definition,
-			CASE WHEN check_option = 'NONE' THEN '' ELSE check_option END,
+		SELECT c.relname, pg_get_viewdef(c.oid),
 			coalesce((
-				SELECT obj_description(c.oid, 'pg_class')
-				FROM pg_class c
-				WHERE c.relnamespace = current_schema()::regnamespace
-				AND c.relname = views.table_name
-			), '')
-		FROM information_schema.views
-		WHERE table_schema = current_schema()
+				SELECT upper(substring(option FROM '^check_option=(.*)$'))
+				FROM unnest(c.reloptions) AS option
+				WHERE option LIKE 'check_option=%'
+			), ''),
+			coalesce(obj_description(c.oid, 'pg_class'), '')
+		FROM pg_class c
+		WHERE c.relkind = 'v'
+		AND c.relnamespace = current_schema()::regnamespace
 		AND NOT EXISTS (
-			SELECT 1
-			FROM pg_depend dep
-			JOIN pg_class c ON c.oid = dep.objid
-			WHERE dep.deptype = 'e'
-			AND c.relnamespace = current_schema()::regnamespace
-			AND c.relname = views.table_name
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = c.oid AND d.deptype = 'e'
 		)
-		ORDER BY table_name
+		ORDER BY c.relname
 	`)
 	if err != nil {
 		return nil, err
@@ -2159,6 +2165,9 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 
 	// pg_get_triggerdef writes no mode, so the query reads tgenabled apart. The value O names
 	// the mode of every new trigger.
+	//
+	// A partition takes each row trigger of its parent, and tgparentid names that parent
+	// trigger. Without this filter a second CREATE TRIGGER statement of that trigger fails.
 	triggerRows, err := db.QueryContext(ctx, `
 			SELECT
 				tgname,
@@ -2175,7 +2184,7 @@ func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName str
 					ELSE 'ENABLE'
 				END
 			FROM pg_trigger
-			WHERE tgrelid = $1::regclass AND tgisinternal = false
+			WHERE tgrelid = $1::regclass AND tgisinternal = false AND tgparentid = 0
 			ORDER BY tgname
 		`, driversshared.QuoteIdentifier(tableName))
 	if err != nil {

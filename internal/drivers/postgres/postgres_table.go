@@ -166,11 +166,20 @@ func identityOptionDefaults(sourceOptions string, columnType string) string {
 func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) ([]driversshared.Instruction, error) {
 	var instructions []driversshared.Instruction
 
-	// A partition holds the columns, the constraints, and the indexes of its parent.
-	// A partition takes the columns, the constraints, and the indexes of its parent.
+	if t.IsPartition() != other.IsPartition() {
+		if t.IsPartition() {
+			return nil, fmt.Errorf("the table %q changes from a table to a partition, and dbdiff cannot diff this change", t.Name)
+		}
+
+		return nil, fmt.Errorf("the table %q changes from a partition to a table, and dbdiff cannot diff this change", t.Name)
+	}
+
+	// A partition takes the columns, the constraints, and the inherited indexes of its parent.
+	// The diff does not compare the own constraints of a partition.
+	// DiffTables prints the removals of the own indexes of a partition.
 	// A new bound or a new parent needs a detach and an attach, because PostgreSQL
 	// holds no action that changes a bound in place.
-	if t.IsPartition() && other.IsPartition() {
+	if t.IsPartition() {
 		if t.PartitionParent != other.PartitionParent || t.PartitionBound != other.PartitionBound {
 			instructions = append(instructions,
 				&PostgresDetachPartitionInstruction{
@@ -184,11 +193,12 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 				})
 		}
 
-		return instructions, nil
-	}
+		instructions = append(instructions, diffRowLevelSecurity(t, other)...)
+		instructions = append(instructions, diffComments(t, other)...)
+		instructions = append(instructions, diffIndexAdditions(t, other)...)
+		instructions = append(instructions, diffTriggers(t, other)...)
 
-	if t.IsPartition() || other.IsPartition() {
-		return nil, nil
+		return instructions, nil
 	}
 
 	alterTable := func(action driversshared.AlterTableAction) driversshared.Instruction {
@@ -391,27 +401,7 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 	instructions = append(instructions, diffStorageParameters(t, other)...)
 	instructions = append(instructions, diffRowLevelSecurity(t, other)...)
 
-	if t.Comment != other.Comment {
-		instructions = append(instructions, &PostgresCommentOnTableInstruction{
-			Name: t.Name,
-			Text: t.Comment,
-		})
-	}
-
-	for _, targetColumn := range t.Columns {
-		sourceColumn, found := other.ColumnByName(targetColumn.Name)
-		if !found {
-			continue
-		}
-
-		if targetColumn.Comment != sourceColumn.Comment {
-			instructions = append(instructions, &PostgresCommentOnColumnInstruction{
-				TableName:  t.Name,
-				ColumnName: targetColumn.Name,
-				Text:       targetColumn.Comment,
-			})
-		}
-	}
+	instructions = append(instructions, diffComments(t, other)...)
 
 	// PostgreSQL drops every constraint and every index of a column with the column, so
 	// these two blocks come before the column removals below.
@@ -441,8 +431,67 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 
 	instructions = append(instructions, dropNotNullInstructions...)
 
-	for _, targetIndex := range t.Indexes {
-		sourceIndex, found := other.IndexByName(targetIndex.Name)
+	instructions = append(instructions, diffIndexAdditions(t, other)...)
+
+	// The mode USING INDEX names an index, so this block comes after the index additions
+	// above. It comes before the index removals below, because PostgreSQL refuses to drop
+	// the index that the replica identity of the source holds.
+	if t.ReplicaIdentity != other.ReplicaIdentity ||
+		t.ReplicaIdentityIndex != other.ReplicaIdentityIndex {
+		instructions = append(instructions, alterTable(&PostgresReplicaIdentityAction{
+			Mode:      t.ReplicaIdentity,
+			IndexName: t.ReplicaIdentityIndex,
+		}))
+	}
+
+	instructions = append(instructions, diffIndexRemovals(t, other)...)
+
+	for _, sourceColumn := range other.Columns {
+		_, found := t.ColumnByName(sourceColumn.Name)
+		if !found {
+			instructions = append(instructions,
+				alterTable(&driversshared.SQLDropColumnAction{ColumnName: sourceColumn.Name}))
+		}
+	}
+
+	instructions = append(instructions, diffTriggers(t, other)...)
+
+	return instructions, nil
+}
+
+func diffComments(targetTable *PostgresTable, sourceTable *PostgresTable) []driversshared.Instruction {
+	var instructions []driversshared.Instruction
+
+	if targetTable.Comment != sourceTable.Comment {
+		instructions = append(instructions, &PostgresCommentOnTableInstruction{
+			Name: targetTable.Name,
+			Text: targetTable.Comment,
+		})
+	}
+
+	for _, targetColumn := range targetTable.Columns {
+		sourceColumn, found := sourceTable.ColumnByName(targetColumn.Name)
+		if !found {
+			continue
+		}
+
+		if targetColumn.Comment != sourceColumn.Comment {
+			instructions = append(instructions, &PostgresCommentOnColumnInstruction{
+				TableName:  targetTable.Name,
+				ColumnName: targetColumn.Name,
+				Text:       targetColumn.Comment,
+			})
+		}
+	}
+
+	return instructions
+}
+
+func diffIndexAdditions(targetTable *PostgresTable, sourceTable *PostgresTable) []driversshared.Instruction {
+	var instructions []driversshared.Instruction
+
+	for _, targetIndex := range targetTable.Indexes {
+		sourceIndex, found := sourceTable.IndexByName(targetIndex.Name)
 		if !found {
 			instructions = append(instructions, targetIndex.Instructions()...)
 			continue
@@ -462,37 +511,30 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 		}
 	}
 
-	// The mode USING INDEX names an index, so this block comes after the index additions
-	// above. It comes before the index removals below, because PostgreSQL refuses to drop
-	// the index that the replica identity of the source holds.
-	if t.ReplicaIdentity != other.ReplicaIdentity ||
-		t.ReplicaIdentityIndex != other.ReplicaIdentityIndex {
-		instructions = append(instructions, alterTable(&PostgresReplicaIdentityAction{
-			Mode:      t.ReplicaIdentity,
-			IndexName: t.ReplicaIdentityIndex,
-		}))
-	}
+	return instructions
+}
 
-	for _, sourceIndex := range other.Indexes {
-		_, found := t.IndexByName(sourceIndex.Name)
+func diffIndexRemovals(targetTable *PostgresTable, sourceTable *PostgresTable) []driversshared.Instruction {
+	var instructions []driversshared.Instruction
+
+	for _, sourceIndex := range sourceTable.Indexes {
+		_, found := targetTable.IndexByName(sourceIndex.Name)
 		if !found {
 			instructions = append(instructions, &driversshared.SQLDropIndexInstruction{Name: sourceIndex.Name})
 		}
 	}
 
-	for _, sourceColumn := range other.Columns {
-		_, found := t.ColumnByName(sourceColumn.Name)
-		if !found {
-			instructions = append(instructions,
-				alterTable(&driversshared.SQLDropColumnAction{ColumnName: sourceColumn.Name}))
-		}
-	}
+	return instructions
+}
 
-	for _, targetTrigger := range t.Triggers {
-		sourceTrigger, found := other.TriggerByName(targetTrigger.Name)
+func diffTriggers(targetTable *PostgresTable, sourceTable *PostgresTable) []driversshared.Instruction {
+	var instructions []driversshared.Instruction
+
+	for _, targetTrigger := range targetTable.Triggers {
+		sourceTrigger, found := sourceTable.TriggerByName(targetTrigger.Name)
 		if !found {
 			instructions = append(instructions, targetTrigger.CreateInstruction())
-			instructions = append(instructions, targetTrigger.EnableInstructions(t.Name)...)
+			instructions = append(instructions, targetTrigger.EnableInstructions(targetTable.Name)...)
 
 			continue
 		}
@@ -503,34 +545,37 @@ func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast Automat
 			instructions = append(instructions,
 				&PostgresDropTriggerInstruction{
 					Name:      sourceTrigger.Name,
-					TableName: t.Name,
+					TableName: targetTable.Name,
 				},
 				targetTrigger.CreateInstruction())
-			instructions = append(instructions, targetTrigger.EnableInstructions(t.Name)...)
+			instructions = append(instructions, targetTrigger.EnableInstructions(targetTable.Name)...)
 
 			continue
 		}
 
 		if targetTrigger.EnableMode != sourceTrigger.EnableMode {
-			instructions = append(instructions, alterTable(&PostgresTriggerEnableAction{
-				Mode:        targetTrigger.EnableMode,
-				TriggerName: targetTrigger.Name,
-			}))
+			instructions = append(instructions, &PostgresAlterTableInstruction{
+				Name: targetTable.Name,
+				Actions: []driversshared.AlterTableAction{&PostgresTriggerEnableAction{
+					Mode:        targetTrigger.EnableMode,
+					TriggerName: targetTrigger.Name,
+				}},
+			})
 		}
 	}
 
-	for _, sourceTrigger := range other.Triggers {
-		_, found := t.TriggerByName(sourceTrigger.Name)
+	for _, sourceTrigger := range sourceTable.Triggers {
+		_, found := targetTable.TriggerByName(sourceTrigger.Name)
 		if !found {
 			instructions = append(instructions,
 				&PostgresDropTriggerInstruction{
 					Name:      sourceTrigger.Name,
-					TableName: t.Name,
+					TableName: targetTable.Name,
 				})
 		}
 	}
 
-	return instructions, nil
+	return instructions
 }
 
 // A statement needs the parent: a partition needs its parent, a table of INHERITS needs

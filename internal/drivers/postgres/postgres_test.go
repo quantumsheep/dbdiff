@@ -2188,6 +2188,66 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnSource(diff)
 	})
 
+	t.Run("ModifyAViewOfAnotherOwner", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		// information_schema.views gives no definition of a view that the connecting role
+		// does not own, so the diff connects as a role that owns no view.
+		driver.ExecOnSource(`
+			DO $$
+			BEGIN
+				IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dbdiff_view_owner') THEN
+					CREATE ROLE dbdiff_view_owner;
+				END IF;
+				IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dbdiff_view_reader') THEN
+					CREATE ROLE dbdiff_view_reader LOGIN PASSWORD 'password';
+				END IF;
+			END
+			$$;
+		`)
+
+		for _, schema := range []string{driver.sourceSchema, driver.targetSchema} {
+			_, err := driver.conn.ExecContext(t.Context(), fmt.Sprintf(`
+				GRANT USAGE ON SCHEMA %[1]s TO dbdiff_view_reader;
+				CREATE TABLE %[1]s.base (a integer);
+				GRANT SELECT ON ALL TABLES IN SCHEMA %[1]s TO dbdiff_view_reader;
+			`, schema))
+			require.NoError(t, err)
+		}
+
+		driver.ExecOnSource(`
+			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0;
+			ALTER VIEW positive OWNER TO dbdiff_view_owner;
+			GRANT SELECT ON positive TO dbdiff_view_reader;
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE VIEW positive AS SELECT a FROM base WHERE a > 1 WITH LOCAL CHECK OPTION;
+			ALTER VIEW positive OWNER TO dbdiff_view_owner;
+			GRANT SELECT ON positive TO dbdiff_view_reader;
+		`)
+
+		readerConnectionString := strings.Replace(postgresTestConnectionString,
+			"user:password", "dbdiff_view_reader:password", 1)
+		driver.source = driversshared.ConnectionStringDataSource{
+			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.sourceSchema),
+		}
+		driver.target = driversshared.ConnectionStringDataSource{
+			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.targetSchema),
+		}
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "positive"},
+			&PostgresCreateViewInstruction{
+				Name:        "positive",
+				Query:       " SELECT a\n   FROM base\n  WHERE (a > 1);",
+				CheckOption: "LOCAL",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
 	t.Run("CreateRule", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
@@ -4559,6 +4619,114 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(diff)
 		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ModifyTheOwnObjectsOfAPartition", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE measurements (id integer PRIMARY KEY, value integer) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+			CREATE FUNCTION touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+		`
+
+		driver.ExecOnSource(schema + `
+			CREATE INDEX measurements_low_old ON measurements_low (id, value);
+		`)
+
+		driver.ExecOnTarget(schema + `
+			CREATE INDEX measurements_value ON measurements (value);
+			CREATE TRIGGER parent_trigger BEFORE INSERT ON measurements
+				FOR EACH ROW EXECUTE FUNCTION touch();
+			COMMENT ON TABLE measurements_low IS 'low range';
+			ALTER TABLE measurements_low ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY low_read ON measurements_low FOR SELECT USING (value > 0);
+			CREATE INDEX measurements_low_id ON measurements_low (id);
+			CREATE TRIGGER low_trigger BEFORE INSERT ON measurements_low
+				FOR EACH ROW EXECUTE FUNCTION touch();
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLDropIndexInstruction{Name: "measurements_low_old"},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX measurements_value ON measurements USING btree (value)",
+			},
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER parent_trigger BEFORE INSERT ON measurements FOR EACH ROW EXECUTE FUNCTION touch()",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measurements_low",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresRowLevelSecurityAction{Mode: "ENABLE"},
+				},
+			},
+			&PostgresCreatePolicyInstruction{
+				Name:       "low_read",
+				TableName:  "measurements_low",
+				Permissive: "PERMISSIVE",
+				Command:    "SELECT",
+				Roles:      []string{"public"},
+				Using:      "(value > 0)",
+			},
+			&PostgresCommentOnTableInstruction{
+				Name: "measurements_low",
+				Text: "low range",
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX measurements_low_id ON measurements_low USING btree (id)",
+			},
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER low_trigger BEFORE INSERT ON measurements_low FOR EACH ROW EXECUTE FUNCTION touch()",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ReplaceAPartitionIndexWithAParentIndex", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE measurements (id integer PRIMARY KEY, value integer) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+		`
+
+		driver.ExecOnSource(schema + `
+			CREATE INDEX measurements_low_value ON measurements_low (value);
+		`)
+
+		driver.ExecOnTarget(schema + `
+			CREATE INDEX measurements_value ON measurements (value);
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLDropIndexInstruction{Name: "measurements_low_value"},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX measurements_value ON measurements USING btree (value)",
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("ChangeATableToAPartition", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low (id integer PRIMARY KEY);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+		`)
+
+		_, err := driver.Diff(t.Context(), driver.source, driver.target, driversshared.DiffOptions{})
+		require.EqualError(t, err,
+			`the table "measurements_low" changes from a table to a partition, and dbdiff cannot diff this change`)
 	})
 
 	t.Run("CompareRowsOfAPartitionedTable", func(t *testing.T) {
