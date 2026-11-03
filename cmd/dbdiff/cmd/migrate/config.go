@@ -1,4 +1,4 @@
-package migrations
+package cmdmigrate
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-func GetMigrationConfigFromCommand(command *cli.Command) (*coremigrations.MigrationConfig, error) {
+func migrationConfigFromCommand(command *cli.Command) (*coremigrations.MigrationConfig, error) {
 	path := command.String("config")
 
 	optional := path == ""
@@ -65,8 +65,8 @@ func GetMigrationConfigFromCommand(command *cli.Command) (*coremigrations.Migrat
 	return config, nil
 }
 
-func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.MigrationConfig, coremigrations.Migrator, *coremigrations.MigrationSet, error) {
-	config, err := GetMigrationConfigFromCommand(command)
+func openSet(ctx context.Context, command *cli.Command) (*coremigrations.MigrationConfig, coremigrations.Migrator, *coremigrations.MigrationSet, error) {
+	config, err := migrationConfigFromCommand(command)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -101,4 +101,36 @@ func OpenSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 	}
 
 	return config, migrator, set, nil
+}
+
+const databaseTargetUsage = "Connection URL of the database that the migrations change. The default is the DBDIFF_TARGET variable"
+
+func migrationFlags(targetUsage string, flags ...cli.Flag) []cli.Flag {
+	return append([]cli.Flag{
+		&cli.StringFlag{
+			Name:  "config",
+			Usage: "Path of the configuration file. The default is dbdiff.yaml of the working directory",
+		},
+		&cli.StringFlag{
+			Name:  "source",
+			Usage: "Directory of the migration files",
+		},
+		&cli.StringFlag{
+			Name:  "target",
+			Usage: targetUsage,
+		},
+	}, flags...)
+}
+
+func withSet(action func(ctx context.Context, command *cli.Command, config *coremigrations.MigrationConfig, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) error) cli.ActionFunc {
+	return func(ctx context.Context, command *cli.Command) error {
+		config, migrator, set, err := openSet(ctx, command)
+		if err != nil {
+			return err
+		}
+
+		defer func() { _ = migrator.Close() }()
+
+		return action(ctx, command, config, migrator, set)
+	}
 }

@@ -1,4 +1,4 @@
-package cmdmigratestatus_test
+package cmdmigrate_test
 
 import (
 	"testing"

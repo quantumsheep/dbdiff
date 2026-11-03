@@ -1,4 +1,4 @@
-package cmdmigraterepair_test
+package cmdmigrate_test
 
 import (
 	"path/filepath"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMigrateRepairCommand(t *testing.T) {
+func TestMigrateStepCommand(t *testing.T) {
 	binaryPath := clitest.Build(t)
 
 	t.Run("WithNoSource", func(t *testing.T) {
@@ -19,12 +19,12 @@ func TestMigrateRepairCommand(t *testing.T) {
 
 		configPath := clitest.WriteMigrationConfig(t, directory, "driver: sqlite3\n")
 
-		result := clitest.Run(t, binaryPath, "migrate", "repair", "--config", configPath, "--target", databasePath)
+		result := clitest.Run(t, binaryPath, "migrate", "step", "--config", configPath, "--target", databasePath)
 		require.Equal(t, 1, result.ExitCode)
 		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
 	})
 
-	t.Run("ACleanRecordNeedsNoRepair", func(t *testing.T) {
+	t.Run("WithoutATerminal", func(t *testing.T) {
 		directory := t.TempDir()
 
 		databasePath := filepath.Join(directory, "app.sqlite")
@@ -37,11 +37,8 @@ func TestMigrateRepairCommand(t *testing.T) {
 		configPath := clitest.WriteMigrationConfig(t, directory,
 			"driver: sqlite3\nsource: "+migrations+"\n")
 
-		result := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath, "--target", databasePath)
-		require.Equal(t, 0, result.ExitCode, result.Stderr)
-
-		result = clitest.Run(t, binaryPath, "migrate", "repair", "--config", configPath, "--target", databasePath)
-		require.Equal(t, 0, result.ExitCode, result.Stderr)
-		require.Contains(t, result.Stdout, "The record needs no repair.")
+		result := clitest.Run(t, binaryPath, "migrate", "step", "--config", configPath, "--target", databasePath)
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: step needs a terminal. Use the command up to apply a migration with no prompt\n", result.Stderr)
 	})
 }

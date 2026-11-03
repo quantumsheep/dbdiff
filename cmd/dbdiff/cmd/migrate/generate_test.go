@@ -1,4 +1,4 @@
-package cmdmigrategenerate_test
+package cmdmigrate_test
 
 import (
 	"fmt"
@@ -74,7 +74,7 @@ func TestMigrateGenerateCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: the migrations hold the schema of the source already, so dbdiff wrote no file\n", result.Stderr)
+		require.Equal(t, "dbdiff: the migrations hold the schema of the target already, so dbdiff wrote no file\n", result.Stderr)
 
 		entries, err := os.ReadDir(migrations)
 		require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestMigrateGenerateCommand(t *testing.T) {
 
 		result := clitest.Run(t, binaryPath, "migrate", "generate", "--config", configPath, "add_example")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: the migrations hold the schema of the source already, so dbdiff wrote no file\n", result.Stderr)
+		require.Equal(t, "dbdiff: the migrations hold the schema of the target already, so dbdiff wrote no file\n", result.Stderr)
 	})
 
 	t.Run("BuildsTheMigrationsDirectory", func(t *testing.T) {

@@ -1,4 +1,4 @@
-package cmdmigrateverify_test
+package cmdmigrate_test
 
 import (
 	"path/filepath"

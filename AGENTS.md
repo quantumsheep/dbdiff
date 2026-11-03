@@ -6,7 +6,7 @@ This file gives the principles. The code holds the details. Before you change a 
 
 ## Architecture
 
-- `cmd/dbdiff/` holds the CLI, with one package per command.
+- `cmd/dbdiff/` holds the CLI, with one package per top-level command. The subcommands of a command live in the package of that command, with one file for each subcommand.
 - `internal/drivers/shared/` holds the engine-free core. `internal/drivers/<engine>/` holds one engine.
 - `internal/migrations/` holds the migration runner. It knows no engine.
 - `drivers/` and `migrations/` are the public Go packages. Keep their types stable.
