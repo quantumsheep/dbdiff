@@ -44,11 +44,11 @@ func SplitSQLStatements(content string) []string {
 
 		switch {
 		case strings.HasPrefix(rest, "--"):
-			index = endOfLineComment(content, index)
+			index = EndOfLineComment(content, index)
 		case strings.HasPrefix(rest, "/*"):
 			index = endOfBlockComment(content, index)
 		case content[index] == '\'' || content[index] == '"' || content[index] == '`':
-			index = endOfQuotedText(content, index)
+			index = EndOfQuotedText(content, index)
 		case content[index] == '$':
 			index = endOfDollarQuotedText(content, index)
 		case content[index] == '(':
@@ -142,7 +142,7 @@ func appendStatement(statements []string, statement string) []string {
 	return append(statements, statement)
 }
 
-func endOfLineComment(content string, index int) int {
+func EndOfLineComment(content string, index int) int {
 	end := strings.IndexByte(content[index:], '\n')
 	if end < 0 {
 		return len(content)
@@ -180,7 +180,7 @@ func endOfBlockComment(content string, index int) int {
 	return len(content)
 }
 
-func endOfQuotedText(content string, index int) int {
+func EndOfQuotedText(content string, index int) int {
 	quote := content[index]
 	escapes := quote == '\'' && index > 0 && (content[index-1] == 'E' || content[index-1] == 'e')
 

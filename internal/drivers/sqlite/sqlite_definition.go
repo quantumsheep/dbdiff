@@ -1,6 +1,7 @@
 package driverssqlite
 
 import (
+	"slices"
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -47,7 +48,7 @@ func constraintColumnNames(list string) []string {
 
 	var names []string
 
-	for _, part := range strings.Split(inner, ",") {
+	for _, part := range splitTopLevel(inner, ',') {
 		tokens := splitTopLevelTokens(part)
 		if len(tokens) == 0 {
 			continue
@@ -69,7 +70,7 @@ func constraintKeyClauses(list string) []string {
 
 	holdsModifier := false
 
-	for _, part := range strings.Split(inner, ",") {
+	for _, part := range splitTopLevel(inner, ',') {
 		tokens := splitTopLevelTokens(part)
 		if len(tokens) == 0 {
 			continue
@@ -118,9 +119,12 @@ func indexKeyModifiers(definitionKey string) string {
 
 // SQLite accepts WITHOUT ROWID and STRICT, in any order and in any case.
 func parseTableOptions(definition string) (withoutRowID bool, strict bool) {
-	tail := definition[indexAfterColumnList(definition):]
+	_, closing := keyListBounds(definition)
+	if closing < 0 {
+		return false, false
+	}
 
-	for _, option := range strings.Split(tail, ",") {
+	for _, option := range splitTopLevel(definition[closing+1:], ',') {
 		option = strings.Join(strings.Fields(option), " ")
 
 		if strings.EqualFold(option, "WITHOUT ROWID") {
@@ -135,57 +139,27 @@ func parseTableOptions(definition string) (withoutRowID bool, strict bool) {
 	return withoutRowID, strict
 }
 
-func indexAfterColumnList(definition string) int {
-	start := indexOfKeyList(definition)
-	if start < 0 {
-		return len(definition)
-	}
-
-	depth := 0
-	quote := noQuote
-
-	for position, character := range definition[start:] {
-		if quote != noQuote {
-			if character == quote {
-				quote = noQuote
-			}
-
-			continue
-		}
-
-		opened := closingQuote(character)
-		if opened != noQuote {
-			quote = opened
-			continue
-		}
-
-		if character == '(' {
-			depth++
-			continue
-		}
-
-		if character == ')' {
-			depth--
-
-			if depth == 0 {
-				return start + position + 1
-			}
-		}
-	}
-
-	return len(definition)
+// A parsed constraint holds the parts of a UNIQUE or a FOREIGN KEY clause that no PRAGMA
+// reports. Two constraints can have the same columns, so no map keys them by column.
+type parsedConstraint struct {
+	Name       string
+	Columns    []string
+	Keys       []string
+	Conflict   string
+	Deferrable string
 }
 
 // PRAGMA table_xinfo gives no expression of a generated column, and no PRAGMA reports a
 // collation, the keyword AUTOINCREMENT, or a check.
 type SQLiteTableDefinition struct {
-	Columns            map[string]*SQLiteColumn
-	CheckConstraints   []*SQLiteCheckConstraint
-	UniqueNames        map[string]string
-	ForeignKeyNames    map[string]string
-	UniqueConflicts    map[string]string
-	UniqueKeys         map[string][]string
-	ForeignKeyDefers   map[string]string
+	Columns           map[string]*SQLiteColumn
+	CheckConstraints  []*SQLiteCheckConstraint
+	UniqueConstraints []*parsedConstraint
+
+	// The foreign keys of the columns and of the table, in the order of the CREATE TABLE
+	// text. GetTableForeignKeys matches the PRAGMA entries to them by this order.
+	ForeignKeys []*parsedConstraint
+
 	PrimaryKeyName     string
 	PrimaryKeyConflict string
 	PrimaryKeyKeys     []string
@@ -193,24 +167,15 @@ type SQLiteTableDefinition struct {
 	Strict             bool
 }
 
-func (d *SQLiteTableDefinition) UniqueConflictOf(columns []string) string {
-	return d.UniqueConflicts[strings.Join(columns, ",")]
-}
+// If no constraint has these columns, this method returns an empty constraint.
+func (d *SQLiteTableDefinition) UniqueConstraintOf(columns []string) *parsedConstraint {
+	for _, constraint := range d.UniqueConstraints {
+		if slices.Equal(constraint.Columns, columns) {
+			return constraint
+		}
+	}
 
-func (d *SQLiteTableDefinition) DeferrableOf(columns []string) string {
-	return d.ForeignKeyDefers[strings.Join(columns, ",")]
-}
-
-func (d *SQLiteTableDefinition) UniqueNameOf(columns []string) string {
-	return d.UniqueNames[strings.Join(columns, ",")]
-}
-
-func (d *SQLiteTableDefinition) UniqueKeysOf(columns []string) []string {
-	return d.UniqueKeys[strings.Join(columns, ",")]
-}
-
-func (d *SQLiteTableDefinition) ForeignKeyNameOf(columns []string) string {
-	return d.ForeignKeyNames[strings.Join(columns, ",")]
+	return &parsedConstraint{}
 }
 
 func (d *SQLiteTableDefinition) ColumnByName(name string) (*SQLiteColumn, bool) {
@@ -220,13 +185,10 @@ func (d *SQLiteTableDefinition) ColumnByName(name string) (*SQLiteColumn, bool) 
 
 func parseTableDefinition(definition string) *SQLiteTableDefinition {
 	parsed := &SQLiteTableDefinition{
-		Columns:          make(map[string]*SQLiteColumn),
-		UniqueConflicts:  make(map[string]string),
-		UniqueKeys:       make(map[string][]string),
-		ForeignKeyDefers: make(map[string]string),
-		UniqueNames:      make(map[string]string),
-		ForeignKeyNames:  make(map[string]string),
+		Columns: make(map[string]*SQLiteColumn),
 	}
+
+	definition = withoutComments(definition)
 
 	parsed.WithoutRowID, parsed.Strict = parseTableOptions(definition)
 
@@ -254,10 +216,12 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 			}
 
 			if strings.EqualFold(constraint[0], "UNIQUE") && len(constraint) > 1 {
-				key := strings.Join(constraintColumnNames(constraint[1]), ",")
-				parsed.UniqueConflicts[key] = conflictResolution(constraint[1:])
-				parsed.UniqueNames[key] = constraintName
-				parsed.UniqueKeys[key] = constraintKeyClauses(constraint[1])
+				parsed.UniqueConstraints = append(parsed.UniqueConstraints, &parsedConstraint{
+					Name:     constraintName,
+					Columns:  constraintColumnNames(constraint[1]),
+					Keys:     constraintKeyClauses(constraint[1]),
+					Conflict: conflictResolution(constraint[1:]),
+				})
 			}
 
 			if strings.EqualFold(constraint[0], "PRIMARY") && len(constraint) > 2 {
@@ -267,9 +231,11 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 			}
 
 			if strings.EqualFold(constraint[0], "FOREIGN") && len(constraint) > 2 {
-				key := strings.Join(constraintColumnNames(constraint[2]), ",")
-				parsed.ForeignKeyDefers[key] = deferrableClause(constraint[2:])
-				parsed.ForeignKeyNames[key] = constraintName
+				parsed.ForeignKeys = append(parsed.ForeignKeys, &parsedConstraint{
+					Name:       constraintName,
+					Columns:    constraintColumnNames(constraint[2]),
+					Deferrable: deferrableClause(constraint[2:]),
+				})
 			}
 
 			continue
@@ -280,7 +246,10 @@ func parseTableDefinition(definition string) *SQLiteTableDefinition {
 			continue
 		}
 
-		parsed.Columns[name] = parseColumnAttributes(name, tokens[1:])
+		column, foreignKeys := parseColumnAttributes(name, tokens[1:])
+
+		parsed.Columns[name] = column
+		parsed.ForeignKeys = append(parsed.ForeignKeys, foreignKeys...)
 	}
 
 	return parsed
@@ -296,8 +265,10 @@ func isTableConstraintKeyword(token string) bool {
 }
 
 // SQLite accepts the constraints of a column in any order, so the loop tests each token.
-func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
+func parseColumnAttributes(name string, tokens []string) (*SQLiteColumn, []*parsedConstraint) {
 	column := &SQLiteColumn{Name: name}
+
+	var foreignKeys []*parsedConstraint
 
 	// An ON CONFLICT clause belongs to the constraint before it, so the loop keeps the
 	// name of the constraint that it read last.
@@ -343,7 +314,16 @@ func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
 			column.Check = next
 
 		case strings.EqualFold(token, "REFERENCES"):
-			column.ForeignKeyDeferrable = deferrableClause(tokens[position:])
+			foreignKey := &parsedConstraint{
+				Columns:    []string{name},
+				Deferrable: deferrableClause(tokens[position:]),
+			}
+
+			if position >= 2 && strings.EqualFold(tokens[position-2], "CONSTRAINT") {
+				foreignKey.Name = unquoteIdentifier(tokens[position-1])
+			}
+
+			foreignKeys = append(foreignKeys, foreignKey)
 
 		case strings.EqualFold(token, "AS") && strings.HasPrefix(next, "("):
 			column.GeneratedExpression = next
@@ -354,143 +334,172 @@ func parseColumnAttributes(name string, tokens []string) *SQLiteColumn {
 		}
 	}
 
-	return column
+	return column, foreignKeys
 }
 
 // A table constraint gives a part too, and parseTableDefinition drops it.
 func splitColumnDefinitions(definition string) []string {
-	start := indexOfKeyList(definition)
-	if start < 0 {
+	opening, closing := keyListBounds(definition)
+	if opening < 0 || closing < 0 {
 		return nil
 	}
 
-	var parts []string
-	var part strings.Builder
-
-	depth := 0
-	quote := noQuote
-
-	for _, character := range definition[start:] {
-		if quote != noQuote {
-			if character == quote {
-				quote = noQuote
-			}
-
-			part.WriteRune(character)
-			continue
-		}
-
-		opened := closingQuote(character)
-		if opened != noQuote {
-			quote = opened
-
-			part.WriteRune(character)
-			continue
-		}
-
-		if character == '(' {
-			depth++
-
-			if depth > 1 {
-				part.WriteRune(character)
-			}
-
-			continue
-		}
-
-		if character == ')' {
-			depth--
-
-			if depth > 0 {
-				part.WriteRune(character)
-				continue
-			}
-
-			return append(parts, part.String())
-		}
-
-		if character == ',' && depth == 1 {
-			parts = append(parts, part.String())
-			part.Reset()
-
-			continue
-		}
-
-		part.WriteRune(character)
-	}
-
-	return parts
+	return splitTopLevel(definition[opening+1:closing], ',')
 }
 
 // A group in parentheses stays one token, so an expression keeps its text.
 func splitTopLevelTokens(part string) []string {
 	var tokens []string
-	var token strings.Builder
 
-	depth := 0
-	quote := noQuote
+	tokenStart := -1
 
-	flush := func() {
-		if token.Len() > 0 {
-			tokens = append(tokens, token.String())
-			token.Reset()
+	endToken := func(position int) {
+		if tokenStart >= 0 {
+			tokens = append(tokens, part[tokenStart:position])
+			tokenStart = -1
 		}
 	}
 
-	for _, character := range part {
-		if quote != noQuote {
-			token.WriteRune(character)
+	scanTopLevel(part, func(position int, depth int) {
+		character := part[position]
 
-			if character == quote {
-				quote = noQuote
-			}
-
-			continue
+		switch {
+		case depth != 0:
+			return
+		case character == '(':
+			// Without this split, CHECK(x) is one token and the constraint disappears.
+			endToken(position)
+			tokenStart = position
+		case character == ')':
+			endToken(position + 1)
+		case character == ' ' || character == '\t' || character == '\n' || character == '\r':
+			endToken(position)
+		case tokenStart < 0:
+			tokenStart = position
 		}
+	})
 
-		opened := closingQuote(character)
-		if opened != noQuote {
-			quote = opened
-
-			token.WriteRune(character)
-			continue
-		}
-
-		if character == '(' {
-			// Without the flush, CHECK(x) is one token and the constraint disappears.
-			if depth == 0 {
-				flush()
-			}
-
-			depth++
-
-			token.WriteRune(character)
-			continue
-		}
-
-		if character == ')' {
-			depth--
-
-			token.WriteRune(character)
-
-			if depth == 0 {
-				flush()
-			}
-
-			continue
-		}
-
-		if depth == 0 && (character == ' ' || character == '\t' || character == '\n' || character == '\r') {
-			flush()
-			continue
-		}
-
-		token.WriteRune(character)
-	}
-
-	flush()
+	endToken(len(part))
 
 	return tokens
+}
+
+func splitTopLevel(text string, separator byte) []string {
+	var parts []string
+
+	partStart := 0
+
+	scanTopLevel(text, func(position int, depth int) {
+		if depth == 0 && text[position] == separator {
+			parts = append(parts, text[partStart:position])
+			partStart = position + 1
+		}
+	})
+
+	return append(parts, text[partStart:])
+}
+
+// The first group in parentheses holds the columns of a table or the keys of an index.
+func keyListBounds(definition string) (opening int, closing int) {
+	opening = -1
+	closing = -1
+
+	scanTopLevel(definition, func(position int, depth int) {
+		if depth != 0 || closing >= 0 {
+			return
+		}
+
+		switch definition[position] {
+		case '(':
+			opening = position
+		case ')':
+			closing = position
+		}
+	})
+
+	return opening, closing
+}
+
+// The visit function receives the position of each character outside quoted text, with the
+// parenthesis depth around that character. The two parentheses of a group get the same depth.
+// The function receives a quoted text one time, at its opening quote, so a test of that
+// character never matches a parenthesis or a separator in the text.
+func scanTopLevel(text string, visit func(position int, depth int)) {
+	depth := 0
+	index := 0
+
+	for index < len(text) {
+		end := max(endOfQuotedTextOrComment(text, index), index+1)
+
+		if text[index] == ')' {
+			depth--
+		}
+
+		visit(index, depth)
+
+		if text[index] == '(' {
+			depth++
+		}
+
+		index = end
+	}
+}
+
+// SQLite keeps the comments of a CREATE statement in sqlite_master. Each comment becomes a
+// space, so no parser reads a comment as a part of a column or a key.
+func withoutComments(text string) string {
+	var result strings.Builder
+
+	index := 0
+
+	for index < len(text) {
+		end := endOfQuotedTextOrComment(text, index)
+
+		switch {
+		case end == index:
+			result.WriteByte(text[index])
+
+			end++
+		case text[index] == '-' || text[index] == '/':
+			result.WriteByte(' ')
+		default:
+			result.WriteString(text[index:end])
+		}
+
+		index = end
+	}
+
+	return result.String()
+}
+
+// If no quoted text and no comment starts at index, this function returns index.
+// SQLite nests no block comment, so the first "*/" ends it. SQLite has no E'...' string, so
+// the quoted text starts the slice that EndOfQuotedText reads. Then no letter before the
+// quote turns on the backslash escape.
+func endOfQuotedTextOrComment(text string, index int) int {
+	rest := text[index:]
+
+	switch {
+	case strings.HasPrefix(rest, "--"):
+		return driversshared.EndOfLineComment(text, index)
+	case strings.HasPrefix(rest, "/*"):
+		return endOfTerminator(text, index+len("/*"), "*/")
+	case rest[0] == '[':
+		return endOfTerminator(text, index+1, "]")
+	case closingQuote(rune(rest[0])) != noQuote:
+		return index + driversshared.EndOfQuotedText(rest, 0)
+	}
+
+	return index
+}
+
+func endOfTerminator(text string, index int, terminator string) int {
+	end := strings.Index(text[index:], terminator)
+	if end < 0 {
+		return len(text)
+	}
+
+	return index + end + len(terminator)
 }
 
 func unquoteIdentifier(token string) string {

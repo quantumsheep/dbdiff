@@ -1,12 +1,13 @@
 package driverssqlite
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -266,16 +267,16 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 	var uniqueConstraints []*SQLiteUniqueConstraint
 
 	for _, key := range uniqueKeys {
-		constraintName := parsed.UniqueNameOf(key)
+		parsedUnique := parsed.UniqueConstraintOf(key)
 
 		// A column constraint holds no name, so a named constraint of one column stays a
 		// table constraint. Without that rule the name goes away.
-		if len(key) != 1 || constraintName != "" {
+		if len(key) != 1 || parsedUnique.Name != "" {
 			uniqueConstraints = append(uniqueConstraints, &SQLiteUniqueConstraint{
-				Name:     constraintName,
+				Name:     parsedUnique.Name,
 				Columns:  key,
-				Keys:     parsed.UniqueKeysOf(key),
-				Conflict: parsed.UniqueConflictOf(key),
+				Keys:     parsedUnique.Keys,
+				Conflict: parsedUnique.Conflict,
 			})
 
 			continue
@@ -290,7 +291,7 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 			// The table form of the constraint holds the ON CONFLICT clause, and the
 			// column keeps it.
 			if matchingColumn.UniqueConflict == "" {
-				matchingColumn.UniqueConflict = parsed.UniqueConflictOf(key)
+				matchingColumn.UniqueConflict = parsedUnique.Conflict
 			}
 		}
 	}
@@ -305,26 +306,9 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		return nil, err
 	}
 
-	foreignKeys, err := d.GetTableForeignKeys(ctx, db, tableName)
+	foreignKeys, err := d.GetTableForeignKeys(ctx, db, tableName, parsed.ForeignKeys)
 	if err != nil {
 		return nil, err
-	}
-
-	// PRAGMA foreign_key_list reports no DEFERRABLE clause. SQLite writes a key of one column
-	// as a column constraint or as a table constraint, and dbdiff writes the table form, so a
-	// key of one column reads either place.
-	for _, foreignKey := range foreignKeys {
-		foreignKey.Name = parsed.ForeignKeyNameOf(foreignKey.From)
-		foreignKey.Deferrable = parsed.DeferrableOf(foreignKey.From)
-
-		if foreignKey.Deferrable != "" || len(foreignKey.From) != 1 {
-			continue
-		}
-
-		attributes, found := parsed.ColumnByName(foreignKey.From[0])
-		if found {
-			foreignKey.Deferrable = attributes.ForeignKeyDeferrable
-		}
 	}
 
 	primaryKeyKeys := parsed.PrimaryKeyKeys
@@ -487,8 +471,8 @@ func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, table
 		return nil, nil
 	}
 
-	sort.SliceStable(keyColumns, func(i, j int) bool {
-		return keyColumns[i].Position < keyColumns[j].Position
+	slices.SortStableFunc(keyColumns, func(first primaryKeyColumn, second primaryKeyColumn) int {
+		return cmp.Compare(first.Position, second.Position)
 	})
 
 	names := lo.Map(keyColumns, func(keyColumn primaryKeyColumn, _ int) string {
@@ -520,9 +504,7 @@ func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, table
 		keys = append(keys, columnNames)
 	}
 
-	sort.SliceStable(keys, func(i, j int) bool {
-		return strings.Join(keys[i], ",") < strings.Join(keys[j], ",")
-	})
+	slices.SortStableFunc(keys, slices.Compare)
 
 	return keys, nil
 }
@@ -583,8 +565,8 @@ func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableNam
 	}
 
 	// PRAGMA index_list gives no stable order.
-	sort.SliceStable(indexes, func(i, j int) bool {
-		return indexes[i].Name < indexes[j].Name
+	slices.SortStableFunc(indexes, func(first *SQLiteIndex, second *SQLiteIndex) int {
+		return strings.Compare(first.Name, second.Name)
 	})
 
 	return indexes, nil
@@ -703,7 +685,9 @@ func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 	return views, nil
 }
 
-func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteForeignKey, error) {
+// PRAGMA foreign_key_list reports no name and no DEFERRABLE clause, so each key takes them
+// from its clause in parsedForeignKeys.
+func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tableName string, parsedForeignKeys []*parsedConstraint) ([]*SQLiteForeignKey, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+driversshared.QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err
@@ -749,33 +733,38 @@ func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tabl
 		return nil, err
 	}
 
-	foreignKeysSet := lo.Values(foreignKeysMap)
+	// SQLite gives the id 0 to the foreign key that the CREATE TABLE text declares last, so the
+	// descending ids give the order of the text. Two keys on the same columns get their own
+	// clauses only in that order.
+	foreignKeysSet := make([]*SQLiteForeignKey, 0, len(foreignKeysMap))
+	unmatchedForeignKeys := slices.Clone(parsedForeignKeys)
+
+	for _, foreignKeyID := range slices.Backward(slices.Sorted(maps.Keys(foreignKeysMap))) {
+		foreignKey := foreignKeysMap[foreignKeyID]
+
+		position := slices.IndexFunc(unmatchedForeignKeys, func(parsedForeignKey *parsedConstraint) bool {
+			return slices.Equal(parsedForeignKey.Columns, foreignKey.From)
+		})
+		if position >= 0 {
+			foreignKey.Name = unmatchedForeignKeys[position].Name
+			foreignKey.Deferrable = unmatchedForeignKeys[position].Deferrable
+			unmatchedForeignKeys = slices.Delete(unmatchedForeignKeys, position, position+1)
+		}
+
+		foreignKeysSet = append(foreignKeysSet, foreignKey)
+	}
 
 	// PRAGMA foreign_key_list gives no stable order. Without this sort the output changes between two runs.
-	sort.SliceStable(foreignKeysSet, func(i, j int) bool {
-		first := foreignKeysSet[i]
-		second := foreignKeysSet[j]
-		if first.Table != second.Table {
-			return first.Table < second.Table
-		}
-
-		if !slices.Equal(first.From, second.From) {
-			return strings.Join(first.From, ",") < strings.Join(second.From, ",")
-		}
-
-		if !slices.Equal(first.To, second.To) {
-			return strings.Join(first.To, ",") < strings.Join(second.To, ",")
-		}
-
-		if first.OnUpdate != second.OnUpdate {
-			return first.OnUpdate < second.OnUpdate
-		}
-
-		if first.OnDelete != second.OnDelete {
-			return first.OnDelete < second.OnDelete
-		}
-
-		return false
+	slices.SortStableFunc(foreignKeysSet, func(first *SQLiteForeignKey, second *SQLiteForeignKey) int {
+		return cmp.Or(
+			strings.Compare(first.Table, second.Table),
+			slices.Compare(first.From, second.From),
+			slices.Compare(first.To, second.To),
+			strings.Compare(first.OnUpdate, second.OnUpdate),
+			strings.Compare(first.OnDelete, second.OnDelete),
+			strings.Compare(first.Name, second.Name),
+			strings.Compare(first.Deferrable, second.Deferrable),
+		)
 	})
 
 	return foreignKeysSet, nil

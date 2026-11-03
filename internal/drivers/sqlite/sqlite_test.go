@@ -1918,6 +1918,93 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("RecreateTableWithForeignKeysOnTheSameColumns", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE items (owner INTEGER);
+			INSERT INTO parents (id) VALUES (1);
+			INSERT INTO items (owner) VALUES (1);
+		`)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY);
+			CREATE TABLE items (
+				owner INTEGER,
+				CONSTRAINT items_first FOREIGN KEY (owner) REFERENCES parents(id),
+				CONSTRAINT items_second FOREIGN KEY (owner) REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED,
+				CONSTRAINT items_third FOREIGN KEY (owner) REFERENCES parents(id) ON DELETE CASCADE
+			);
+		`)
+		diff := driver.RequireInstructions(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("items",
+				&SQLiteCreateTableInstruction{
+					Name: "_items_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name: "owner",
+							Type: "INTEGER",
+						},
+					},
+					ForeignKeys: []*SQLiteForeignKey{
+						{
+							Name:     "items_third",
+							Table:    "parents",
+							From:     []string{"owner"},
+							To:       []string{"id"},
+							OnUpdate: "NO ACTION",
+							OnDelete: "CASCADE",
+						},
+						{
+							Name:     "items_first",
+							Table:    "parents",
+							From:     []string{"owner"},
+							To:       []string{"id"},
+							OnUpdate: "NO ACTION",
+							OnDelete: "NO ACTION",
+						},
+						{
+							Name:       "items_second",
+							Table:      "parents",
+							From:       []string{"owner"},
+							To:         []string{"id"},
+							OnUpdate:   "NO ACTION",
+							OnDelete:   "NO ACTION",
+							Deferrable: "DEFERRABLE INITIALLY DEFERRED",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_items_temp",
+					ColumnNames:       []string{"owner"},
+					SelectExpressions: []string{`"owner"`},
+					SourceTableName:   "items",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "items"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_items_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "items"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		driver.ExecOnSource(diff)
+
+		rows := driver.FetchAllFromSource("items", "")
+		require.Equal(t, []map[string]any{
+			{"owner": int64(1)},
+		}, rows)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("DeferrableOfATableForeignKeyOfOneColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -2648,6 +2735,179 @@ func TestSQLiteDriver(t *testing.T) {
 
 		_, err := driver.sourceConnection.Exec(`INSERT INTO members (id, team, name) VALUES (2, 'red', 'Alice');`)
 		require.ErrorContains(t, err, "UNIQUE constraint failed: members.team, members.name")
+	})
+
+	t.Run("CreateTableAndIndexWithComments", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE notes (
+				id INTEGER PRIMARY KEY, -- the key (one, two
+				body TEXT CHECK (body <> ''), /* a comment, with ( */
+				score INTEGER -- a last comment )
+			);
+			CREATE INDEX notes_score ON notes (score DESC, -- a key comment, (
+				lower(body)) WHERE score > 0 -- a condition comment
+			;
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "notes",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name:  "body",
+						Type:  "TEXT",
+						Check: "(body <> '')",
+					},
+					{
+						Name: "score",
+						Type: "INTEGER",
+					},
+				},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "notes_score",
+				TableName: "notes",
+				Keys:      []string{`"score" DESC`, "lower(body)"},
+				Condition: &SQLiteIndexPredicateCondition{Expression: "score > 0"},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
+	t.Run("CreateTableAndIndexWithABackslashStringAfterAWord", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE codes (
+				name TEXT CHECK (name NOT LIKE '%x\%' ESCAPE'\'),
+				code INTEGER
+			);
+			CREATE INDEX codes_name ON codes (name) WHERE name LIKE 'a\%' ESCAPE'\';
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "codes",
+				Columns: []*SQLiteColumn{
+					{
+						Name:  "name",
+						Type:  "TEXT",
+						Check: `(name NOT LIKE '%x\%' ESCAPE'\')`,
+					},
+					{
+						Name: "code",
+						Type: "INTEGER",
+					},
+				},
+			},
+			&SQLiteCreateIndexInstruction{
+				Name:      "codes_name",
+				TableName: "codes",
+				Keys:      []string{`"name"`},
+				Condition: &SQLiteIndexPredicateCondition{Expression: `name LIKE 'a\%' ESCAPE'\'`},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+	})
+
+	t.Run("CreateTableWithAUniqueConstraintOnAQuotedNameWithAComma", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE pairs (
+				"a,b" TEXT,
+				c TEXT,
+				CONSTRAINT pairs_unique UNIQUE ("a,b" COLLATE NOCASE, c)
+			);
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "pairs",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "a,b",
+						Type: "TEXT",
+					},
+					{
+						Name: "c",
+						Type: "TEXT",
+					},
+				},
+				UniqueConstraints: []*SQLiteUniqueConstraint{
+					{
+						Name:    "pairs_unique",
+						Columns: []string{"a,b", "c"},
+						Keys:    []string{`"a,b" COLLATE NOCASE`, `"c"`},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+	})
+
+	t.Run("CreateTableWithUniqueConstraintsWhoseColumnNamesJoinToTheSameText", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnTarget(`
+			CREATE TABLE pairs (
+				a TEXT,
+				b TEXT,
+				"a,b" TEXT,
+				CONSTRAINT pairs_two UNIQUE (a, b DESC) ON CONFLICT REPLACE,
+				CONSTRAINT pairs_one UNIQUE ("a,b")
+			);
+		`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "pairs",
+				Columns: []*SQLiteColumn{
+					{
+						Name: "a",
+						Type: "TEXT",
+					},
+					{
+						Name: "b",
+						Type: "TEXT",
+					},
+					{
+						Name: "a,b",
+						Type: "TEXT",
+					},
+				},
+				UniqueConstraints: []*SQLiteUniqueConstraint{
+					{
+						Name:     "pairs_two",
+						Columns:  []string{"a", "b"},
+						Keys:     []string{`"a"`, `"b" DESC`},
+						Conflict: "REPLACE",
+					},
+					{
+						Name:    "pairs_one",
+						Columns: []string{"a,b"},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
 	})
 
 	t.Run("AddUniqueConstraint", func(t *testing.T) {

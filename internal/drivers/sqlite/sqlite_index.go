@@ -58,95 +58,20 @@ func closingQuote(character rune) rune {
 
 // PRAGMA index_info gives no name for an expression key, and it gives no condition.
 func parseIndexDefinition(definition string) ([]string, string) {
-	start := indexOfKeyList(definition)
-	if start < 0 {
+	definition = withoutComments(definition)
+
+	opening, closing := keyListBounds(definition)
+	if opening < 0 || closing < 0 {
 		return nil, ""
 	}
 
-	var keys []string
-	var key strings.Builder
+	keys := splitTopLevel(definition[opening+1:closing], ',')
 
-	depth := 0
-	quote := noQuote
-
-	for position, character := range definition[start:] {
-		if quote != noQuote {
-			if character == quote {
-				quote = noQuote
-			}
-
-			key.WriteRune(character)
-			continue
-		}
-
-		opened := closingQuote(character)
-		if opened != noQuote {
-			quote = opened
-
-			key.WriteRune(character)
-			continue
-		}
-
-		if character == '(' {
-			depth++
-
-			if depth > 1 {
-				key.WriteRune(character)
-			}
-
-			continue
-		}
-
-		if character == ')' {
-			depth--
-
-			if depth > 0 {
-				key.WriteRune(character)
-				continue
-			}
-
-			keys = append(keys, strings.TrimSpace(key.String()))
-
-			return keys, parseIndexCondition(definition[start+position+1:])
-		}
-
-		if character == ',' && depth == 1 {
-			keys = append(keys, strings.TrimSpace(key.String()))
-			key.Reset()
-
-			continue
-		}
-
-		key.WriteRune(character)
+	for position, key := range keys {
+		keys[position] = strings.TrimSpace(key)
 	}
 
-	return nil, ""
-}
-
-func indexOfKeyList(definition string) int {
-	quote := noQuote
-
-	for position, character := range definition {
-		if quote != noQuote {
-			if character == quote {
-				quote = noQuote
-			}
-
-			continue
-		}
-
-		opened := closingQuote(character)
-		if opened != noQuote {
-			quote = opened
-			continue
-		}
-
-		if character == '(' {
-			return position
-		}
-	}
-
-	return -1
+	return keys, parseIndexCondition(definition[closing+1:])
 }
 
 func parseIndexCondition(text string) string {
