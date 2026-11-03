@@ -333,7 +333,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropTableInstruction{Name: "users"},
 		})
 	})
@@ -343,7 +343,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT);`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -363,7 +363,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -378,7 +378,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name VARCHAR(50));`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT);`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -2404,7 +2404,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT NOT NULL);`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -2419,7 +2419,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT DEFAULT 'anon');`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -2668,7 +2668,7 @@ func TestPostgresDriver(t *testing.T) {
 		driver.ExecOnTarget(`CREATE TABLE users (id INT PRIMARY KEY);`)
 
 		driver.ExecOnTarget(`DROP TABLE users; CREATE TABLE users (id INT, CONSTRAINT pk_users PRIMARY KEY (id));`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -2695,7 +2695,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (email TEXT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -2722,7 +2722,7 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE roles (id INT PRIMARY KEY);
 			CREATE TABLE users (role_id INT, CONSTRAINT fk_role FOREIGN KEY (role_id) REFERENCES roles(id));
 		`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
 				Actions: []driversshared.AlterTableAction{
@@ -3134,7 +3134,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
 		driver.ExecOnTarget(`CREATE TABLE users (id INT); CREATE VIEW user_ids AS SELECT id FROM users;`)
-		driver.RequireInstructions([]driversshared.Instruction{
+		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateViewInstruction{
 				Name:  "user_ids",
 				Query: " SELECT id\n   FROM users;",
