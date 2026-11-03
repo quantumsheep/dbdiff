@@ -3,7 +3,7 @@ package driverssqlite
 import (
 	"testing"
 
-	"github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,7 +42,7 @@ func TestSQLiteMigrator(t *testing.T) {
 
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		migration := &migrations.Migration{
+		migration := &internalmigrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -96,7 +96,7 @@ func TestSQLiteMigrator(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
-		require.NoError(t, transaction.Record(t.Context(), &migrations.Migration{
+		require.NoError(t, transaction.Record(t.Context(), &internalmigrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -122,7 +122,7 @@ func TestSQLiteMigrator(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
-		require.NoError(t, transaction.Record(t.Context(), &migrations.Migration{
+		require.NoError(t, transaction.Record(t.Context(), &internalmigrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -149,7 +149,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("SatisfiesTheMigratorInterface", func(t *testing.T) {
-		var migrator migrations.Migrator = &SQLiteMigrator{}
+		var migrator internalmigrations.Migrator = &SQLiteMigrator{}
 		require.NotNil(t, migrator)
 	})
 

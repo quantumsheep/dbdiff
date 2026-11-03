@@ -9,7 +9,7 @@ import (
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -41,7 +41,7 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 		return fmt.Errorf("name the migration, for example add_created_at")
 	}
 
-	slug := coremigrations.MigrationSlug(name)
+	slug := internalmigrations.Slug(name)
 	if slug == "" {
 		return fmt.Errorf("the name of a migration holds no letter and no digit")
 	}
@@ -78,7 +78,7 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	paths, err := coremigrations.WriteMigrationFiles(config.Source, slug,
+	paths, err := internalmigrations.WriteFiles(config.Source, slug,
 		time.Now(), helpers.Version(), instructions)
 	if err != nil {
 		return err

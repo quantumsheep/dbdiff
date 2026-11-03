@@ -8,19 +8,19 @@ import (
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
-func migrationConfigFromCommand(command *cli.Command) (*coremigrations.MigrationConfig, error) {
+func migrationConfigFromCommand(command *cli.Command) (*internalmigrations.Config, error) {
 	path := command.String("config")
 
 	optional := path == ""
 	if optional {
-		path = coremigrations.DefaultMigrationConfigPath
+		path = internalmigrations.DefaultConfigPath
 	}
 
-	config, err := coremigrations.ReadMigrationConfig(path, optional)
+	config, err := internalmigrations.ReadConfig(path, optional)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the configuration file: %w", err)
 	}
@@ -65,7 +65,7 @@ func migrationConfigFromCommand(command *cli.Command) (*coremigrations.Migration
 	return config, nil
 }
 
-func openSet(ctx context.Context, command *cli.Command) (*coremigrations.MigrationConfig, coremigrations.Migrator, *coremigrations.MigrationSet, error) {
+func openSet(ctx context.Context, command *cli.Command) (*internalmigrations.Config, internalmigrations.Migrator, *internalmigrations.Set, error) {
 	config, err := migrationConfigFromCommand(command)
 	if err != nil {
 		return nil, nil, nil, err
@@ -93,7 +93,7 @@ func openSet(ctx context.Context, command *cli.Command) (*coremigrations.Migrati
 		return nil, nil, nil, fmt.Errorf("failed to open the target database: %w", err)
 	}
 
-	set, err := coremigrations.LoadMigrationSet(ctx, migrator, config.Source)
+	set, err := internalmigrations.LoadSet(ctx, migrator, config.Source)
 	if err != nil {
 		_ = migrator.Close()
 
@@ -122,7 +122,7 @@ func migrationFlags(targetUsage string, flags ...cli.Flag) []cli.Flag {
 	}, flags...)
 }
 
-func withSet(action func(ctx context.Context, command *cli.Command, config *coremigrations.MigrationConfig, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) error) cli.ActionFunc {
+func withRunner(action func(ctx context.Context, command *cli.Command, config *internalmigrations.Config, runner *internalmigrations.Runner) error) cli.ActionFunc {
 	return func(ctx context.Context, command *cli.Command) error {
 		config, migrator, set, err := openSet(ctx, command)
 		if err != nil {
@@ -131,6 +131,12 @@ func withSet(action func(ctx context.Context, command *cli.Command, config *core
 
 		defer func() { _ = migrator.Close() }()
 
-		return action(ctx, command, config, migrator, set)
+		runner := &internalmigrations.Runner{
+			Migrator: migrator,
+			Set:      set,
+			Output:   os.Stdout,
+		}
+
+		return action(ctx, command, config, runner)
 	}
 }

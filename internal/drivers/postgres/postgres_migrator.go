@@ -7,14 +7,14 @@ import (
 	"strconv"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	"github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
 // This value is a constant of dbdiff. Every dbdiff process takes the same lock, and no
 // other application takes it.
 const postgresMigrationLockKey = 7264196283401
 
-var postgresHistoryDialect = migrations.SQLDialect{
+var postgresHistoryDialect = internalmigrations.SQLDialect{
 	QuoteIdentifier: driversshared.QuoteIdentifier,
 	Placeholder: func(position int) string {
 		return "$" + strconv.Itoa(position)
@@ -50,7 +50,7 @@ var postgresHistoryDialect = migrations.SQLDialect{
 }
 
 type PostgresMigrator struct {
-	migrations.SQLMigrator
+	internalmigrations.SQLMigrator
 
 	Database *sql.DB
 }
@@ -71,7 +71,7 @@ func NewPostgresMigrator(ctx context.Context, connectionString string, schema st
 	}
 
 	migrator := &PostgresMigrator{
-		SQLMigrator: migrations.SQLMigrator{
+		SQLMigrator: internalmigrations.SQLMigrator{
 			Connection: connection,
 			Dialect:    postgresHistoryDialect,
 		},

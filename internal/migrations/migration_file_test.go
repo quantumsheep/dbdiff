@@ -1,4 +1,4 @@
-package migrations_test
+package internalmigrations_test
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
@@ -38,11 +38,11 @@ func TestGenerateMigration(t *testing.T) {
 		directory := t.TempDir()
 		moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
 
-		first, err := coremigrations.WriteMigrationFiles(directory, "one", moment, "test",
+		first, err := internalmigrations.WriteFiles(directory, "one", moment, "test",
 			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "users"}})
 		require.NoError(t, err)
 
-		second, err := coremigrations.WriteMigrationFiles(directory, "two", moment, "test",
+		second, err := internalmigrations.WriteFiles(directory, "two", moment, "test",
 			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "notes"}})
 		require.NoError(t, err)
 
@@ -98,7 +98,7 @@ func TestSplitMigrationInstructions(t *testing.T) {
 	t.Run("OneFileWithNoSeparateInstruction", func(t *testing.T) {
 		directory := t.TempDir()
 
-		paths, err := coremigrations.WriteMigrationFiles(directory, "add_users", moment, "test",
+		paths, err := internalmigrations.WriteFiles(directory, "add_users", moment, "test",
 			[]driversshared.Instruction{&driversshared.SQLDropTableInstruction{Name: "users"}})
 		require.NoError(t, err)
 		require.Equal(t, []string{filepath.Join(directory, "20260822143000_add_users.sql")}, paths)
@@ -114,7 +114,7 @@ func TestSplitMigrationInstructions(t *testing.T) {
 
 		other := &driversshared.SQLDropTableInstruction{Name: "users"}
 
-		paths, err := coremigrations.WriteMigrationFiles(directory, "add_mood", moment, "test",
+		paths, err := internalmigrations.WriteFiles(directory, "add_mood", moment, "test",
 			[]driversshared.Instruction{other, enumValue})
 		require.NoError(t, err)
 		require.Equal(t, []string{

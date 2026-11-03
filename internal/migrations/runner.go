@@ -1,4 +1,4 @@
-package migrations
+package internalmigrations
 
 import (
 	"bufio"
@@ -15,8 +15,8 @@ import (
 	"github.com/samber/lo"
 )
 
-func LoadMigrationSet(ctx context.Context, migrator Migrator, directory string) (*MigrationSet, error) {
-	files, err := ReadMigrationDirectory(directory)
+func LoadSet(ctx context.Context, migrator Migrator, directory string) (*Set, error) {
+	files, err := ReadDirectory(directory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the migrations directory: %w", err)
 	}
@@ -26,93 +26,106 @@ func LoadMigrationSet(ctx context.Context, migrator Migrator, directory string) 
 		return nil, fmt.Errorf("failed to read the history table: %w", err)
 	}
 
-	return NewMigrationSet(files, applied), nil
+	return NewSet(files, applied), nil
 }
 
-func RenderMigrationStatus(set *MigrationSet) string {
-	if len(set.Entries) == 0 {
-		return "The directory holds no migration.\n"
+type Runner struct {
+	Migrator Migrator
+	Set      *Set
+	Output   io.Writer
+}
+
+func (r *Runner) Status() error {
+	if len(r.Set.Entries) == 0 {
+		_, _ = fmt.Fprintln(r.Output, "The directory holds no migration.")
+
+		return nil
 	}
 
-	var builder strings.Builder
+	for _, entry := range r.Set.Entries {
+		_, _ = fmt.Fprintf(r.Output, "%-40s %s", entry.Label(), entry.State)
 
-	for _, entry := range set.Entries {
-		fmt.Fprintf(&builder, "%-40s %s", entry.FileName(), entry.State)
-
-		if entry.State == MigrationApplied {
-			builder.WriteString("   ")
-			builder.WriteString(entry.AppliedAt.UTC().Format(time.RFC3339))
+		if entry.State == StateApplied {
+			_, _ = fmt.Fprintf(r.Output, "   %s", entry.AppliedAt.UTC().Format(time.RFC3339))
 		}
 
-		builder.WriteString("\n")
+		_, _ = fmt.Fprintln(r.Output)
 	}
 
-	return builder.String()
+	return r.Set.RecordError()
 }
 
-func RenderMigrationPreview(set *MigrationSet) (string, error) {
-	err := set.RecordError()
+func (r *Runner) Preview() error {
+	err := r.Set.RecordError()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	var builder strings.Builder
 
-	for _, entry := range set.Entries {
-		if entry.State != MigrationOutOfOrder {
-			continue
-		}
+	writeOutOfOrder(&builder, r.Set, "The commands up and step will refuse it.")
 
-		fmt.Fprintf(&builder, "%s is out of order. The commands up and step will refuse it.\n", entry.FileName())
-	}
-
-	pending := set.Pending()
+	pending := r.Set.Pending()
 	if len(pending) == 0 {
 		if builder.Len() == 0 {
-			return "The database is up to date.\n", nil
+			builder.WriteString("The database is up to date.\n")
 		}
 
-		return builder.String(), nil
+		_, _ = fmt.Fprint(r.Output, builder.String())
+
+		return nil
 	}
 
 	for _, entry := range pending {
 		content, err := entry.Content()
 		if err != nil {
-			return "", err
+			return err
 		}
 
-		builder.WriteString(entry.FileName())
+		builder.WriteString(entry.Label())
 		builder.WriteString("\n")
 		builder.WriteString("  ")
-		builder.WriteString(indentMigrationStatement(strings.TrimSpace(content)))
+		builder.WriteString(indentStatement(strings.TrimSpace(content)))
 		builder.WriteString("\n")
 	}
 
-	return builder.String(), nil
+	_, _ = fmt.Fprint(r.Output, builder.String())
+
+	return nil
 }
 
-func indentMigrationStatement(statement string) string {
+func writeOutOfOrder(writer io.Writer, set *Set, consequence string) {
+	for _, entry := range set.Entries {
+		if entry.State != StateOutOfOrder {
+			continue
+		}
+
+		_, _ = fmt.Fprintf(writer, "%s is out of order. %s\n", entry.Label(), consequence)
+	}
+}
+
+func indentStatement(statement string) string {
 	return strings.ReplaceAll(statement, "\n", "\n  ")
 }
 
 // One transaction holds every pending file, because a file can read an object of an
 // earlier file.
-func RunMigrationPreview(ctx context.Context, migrator Migrator, set *MigrationSet, output io.Writer) error {
-	err := set.RecordError()
+func (r *Runner) PreviewInTransaction(ctx context.Context) error {
+	err := r.Set.RecordError()
 	if err != nil {
 		return err
 	}
 
-	pending := set.Pending()
+	pending := r.Set.Pending()
 	if len(pending) == 0 {
 		return nil
 	}
 
-	if !migrator.SupportsTransactionalDDL() {
+	if !r.Migrator.SupportsTransactionalDDL() {
 		return fmt.Errorf("the target engine commits every DDL statement at once, so preview cannot roll the pending files back")
 	}
 
-	transaction, err := migrator.Begin(ctx)
+	transaction, err := r.Migrator.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open the preview transaction: %w", err)
 	}
@@ -126,38 +139,36 @@ func RunMigrationPreview(ctx context.Context, migrator Migrator, set *MigrationS
 		}
 
 		if !driversshared.FileUsesTransaction(content) {
-			_, _ = fmt.Fprintf(output, "%s runs outside a transaction, so preview does not run it.\n",
-				entry.FileName())
+			_, _ = fmt.Fprintf(r.Output, "%s runs outside a transaction, so preview does not run it.\n",
+				entry.Label())
 
 			continue
 		}
 
 		err = transaction.Apply(ctx, content)
 		if err != nil {
-			return fmt.Errorf("%s failed: %w", entry.FileName(), err)
+			return fmt.Errorf("%s failed: %w", entry.Label(), err)
 		}
 	}
 
 	return nil
 }
 
-func ApplyMigrations(ctx context.Context, migrator Migrator, set *MigrationSet,
-	lastVersion string, output io.Writer) error {
-	return applyPendingMigrations(ctx, migrator, set, nil, lastVersion, output)
+func (r *Runner) Up(ctx context.Context, toVersion string) error {
+	return r.applyPending(ctx, nil, toVersion)
 }
 
-func StepMigration(ctx context.Context, migrator Migrator, set *MigrationSet,
-	input io.Reader, output io.Writer) error {
-	return applyPendingMigrations(ctx, migrator, set, bufio.NewReader(input), "", output)
+func (r *Runner) Step(ctx context.Context, input io.Reader) error {
+	return r.applyPending(ctx, bufio.NewReader(input), "")
 }
 
-func pendingMigrationsUpTo(set *MigrationSet, lastVersion string) ([]*MigrationEntry, error) {
+func pendingUpTo(set *Set, lastVersion string) ([]*Entry, error) {
 	return migrationsUpTo(set, set.Pending(), lastVersion)
 }
 
 // An empty version keeps every entry. A named version keeps the entries up to that
 // version, and it must name a file of the directory.
-func migrationsUpTo(set *MigrationSet, entries []*MigrationEntry, lastVersion string) ([]*MigrationEntry, error) {
+func migrationsUpTo(set *Set, entries []*Entry, lastVersion string) ([]*Entry, error) {
 	if lastVersion == "" {
 		return entries, nil
 	}
@@ -174,7 +185,7 @@ func migrationsUpTo(set *MigrationSet, entries []*MigrationEntry, lastVersion st
 		return nil, fmt.Errorf("the directory holds no migration with the version %s", lastVersion)
 	}
 
-	var kept []*MigrationEntry
+	var kept []*Entry
 
 	for _, entry := range entries {
 		if entry.Migration.Version <= lastVersion {
@@ -185,46 +196,42 @@ func migrationsUpTo(set *MigrationSet, entries []*MigrationEntry, lastVersion st
 	return kept, nil
 }
 
-func applyPendingMigrations(ctx context.Context, migrator Migrator, set *MigrationSet,
-	reader *bufio.Reader, lastVersion string, output io.Writer) error {
-	err := set.ProblemError()
+func (r *Runner) applyPending(ctx context.Context, reader *bufio.Reader, lastVersion string) error {
+	err := r.Set.ProblemError()
 	if err != nil {
 		return err
 	}
 
-	pendingBeforeLock, err := pendingMigrationsUpTo(set, lastVersion)
+	pendingBeforeLock, err := pendingUpTo(r.Set, lastVersion)
 	if err != nil {
 		return err
 	}
 
 	if len(pendingBeforeLock) == 0 {
-		_, _ = fmt.Fprintln(output, "The database is up to date.")
+		_, _ = fmt.Fprintln(r.Output, "The database is up to date.")
 
 		return nil
 	}
 
-	locked, err := migrator.TryLock(ctx)
+	locked, err := r.Migrator.TryLock(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to take the migration lock: %w", err)
 	}
 
-	if !locked {
-		_, _ = fmt.Fprintln(output, "Another process holds the migration lock. dbdiff waits for it.")
+	unlock := func() { _ = r.Migrator.Unlock(ctx) }
 
-		err = migrator.Lock(ctx)
+	if !locked {
+		_, _ = fmt.Fprintln(r.Output, "Another process holds the migration lock. dbdiff waits for it.")
+
+		unlock, err = r.lock(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to take the migration lock: %w", err)
+			return err
 		}
 	}
 
-	defer func() { _ = migrator.Unlock(ctx) }()
+	defer unlock()
 
-	err = migrator.EnsureHistoryTable(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to create the history table: %w", err)
-	}
-
-	set, err = reloadMigrationSet(ctx, migrator, set)
+	set, err := r.reloadWithHistoryTable(ctx)
 	if err != nil {
 		return err
 	}
@@ -234,13 +241,13 @@ func applyPendingMigrations(ctx context.Context, migrator Migrator, set *Migrati
 		return err
 	}
 
-	pending, err := pendingMigrationsUpTo(set, lastVersion)
+	pending, err := pendingUpTo(set, lastVersion)
 	if err != nil {
 		return err
 	}
 
 	if len(pending) == 0 {
-		_, _ = fmt.Fprintln(output, "The database is up to date.")
+		_, _ = fmt.Fprintln(r.Output, "The database is up to date.")
 
 		return nil
 	}
@@ -254,16 +261,16 @@ func applyPendingMigrations(ctx context.Context, migrator Migrator, set *Migrati
 				return err
 			}
 
-			_, _ = fmt.Fprintf(output, "%s\n", entry.FileName())
-			_, _ = fmt.Fprintf(output, "  %s\n", indentMigrationStatement(strings.TrimSpace(content)))
+			_, _ = fmt.Fprintf(r.Output, "%s\n", entry.Label())
+			_, _ = fmt.Fprintf(r.Output, "  %s\n", indentStatement(strings.TrimSpace(content)))
 
-			answer, err := readStepAnswer(reader, output)
+			answer, err := readStepAnswer(reader, r.Output)
 			if err != nil {
 				return err
 			}
 
 			if answer == "q" {
-				_, _ = fmt.Fprintln(output, "The run stopped. Every file that dbdiff applied stays applied.")
+				_, _ = fmt.Fprintln(r.Output, "The run stopped. Every file that dbdiff applied stays applied.")
 
 				return nil
 			}
@@ -272,7 +279,7 @@ func applyPendingMigrations(ctx context.Context, migrator Migrator, set *Migrati
 		}
 
 		// Each file commits alone. A failure must not roll back an earlier file.
-		err := applyOneMigration(ctx, migrator, entry, output)
+		err := r.applyOne(ctx, entry)
 		if err != nil {
 			return err
 		}
@@ -281,19 +288,18 @@ func applyPendingMigrations(ctx context.Context, migrator Migrator, set *Migrati
 	return nil
 }
 
-// RunMigrationRepair makes the record agree with the files. A changed row takes the
+// Repair makes the record agree with the files. A changed row takes the
 // checksum of its file. A missing row and a dirty row go away. An out of order file
 // needs a new generate, so repair does not touch it.
-func RunMigrationRepair(ctx context.Context, migrator Migrator, set *MigrationSet,
-	output io.Writer) error {
-	err := migrator.Lock(ctx)
+func (r *Runner) Repair(ctx context.Context) error {
+	unlock, err := r.lock(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to take the migration lock: %w", err)
+		return err
 	}
 
-	defer func() { _ = migrator.Unlock(ctx) }()
+	defer unlock()
 
-	set, err = reloadMigrationSet(ctx, migrator, set)
+	set, err := r.reload(ctx)
 	if err != nil {
 		return err
 	}
@@ -302,64 +308,58 @@ func RunMigrationRepair(ctx context.Context, migrator Migrator, set *MigrationSe
 
 	for _, entry := range set.Entries {
 		switch entry.State {
-		case MigrationChanged:
-			err = migrator.UpdateChecksum(ctx, entry.Migration)
+		case StateChanged:
+			err = r.Migrator.UpdateChecksum(ctx, entry.Migration)
 			if err != nil {
-				return fmt.Errorf("failed to update the checksum of %s: %w", entry.FileName(), err)
+				return fmt.Errorf("failed to update the checksum of %s: %w", entry.Label(), err)
 			}
 
-			_, _ = fmt.Fprintf(output, "Updated the checksum of %s.\n", entry.FileName())
+			_, _ = fmt.Fprintf(r.Output, "Updated the checksum of %s.\n", entry.Label())
 			repaired++
-		case MigrationMissing:
-			err = migrator.DeleteRecord(ctx, entry.Migration.Version)
+		case StateMissing:
+			err = r.Migrator.DeleteRecord(ctx, entry.Migration.Version)
 			if err != nil {
-				return fmt.Errorf("failed to delete the row of %s: %w", entry.FileName(), err)
+				return fmt.Errorf("failed to delete the row of %s: %w", entry.Label(), err)
 			}
 
-			_, _ = fmt.Fprintf(output, "Deleted the row of %s.\n", entry.FileName())
+			_, _ = fmt.Fprintf(r.Output, "Deleted the row of %s.\n", entry.Label())
 			repaired++
-		case MigrationDirty:
-			err = migrator.DeleteRecord(ctx, entry.Migration.Version)
+		case StateDirty:
+			err = r.Migrator.DeleteRecord(ctx, entry.Migration.Version)
 			if err != nil {
-				return fmt.Errorf("failed to delete the row of %s: %w", entry.FileName(), err)
+				return fmt.Errorf("failed to delete the row of %s: %w", entry.Label(), err)
 			}
 
-			_, _ = fmt.Fprintf(output, "Deleted the dirty row of %s. The next up runs the whole file again.\n",
-				entry.FileName())
+			_, _ = fmt.Fprintf(r.Output, "Deleted the dirty row of %s. The next up runs the whole file again.\n",
+				entry.Label())
 			repaired++
 		}
 	}
 
 	if repaired == 0 {
-		_, _ = fmt.Fprintln(output, "The record needs no repair.")
+		_, _ = fmt.Fprintln(r.Output, "The record needs no repair.")
 	}
 
 	return nil
 }
 
-// RunMigrationBaseline records every file that the history table does not hold, and it
+// Baseline records every file that the history table does not hold, and it
 // runs no file. A baseline adopts a database that already holds the schema of the files.
 // A named lastVersion stops the record after that version.
-func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *MigrationSet,
-	lastVersion string, output io.Writer) error {
-	err := set.RecordError()
+func (r *Runner) Baseline(ctx context.Context, lastVersion string) error {
+	err := r.Set.RecordError()
 	if err != nil {
 		return err
 	}
 
-	err = migrator.Lock(ctx)
+	unlock, err := r.lock(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to take the migration lock: %w", err)
+		return err
 	}
 
-	defer func() { _ = migrator.Unlock(ctx) }()
+	defer unlock()
 
-	err = migrator.EnsureHistoryTable(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to create the history table: %w", err)
-	}
-
-	set, err = reloadMigrationSet(ctx, migrator, set)
+	set, err := r.reloadWithHistoryTable(ctx)
 	if err != nil {
 		return err
 	}
@@ -369,8 +369,8 @@ func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *Migration
 		return err
 	}
 
-	unrecorded := lo.Filter(set.Entries, func(entry *MigrationEntry, _ int) bool {
-		return entry.State == MigrationPending || entry.State == MigrationOutOfOrder
+	unrecorded := lo.Filter(set.Entries, func(entry *Entry, _ int) bool {
+		return entry.State == StatePending || entry.State == StateOutOfOrder
 	})
 
 	unrecorded, err = migrationsUpTo(set, unrecorded, lastVersion)
@@ -379,12 +379,12 @@ func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *Migration
 	}
 
 	if len(unrecorded) == 0 {
-		_, _ = fmt.Fprintln(output, "The record holds every file.")
+		_, _ = fmt.Fprintln(r.Output, "The record holds every file.")
 
 		return nil
 	}
 
-	transaction, err := migrator.Begin(ctx)
+	transaction, err := r.Migrator.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open the baseline transaction: %w", err)
 	}
@@ -394,7 +394,7 @@ func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *Migration
 		if err != nil {
 			_ = transaction.Rollback()
 
-			return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+			return fmt.Errorf("failed to record %s: %w", entry.Label(), err)
 		}
 	}
 
@@ -404,28 +404,46 @@ func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *Migration
 	}
 
 	for _, entry := range unrecorded {
-		_, _ = fmt.Fprintf(output, "Recorded %s.\n", entry.FileName())
+		_, _ = fmt.Fprintf(r.Output, "Recorded %s.\n", entry.Label())
 	}
 
 	return nil
 }
 
+func (r *Runner) lock(ctx context.Context) (func(), error) {
+	err := r.Migrator.Lock(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to take the migration lock: %w", err)
+	}
+
+	return func() { _ = r.Migrator.Unlock(ctx) }, nil
+}
+
+func (r *Runner) reloadWithHistoryTable(ctx context.Context) (*Set, error) {
+	err := r.Migrator.EnsureHistoryTable(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create the history table: %w", err)
+	}
+
+	return r.reload(ctx)
+}
+
 // Another process can apply a file between the first read of the state and the lock, so
 // this second read builds the set again under the lock.
-func reloadMigrationSet(ctx context.Context, migrator Migrator, set *MigrationSet) (*MigrationSet, error) {
-	applied, err := migrator.AppliedMigrations(ctx)
+func (r *Runner) reload(ctx context.Context) (*Set, error) {
+	applied, err := r.Migrator.AppliedMigrations(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewMigrationSet(migrationFilesOf(set), applied), nil
+	return NewSet(migrationFilesOf(r.Set), applied), nil
 }
 
-func migrationFilesOf(set *MigrationSet) []*Migration {
+func migrationFilesOf(set *Set) []*Migration {
 	var files []*Migration
 
 	for _, entry := range set.Entries {
-		if entry.State == MigrationMissing {
+		if entry.State == StateMissing {
 			continue
 		}
 
@@ -435,8 +453,7 @@ func migrationFilesOf(set *MigrationSet) []*Migration {
 	return files
 }
 
-func applyOneMigration(ctx context.Context, migrator Migrator, entry *MigrationEntry,
-	output io.Writer) error {
+func (r *Runner) applyOne(ctx context.Context, entry *Entry) error {
 	content, err := entry.Content()
 	if err != nil {
 		return err
@@ -444,46 +461,45 @@ func applyOneMigration(ctx context.Context, migrator Migrator, entry *MigrationE
 
 	// An engine without transactional DDL commits each DDL statement at once, so a
 	// rollback removes no schema change. The dirty row marks a half apply instead.
-	if !driversshared.FileUsesTransaction(content) || !migrator.SupportsTransactionalDDL() {
-		return applyOneMigrationWithoutTransaction(ctx, migrator, entry, content, output)
+	if !driversshared.FileUsesTransaction(content) || !r.Migrator.SupportsTransactionalDDL() {
+		return r.applyOneWithoutTransaction(ctx, entry, content)
 	}
 
-	transaction, err := migrator.Begin(ctx)
+	transaction, err := r.Migrator.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to open the transaction of %s: %w", entry.FileName(), err)
+		return fmt.Errorf("failed to open the transaction of %s: %w", entry.Label(), err)
 	}
 
 	err = transaction.Apply(ctx, content)
 	if err != nil {
 		_ = transaction.Rollback()
 
-		return fmt.Errorf("%s failed: %w", entry.FileName(), err)
+		return fmt.Errorf("%s failed: %w", entry.Label(), err)
 	}
 
 	err = transaction.Record(ctx, entry.Migration)
 	if err != nil {
 		_ = transaction.Rollback()
 
-		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+		return fmt.Errorf("failed to record %s: %w", entry.Label(), err)
 	}
 
 	err = transaction.Commit()
 	if err != nil {
-		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+		return fmt.Errorf("failed to record %s: %w", entry.Label(), err)
 	}
 
-	_, _ = fmt.Fprintf(output, "Applied %s.\n", entry.FileName())
+	_, _ = fmt.Fprintf(r.Output, "Applied %s.\n", entry.Label())
 
 	return nil
 }
 
 // The dirty row keeps a half apply visible, and its primary key stops a second process
 // that runs the same file.
-func applyOneMigrationWithoutTransaction(ctx context.Context, migrator Migrator,
-	entry *MigrationEntry, content string, output io.Writer) error {
-	err := migrator.RecordDirty(ctx, entry.Migration)
+func (r *Runner) applyOneWithoutTransaction(ctx context.Context, entry *Entry, content string) error {
+	err := r.Migrator.RecordDirty(ctx, entry.Migration)
 	if err != nil {
-		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+		return fmt.Errorf("failed to record %s: %w", entry.Label(), err)
 	}
 
 	// The directive is the one signal that starts the split. A file without it runs in
@@ -495,47 +511,75 @@ func applyOneMigrationWithoutTransaction(ctx context.Context, migrator Migrator,
 	}
 
 	for _, statement := range statements {
-		err = migrator.Exec(ctx, statement)
+		err = r.Migrator.Exec(ctx, statement)
 		if err != nil {
 			return fmt.Errorf("%s failed, and the statements before the failure stay applied. "+
 				"Repair the database, and run migrate repair: %w",
-				entry.FileName(), err)
+				entry.Label(), err)
 		}
 	}
 
-	err = migrator.ClearDirty(ctx, entry.Migration)
+	err = r.Migrator.ClearDirty(ctx, entry.Migration)
 	if err != nil {
-		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
+		return fmt.Errorf("failed to record %s: %w", entry.Label(), err)
 	}
 
-	_, _ = fmt.Fprintf(output, "Applied %s.\n", entry.FileName())
+	_, _ = fmt.Fprintf(r.Output, "Applied %s.\n", entry.Label())
 
 	return nil
 }
 
-func MigrationVerifyDirectory(set *MigrationSet) (string, func(), error) {
+// Verify compares the database against a replay of the applied files. The diff function
+// reads the replay directory as its target, and it returns the instructions that make the
+// database equal to the replay.
+func (r *Runner) Verify(ctx context.Context,
+	diff func(ctx context.Context, replay driversshared.DataSource) (driversshared.Instructions, error)) error {
+	err := r.Set.RecordError()
+	if err != nil {
+		return err
+	}
+
+	writeOutOfOrder(r.Output, r.Set, "The replay does not hold it.")
+
 	directory, err := os.MkdirTemp("", "dbdiff-verify-")
 	if err != nil {
-		return "", nil, err
+		return err
 	}
 
-	cleanup := func() {
-		_ = os.RemoveAll(directory)
-	}
+	defer func() { _ = os.RemoveAll(directory) }()
 
-	err = copyAppliedMigrations(set, directory)
+	err = copyAppliedMigrations(r.Set, directory)
 	if err != nil {
-		cleanup()
-
-		return "", nil, err
+		return err
 	}
 
-	return directory, cleanup, nil
+	instructions, err := diff(ctx, driversshared.ParseDataSource(directory))
+	if err != nil {
+		return err
+	}
+
+	if len(instructions) == 0 {
+		_, _ = fmt.Fprintln(r.Output, "The database holds the schema of the migrations.")
+
+		return nil
+	}
+
+	_, _ = fmt.Fprintln(r.Output, instructions.String())
+
+	return fmt.Errorf("the database holds %s that no migration made", changeCountText(len(instructions)))
 }
 
-func copyAppliedMigrations(set *MigrationSet, directory string) error {
+func changeCountText(count int) string {
+	if count == 1 {
+		return "1 change"
+	}
+
+	return fmt.Sprintf("%d changes", count)
+}
+
+func copyAppliedMigrations(set *Set, directory string) error {
 	for _, entry := range set.Entries {
-		if entry.State != MigrationApplied {
+		if entry.State != StateApplied {
 			continue
 		}
 

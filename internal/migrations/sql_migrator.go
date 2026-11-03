@@ -1,4 +1,4 @@
-package migrations
+package internalmigrations
 
 import (
 	"context"
@@ -228,37 +228,37 @@ func (m *SQLMigrator) Exec(ctx context.Context, statement string) error {
 	return err
 }
 
-func (m *SQLMigrator) Begin(ctx context.Context) (MigrationTransaction, error) {
+func (m *SQLMigrator) Begin(ctx context.Context) (Transaction, error) {
 	transaction, err := m.Connection.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return &SQLMigrationTransaction{
+	return &SQLTransaction{
 		Migrator:    m,
 		Transaction: transaction,
 	}, nil
 }
 
-type SQLMigrationTransaction struct {
+type SQLTransaction struct {
 	Migrator    *SQLMigrator
 	Transaction *sql.Tx
 }
 
-func (t *SQLMigrationTransaction) Apply(ctx context.Context, statement string) error {
+func (t *SQLTransaction) Apply(ctx context.Context, statement string) error {
 	_, err := t.Transaction.ExecContext(ctx, statement)
 
 	return err
 }
 
-func (t *SQLMigrationTransaction) Record(ctx context.Context, migration *Migration) error {
+func (t *SQLTransaction) Record(ctx context.Context, migration *Migration) error {
 	return t.Migrator.insertRecord(ctx, t.Transaction, migration, t.Migrator.Dialect.FalseLiteral)
 }
 
-func (t *SQLMigrationTransaction) Commit() error {
+func (t *SQLTransaction) Commit() error {
 	return t.Transaction.Commit()
 }
 
-func (t *SQLMigrationTransaction) Rollback() error {
+func (t *SQLTransaction) Rollback() error {
 	return t.Transaction.Rollback()
 }

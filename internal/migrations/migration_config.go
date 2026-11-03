@@ -1,4 +1,4 @@
-package migrations
+package internalmigrations
 
 import (
 	"bytes"
@@ -10,32 +10,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const DefaultMigrationConfigPath = "dbdiff.yaml"
+const DefaultConfigPath = "dbdiff.yaml"
 
-type MigrationConfig struct {
+type Config struct {
 	Driver  driversshared.DriverName `yaml:"driver"`
 	Source  string                   `yaml:"source"`
 	Target  string                   `yaml:"target"`
 	Schema  string                   `yaml:"schema"`
 	Version string                   `yaml:"version"`
-	Ignore  MigrationIgnoreConfig    `yaml:"ignore"`
+	Ignore  IgnoreConfig             `yaml:"ignore"`
 }
 
-type MigrationIgnoreConfig struct {
+type IgnoreConfig struct {
 	Tables []string `yaml:"tables"`
 }
 
-func ReadMigrationConfig(path string, optional bool) (*MigrationConfig, error) {
+func ReadConfig(path string, optional bool) (*Config, error) {
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) && optional {
-		return &MigrationConfig{}, nil
+		return &Config{}, nil
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
-	config := &MigrationConfig{}
+	config := &Config{}
 
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	decoder.KnownFields(true)

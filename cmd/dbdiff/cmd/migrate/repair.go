@@ -2,10 +2,9 @@ package cmdmigrate
 
 import (
 	"context"
-	"os"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -17,10 +16,10 @@ func repairCommand() *cli.Command {
 			"A dirty row names a half-applied file. Repair the database before you delete that row",
 		Flags:        migrationFlags(databaseTargetUsage),
 		OnUsageError: helpers.OnUsageError,
-		Action:       withSet(repairAction),
+		Action:       withRunner(repairAction),
 	}
 }
 
-func repairAction(ctx context.Context, command *cli.Command, _ *coremigrations.MigrationConfig, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) error {
-	return coremigrations.RunMigrationRepair(ctx, migrator, set, os.Stdout)
+func repairAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+	return runner.Repair(ctx)
 }

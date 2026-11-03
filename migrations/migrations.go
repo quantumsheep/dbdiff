@@ -8,7 +8,7 @@ import (
 
 	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
 // DriverName names a database engine.
@@ -121,7 +121,13 @@ func (m *Migrator) Up(ctx context.Context, options ...UpOption) error {
 		output = io.Discard
 	}
 
-	return coremigrations.ApplyMigrations(ctx, migrator, set, merged.toVersion, output)
+	runner := &internalmigrations.Runner{
+		Migrator: migrator,
+		Set:      set,
+		Output:   output,
+	}
+
+	return runner.Up(ctx, merged.toVersion)
 }
 
 // Status reads the state of each migration file and of each history row.
@@ -149,26 +155,26 @@ func (m *Migrator) Status(ctx context.Context) ([]Entry, error) {
 
 // A rename of an internal constant must not change a value of this package, so this
 // switch maps each state by name.
-func stateOf(state coremigrations.MigrationState) State {
+func stateOf(state internalmigrations.State) State {
 	switch state {
-	case coremigrations.MigrationApplied:
+	case internalmigrations.StateApplied:
 		return StateApplied
-	case coremigrations.MigrationPending:
+	case internalmigrations.StatePending:
 		return StatePending
-	case coremigrations.MigrationChanged:
+	case internalmigrations.StateChanged:
 		return StateChanged
-	case coremigrations.MigrationMissing:
+	case internalmigrations.StateMissing:
 		return StateMissing
-	case coremigrations.MigrationOutOfOrder:
+	case internalmigrations.StateOutOfOrder:
 		return StateOutOfOrder
-	case coremigrations.MigrationDirty:
+	case internalmigrations.StateDirty:
 		return StateDirty
 	default:
 		return State(state)
 	}
 }
 
-func (m *Migrator) open(ctx context.Context) (coremigrations.Migrator, *coremigrations.MigrationSet, error) {
+func (m *Migrator) open(ctx context.Context) (internalmigrations.Migrator, *internalmigrations.Set, error) {
 	if m.target.ConnectionString == "" {
 		return nil, nil, fmt.Errorf("name the target with the WithTargetDataSource option")
 	}
@@ -182,7 +188,7 @@ func (m *Migrator) open(ctx context.Context) (coremigrations.Migrator, *coremigr
 		return nil, nil, fmt.Errorf("failed to open the database: %w", err)
 	}
 
-	set, err := coremigrations.LoadMigrationSet(ctx, migrator, m.directory)
+	set, err := internalmigrations.LoadSet(ctx, migrator, m.directory)
 	if err != nil {
 		_ = migrator.Close()
 

@@ -2,10 +2,9 @@ package cmdmigrate
 
 import (
 	"context"
-	"os"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -20,10 +19,10 @@ func upCommand() *cli.Command {
 			},
 		),
 		OnUsageError: helpers.OnUsageError,
-		Action:       withSet(upAction),
+		Action:       withRunner(upAction),
 	}
 }
 
-func upAction(ctx context.Context, command *cli.Command, _ *coremigrations.MigrationConfig, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) error {
-	return coremigrations.ApplyMigrations(ctx, migrator, set, command.String("to"), os.Stdout)
+func upAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+	return runner.Up(ctx, command.String("to"))
 }

@@ -1,4 +1,4 @@
-package migrations
+package internalmigrations
 
 import (
 	"crypto/sha256"
@@ -23,11 +23,11 @@ type Migration struct {
 	Checksum string
 }
 
-func MigrationVersionOfTime(moment time.Time) string {
+func VersionOfTime(moment time.Time) string {
 	return moment.UTC().Format(migrationVersionLayout)
 }
 
-func MigrationSlug(text string) string {
+func Slug(text string) string {
 	var builder strings.Builder
 
 	previousIsSeparator := false
@@ -53,7 +53,7 @@ func MigrationSlug(text string) string {
 	return strings.Trim(builder.String(), "_")
 }
 
-func ParseMigrationFileName(fileName string) (*Migration, error) {
+func ParseFileName(fileName string) (*Migration, error) {
 	base := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 
 	version, name, found := strings.Cut(base, "_")
@@ -83,13 +83,13 @@ func isMigrationVersion(version string) bool {
 	return true
 }
 
-func MigrationChecksum(content []byte) string {
+func Checksum(content []byte) string {
 	sum := sha256.Sum256(content)
 
 	return hex.EncodeToString(sum[:])
 }
 
-func ReadMigrationDirectory(directory string) ([]*Migration, error) {
+func ReadDirectory(directory string) ([]*Migration, error) {
 	entries, err := os.ReadDir(directory)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -106,7 +106,7 @@ func ReadMigrationDirectory(directory string) ([]*Migration, error) {
 			continue
 		}
 
-		migration, err := ParseMigrationFileName(entry.Name())
+		migration, err := ParseFileName(entry.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ func ReadMigrationDirectory(directory string) ([]*Migration, error) {
 			return nil, err
 		}
 
-		migration.Checksum = MigrationChecksum(content)
+		migration.Checksum = Checksum(content)
 
 		migrations = append(migrations, migration)
 	}
@@ -139,49 +139,49 @@ func ReadMigrationDirectory(directory string) ([]*Migration, error) {
 	return migrations, nil
 }
 
-type MigrationState string
+type State string
 
 const (
-	MigrationApplied    MigrationState = "applied"
-	MigrationPending    MigrationState = "pending"
-	MigrationChanged    MigrationState = "changed"
-	MigrationMissing    MigrationState = "missing"
-	MigrationOutOfOrder MigrationState = "out of order"
-	MigrationDirty      MigrationState = "dirty"
+	StateApplied    State = "applied"
+	StatePending    State = "pending"
+	StateChanged    State = "changed"
+	StateMissing    State = "missing"
+	StateOutOfOrder State = "out of order"
+	StateDirty      State = "dirty"
 )
 
-type MigrationEntry struct {
+type Entry struct {
 	Migration *Migration
-	State     MigrationState
+	State     State
 	AppliedAt time.Time
 }
 
-func (e *MigrationEntry) FileName() string {
+func (e *Entry) Label() string {
 	return e.Migration.Version + "_" + e.Migration.Name
 }
 
-// LoadMigrationSet reads the checksum, and this method reads the file again at the moment
+// LoadSet reads the checksum, and this method reads the file again at the moment
 // of the apply. An edit between the two reads gives a history row that names text that no
 // engine ran.
-func (e *MigrationEntry) Content() (string, error) {
+func (e *Entry) Content() (string, error) {
 	content, err := os.ReadFile(e.Migration.Path)
 	if err != nil {
 		return "", err
 	}
 
-	checksum := MigrationChecksum(content)
+	checksum := Checksum(content)
 	if checksum != e.Migration.Checksum {
-		return "", fmt.Errorf("the file %s changed while dbdiff read it", e.FileName())
+		return "", fmt.Errorf("the file %s changed while dbdiff read it", e.Label())
 	}
 
 	return string(content), nil
 }
 
-type MigrationSet struct {
-	Entries []*MigrationEntry
+type Set struct {
+	Entries []*Entry
 }
 
-func NewMigrationSet(files []*Migration, applied []AppliedMigration) *MigrationSet {
+func NewSet(files []*Migration, applied []AppliedMigration) *Set {
 	appliedByVersion := make(map[string]AppliedMigration, len(applied))
 	lastAppliedVersion := ""
 
@@ -193,12 +193,12 @@ func NewMigrationSet(files []*Migration, applied []AppliedMigration) *MigrationS
 		}
 	}
 
-	var entries []*MigrationEntry
+	var entries []*Entry
 
 	for _, file := range files {
-		entry := &MigrationEntry{
+		entry := &Entry{
 			Migration: file,
-			State:     MigrationPending,
+			State:     StatePending,
 		}
 
 		row, found := appliedByVersion[file.Version]
@@ -206,31 +206,31 @@ func NewMigrationSet(files []*Migration, applied []AppliedMigration) *MigrationS
 
 		if found {
 			entry.AppliedAt = row.AppliedAt
-			entry.State = MigrationApplied
+			entry.State = StateApplied
 
 			if row.Checksum != file.Checksum {
-				entry.State = MigrationChanged
+				entry.State = StateChanged
 			}
 
 			if row.Dirty {
-				entry.State = MigrationDirty
+				entry.State = StateDirty
 			}
 		}
 
-		if entry.State == MigrationPending && file.Version < lastAppliedVersion {
-			entry.State = MigrationOutOfOrder
+		if entry.State == StatePending && file.Version < lastAppliedVersion {
+			entry.State = StateOutOfOrder
 		}
 
 		entries = append(entries, entry)
 	}
 
 	for _, row := range appliedByVersion {
-		state := MigrationMissing
+		state := StateMissing
 		if row.Dirty {
-			state = MigrationDirty
+			state = StateDirty
 		}
 
-		entries = append(entries, &MigrationEntry{
+		entries = append(entries, &Entry{
 			Migration: &Migration{
 				Version:  row.Version,
 				Name:     row.Name,
@@ -241,52 +241,52 @@ func NewMigrationSet(files []*Migration, applied []AppliedMigration) *MigrationS
 		})
 	}
 
-	slices.SortFunc(entries, func(first *MigrationEntry, second *MigrationEntry) int {
+	slices.SortFunc(entries, func(first *Entry, second *Entry) int {
 		return strings.Compare(first.Migration.Version, second.Migration.Version)
 	})
 
-	set := &MigrationSet{
+	set := &Set{
 		Entries: entries,
 	}
 
 	return set
 }
 
-func (s *MigrationSet) Pending() []*MigrationEntry {
-	return lo.Filter(s.Entries, func(entry *MigrationEntry, _ int) bool {
-		return entry.State == MigrationPending
+func (s *Set) Pending() []*Entry {
+	return lo.Filter(s.Entries, func(entry *Entry, _ int) bool {
+		return entry.State == StatePending
 	})
 }
 
-func (s *MigrationSet) Problems() []*MigrationEntry {
-	return lo.Filter(s.Entries, func(entry *MigrationEntry, _ int) bool {
-		return entry.State == MigrationChanged ||
-			entry.State == MigrationMissing ||
-			entry.State == MigrationOutOfOrder ||
-			entry.State == MigrationDirty
+func (s *Set) Problems() []*Entry {
+	return lo.Filter(s.Entries, func(entry *Entry, _ int) bool {
+		return entry.State == StateChanged ||
+			entry.State == StateMissing ||
+			entry.State == StateOutOfOrder ||
+			entry.State == StateDirty
 	})
 }
 
 // An out of order file is no record error. Up and step refuse it in ProblemError, because it breaks the version order.
-func (s *MigrationSet) RecordError() error {
-	return migrationStateError(lo.Filter(s.Entries, func(entry *MigrationEntry, _ int) bool {
-		return entry.State == MigrationChanged ||
-			entry.State == MigrationMissing ||
-			entry.State == MigrationDirty
+func (s *Set) RecordError() error {
+	return migrationStateError(lo.Filter(s.Entries, func(entry *Entry, _ int) bool {
+		return entry.State == StateChanged ||
+			entry.State == StateMissing ||
+			entry.State == StateDirty
 	}))
 }
 
-func (s *MigrationSet) ProblemError() error {
+func (s *Set) ProblemError() error {
 	return migrationStateError(s.Problems())
 }
 
-func migrationStateError(entries []*MigrationEntry) error {
+func migrationStateError(entries []*Entry) error {
 	if len(entries) == 0 {
 		return nil
 	}
 
-	messages := lo.Map(entries, func(entry *MigrationEntry, _ int) string {
-		return fmt.Sprintf("%s is %s", entry.FileName(), entry.State)
+	messages := lo.Map(entries, func(entry *Entry, _ int) string {
+		return fmt.Sprintf("%s is %s", entry.Label(), entry.State)
 	})
 
 	return fmt.Errorf("the migrations of the database need attention: %s. "+

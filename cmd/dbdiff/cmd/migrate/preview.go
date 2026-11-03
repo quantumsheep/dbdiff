@@ -2,11 +2,9 @@ package cmdmigrate
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -21,21 +19,19 @@ func previewCommand() *cli.Command {
 			},
 		),
 		OnUsageError: helpers.OnUsageError,
-		Action:       withSet(previewAction),
+		Action:       withRunner(previewAction),
 	}
 }
 
-func previewAction(ctx context.Context, command *cli.Command, _ *coremigrations.MigrationConfig, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) error {
-	preview, err := coremigrations.RenderMigrationPreview(set)
+func previewAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+	err := runner.Preview()
 	if err != nil {
 		return err
 	}
-
-	fmt.Print(preview)
 
 	if !command.Bool("run") {
 		return nil
 	}
 
-	return coremigrations.RunMigrationPreview(ctx, migrator, set, os.Stdout)
+	return runner.PreviewInTransaction(ctx)
 }

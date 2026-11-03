@@ -8,7 +8,7 @@ import (
 	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
-	"github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
 type DriverOptions struct {
@@ -64,7 +64,7 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 }
 
 func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
-	schema string) (migrations.Migrator, error) {
+	schema string) (internalmigrations.Migrator, error) {
 	if driverName == "" {
 		detected, err := driversshared.DetectDriverOfTarget(target)
 		if err != nil {

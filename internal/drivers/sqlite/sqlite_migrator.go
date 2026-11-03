@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	"github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
-var sqliteHistoryDialect = migrations.SQLDialect{
+var sqliteHistoryDialect = internalmigrations.SQLDialect{
 	QuoteIdentifier: driversshared.QuoteIdentifier,
 	Placeholder: func(int) string {
 		return "?"
@@ -32,7 +32,7 @@ var sqliteHistoryDialect = migrations.SQLDialect{
 }
 
 type SQLiteMigrator struct {
-	migrations.SQLMigrator
+	internalmigrations.SQLMigrator
 }
 
 func NewSQLiteMigrator(path string) (*SQLiteMigrator, error) {
@@ -46,7 +46,7 @@ func NewSQLiteMigrator(path string) (*SQLiteMigrator, error) {
 	connection.SetMaxOpenConns(1)
 
 	migrator := &SQLiteMigrator{
-		SQLMigrator: migrations.SQLMigrator{
+		SQLMigrator: internalmigrations.SQLMigrator{
 			Connection: connection,
 			Dialect:    sqliteHistoryDialect,
 		},

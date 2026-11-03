@@ -1,4 +1,4 @@
-package migrations
+package internalmigrations
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
-func RenderMigrationFile(toolVersion string, generatedAt time.Time, instructions []driversshared.Instruction) string {
+func RenderFile(toolVersion string, generatedAt time.Time, instructions []driversshared.Instruction) string {
 	var builder strings.Builder
 
 	builder.WriteString("-- dbdiff ")
@@ -44,7 +44,7 @@ func RenderMigrationFile(toolVersion string, generatedAt time.Time, instructions
 	return builder.String()
 }
 
-func WriteMigrationFiles(directory string, slug string, generatedAt time.Time,
+func WriteFiles(directory string, slug string, generatedAt time.Time,
 	toolVersion string, instructions []driversshared.Instruction) ([]string, error) {
 	groups := splitMigrationInstructions(instructions)
 	if len(groups) == 0 {
@@ -66,11 +66,11 @@ func WriteMigrationFiles(directory string, slug string, generatedAt time.Time,
 	moment := generatedAt
 
 	for index, group := range groups {
-		for used[MigrationVersionOfTime(moment)] {
+		for used[VersionOfTime(moment)] {
 			moment = moment.Add(time.Second)
 		}
 
-		version := MigrationVersionOfTime(moment)
+		version := VersionOfTime(moment)
 		used[version] = true
 
 		name := slug
@@ -81,7 +81,7 @@ func WriteMigrationFiles(directory string, slug string, generatedAt time.Time,
 
 		path := filepath.Join(directory, version+"_"+name+".sql")
 
-		content := RenderMigrationFile(toolVersion, moment, group)
+		content := RenderFile(toolVersion, moment, group)
 
 		err := os.WriteFile(path, []byte(content), 0o600)
 		if err != nil {

@@ -6,14 +6,14 @@ import (
 	"fmt"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	"github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
 // This name is a constant of dbdiff. Every dbdiff process takes the same lock, and no
 // other application takes it.
 const mysqlMigrationLockName = "dbdiff_migrations"
 
-var mysqlHistoryDialect = migrations.SQLDialect{
+var mysqlHistoryDialect = internalmigrations.SQLDialect{
 	QuoteIdentifier: QuoteIdentifier,
 	Placeholder: func(int) string {
 		return "?"
@@ -43,7 +43,7 @@ var mysqlHistoryDialect = migrations.SQLDialect{
 }
 
 type MySQLMigrator struct {
-	migrations.SQLMigrator
+	internalmigrations.SQLMigrator
 
 	Database *sql.DB
 }
@@ -64,7 +64,7 @@ func NewMySQLMigrator(ctx context.Context, connectionString string) (*MySQLMigra
 	}
 
 	migrator := &MySQLMigrator{
-		SQLMigrator: migrations.SQLMigrator{
+		SQLMigrator: internalmigrations.SQLMigrator{
 			Connection: connection,
 			Dialect:    mysqlHistoryDialect,
 		},

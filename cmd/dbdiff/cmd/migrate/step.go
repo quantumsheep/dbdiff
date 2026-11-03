@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	coremigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -15,10 +15,10 @@ func stepCommand() *cli.Command {
 		Usage:        "Apply every pending migration, and ask before each file",
 		Flags:        migrationFlags(databaseTargetUsage),
 		OnUsageError: helpers.OnUsageError,
-		Action:       withSet(stepAction),
+		Action:       withRunner(stepAction),
 	}
 }
 
-func stepAction(ctx context.Context, command *cli.Command, _ *coremigrations.MigrationConfig, migrator coremigrations.Migrator, set *coremigrations.MigrationSet) error {
-	return coremigrations.StepMigration(ctx, migrator, set, os.Stdin, os.Stdout)
+func stepAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+	return runner.Step(ctx, os.Stdin)
 }

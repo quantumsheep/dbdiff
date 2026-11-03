@@ -12,7 +12,7 @@ import (
 	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	"github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
@@ -147,7 +147,7 @@ func TestPostgresMigrator(t *testing.T) {
 
 		applied, err := migrator.AppliedMigrations(t.Context())
 		require.NoError(t, err)
-		require.Equal(t, []migrations.AppliedMigration{
+		require.Equal(t, []internalmigrations.AppliedMigration{
 			{
 				Version:   "20260814101500",
 				Name:      "init",
@@ -162,7 +162,7 @@ func TestPostgresMigrator(t *testing.T) {
 
 		applied, err = migrator.AppliedMigrations(t.Context())
 		require.NoError(t, err)
-		require.Equal(t, []migrations.AppliedMigration{
+		require.Equal(t, []internalmigrations.AppliedMigration{
 			{
 				Version:   "20260814101500",
 				Name:      "init",
@@ -172,7 +172,7 @@ func TestPostgresMigrator(t *testing.T) {
 			},
 		}, appliedMigrationsInUTC(applied))
 
-		require.NoError(t, migrator.RecordDirty(t.Context(), &migrations.Migration{
+		require.NoError(t, migrator.RecordDirty(t.Context(), &internalmigrations.Migration{
 			Version:  "20260815101500",
 			Name:     "users",
 			Checksum: "bbb",
@@ -181,7 +181,7 @@ func TestPostgresMigrator(t *testing.T) {
 		applied, err = migrator.AppliedMigrations(t.Context())
 		require.NoError(t, err)
 		require.Len(t, applied, 2)
-		require.Equal(t, migrations.AppliedMigration{
+		require.Equal(t, internalmigrations.AppliedMigration{
 			Version:   "20260815101500",
 			Name:      "users",
 			Checksum:  "bbb",
@@ -195,7 +195,7 @@ func TestPostgresMigrator(t *testing.T) {
 
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		migration := &migrations.Migration{
+		migration := &internalmigrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -230,7 +230,7 @@ func TestPostgresMigrator(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" integer PRIMARY KEY);`))
-		require.NoError(t, transaction.Record(t.Context(), &migrations.Migration{
+		require.NoError(t, transaction.Record(t.Context(), &internalmigrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -254,7 +254,7 @@ func TestPostgresMigrator(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" integer PRIMARY KEY);`))
-		require.NoError(t, transaction.Record(t.Context(), &migrations.Migration{
+		require.NoError(t, transaction.Record(t.Context(), &internalmigrations.Migration{
 			Version:  "20260814101500",
 			Name:     "init",
 			Checksum: "aaa",
@@ -265,7 +265,7 @@ func TestPostgresMigrator(t *testing.T) {
 	})
 
 	t.Run("SatisfiesTheMigratorInterface", func(t *testing.T) {
-		var migrator migrations.Migrator = &PostgresMigrator{}
+		var migrator internalmigrations.Migrator = &PostgresMigrator{}
 		require.NotNil(t, migrator)
 	})
 
@@ -293,19 +293,25 @@ func TestPostgresMigrator(t *testing.T) {
 	CREATE INDEX CONCURRENTLY ix_users_email ON users (email);
 	`)
 
-		set, err := migrations.LoadMigrationSet(t.Context(), migrator, directory)
+		set, err := internalmigrations.LoadSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
 
 		output := &bytes.Buffer{}
 
-		err = migrations.ApplyMigrations(t.Context(), migrator, set, "", output)
+		runner := &internalmigrations.Runner{
+			Migrator: migrator,
+			Set:      set,
+			Output:   output,
+		}
+
+		err = runner.Up(t.Context(), "")
 		require.NoError(t, err)
 		require.Contains(t, output.String(), "Applied 20260101000000_concurrent_index.")
 		require.Contains(t, migrator.TableNames(), "users")
 
-		set, err = migrations.LoadMigrationSet(t.Context(), migrator, directory)
+		set, err = internalmigrations.LoadSet(t.Context(), migrator, directory)
 		require.NoError(t, err)
-		require.Equal(t, migrations.MigrationApplied, set.Entries[0].State)
+		require.Equal(t, internalmigrations.StateApplied, set.Entries[0].State)
 	})
 
 	t.Run("GenerateThenApplyLeavesNoDiff", func(t *testing.T) {
@@ -335,13 +341,19 @@ func TestPostgresMigrator(t *testing.T) {
 			driversshared.ParseDataSource(schemaFile), driversshared.DiffOptions{})
 		require.NoError(t, err)
 
-		paths, err := migrations.WriteMigrationFiles(migrationsDirectory, "add_users", time.Now(), "test", generatedInstructions)
+		paths, err := internalmigrations.WriteFiles(migrationsDirectory, "add_users", time.Now(), "test", generatedInstructions)
 		require.NoError(t, err)
 		require.NotEmpty(t, paths)
 
-		set, err := migrations.LoadMigrationSet(t.Context(), migrator, migrationsDirectory)
+		set, err := internalmigrations.LoadSet(t.Context(), migrator, migrationsDirectory)
 		require.NoError(t, err)
-		require.NoError(t, migrations.ApplyMigrations(t.Context(), migrator, set, "", io.Discard))
+		runner := &internalmigrations.Runner{
+			Migrator: migrator,
+			Set:      set,
+			Output:   io.Discard,
+		}
+
+		require.NoError(t, runner.Up(t.Context(), ""))
 
 		sourceConnectionString := fmt.Sprintf("%s&search_path=%s", postgresTestConnectionString, migrator.schema)
 
@@ -355,7 +367,7 @@ func TestPostgresMigrator(t *testing.T) {
 }
 
 // The driver can return the time in the local zone, so the test compares the times in UTC.
-func appliedMigrationsInUTC(applied []migrations.AppliedMigration) []migrations.AppliedMigration {
+func appliedMigrationsInUTC(applied []internalmigrations.AppliedMigration) []internalmigrations.AppliedMigration {
 	for index := range applied {
 		applied[index].AppliedAt = applied[index].AppliedAt.UTC()
 	}

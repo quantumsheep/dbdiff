@@ -1,4 +1,4 @@
-package migrations
+package internalmigrations
 
 import (
 	"context"
@@ -25,7 +25,7 @@ type Migrator interface {
 	Unlock(ctx context.Context) error
 
 	Exec(ctx context.Context, statement string) error
-	Begin(ctx context.Context) (MigrationTransaction, error)
+	Begin(ctx context.Context) (Transaction, error)
 
 	RecordDirty(ctx context.Context, migration *Migration) error
 	ClearDirty(ctx context.Context, migration *Migration) error
@@ -35,7 +35,7 @@ type Migrator interface {
 	DeleteRecord(ctx context.Context, version string) error
 }
 
-type MigrationTransaction interface {
+type Transaction interface {
 	Apply(ctx context.Context, statement string) error
 	Record(ctx context.Context, migration *Migration) error
 	Commit() error

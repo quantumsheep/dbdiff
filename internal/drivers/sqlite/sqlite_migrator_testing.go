@@ -7,7 +7,7 @@ import (
 	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	"github.com/quantumsheep/dbdiff/internal/migrations"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,7 +74,7 @@ func GenerateSQLiteMigration(tb testing.TB, target string, directory string) []s
 
 	moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
 
-	paths, err := migrations.WriteMigrationFiles(directory, "add_users", moment, "1.4.0", instructions)
+	paths, err := internalmigrations.WriteFiles(directory, "add_users", moment, "1.4.0", instructions)
 	require.NoError(tb, err)
 
 	return paths
