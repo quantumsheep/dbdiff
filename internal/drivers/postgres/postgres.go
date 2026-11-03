@@ -162,12 +162,7 @@ func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSour
 
 func (d *PostgresDriver) openSides(ctx context.Context, source driversshared.DataSource,
 	target driversshared.DataSource) (func(), error) {
-	version, err := d.scratchVersionOfSources(ctx, source, target)
-	if err != nil {
-		return nil, err
-	}
-
-	d.ScratchVersion = version
+	d.ScratchVersion = d.scratchVersionOfSources(ctx, source, target)
 
 	targetDatabaseConnection, err := d.OpenSide(ctx, target, d.TargetSchema, "target")
 	if err != nil {

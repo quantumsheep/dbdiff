@@ -179,25 +179,25 @@ func DetectPostgresScratchVersion(ctx context.Context, connectionString string) 
 }
 
 func (d *PostgresDriver) scratchVersionOfSources(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource) (embeddedpostgres.PostgresVersion, error) {
+	target driversshared.DataSource) embeddedpostgres.PostgresVersion {
 	sourceHoldsSQL := driversshared.IsSQLSource(source)
 	targetHoldsSQL := driversshared.IsSQLSource(target)
 
 	if targetHoldsSQL && !sourceHoldsSQL {
 		connectionSource := source.(driversshared.ConnectionStringDataSource)
-		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString), nil
+		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString)
 	}
 
 	if sourceHoldsSQL && !targetHoldsSQL {
 		connectionSource := target.(driversshared.ConnectionStringDataSource)
-		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString), nil
+		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString)
 	}
 
 	if targetHoldsSQL && sourceHoldsSQL && d.ScratchServerVersion != "" {
-		return embeddedpostgres.PostgresVersion(d.ScratchServerVersion), nil
+		return embeddedpostgres.PostgresVersion(d.ScratchServerVersion)
 	}
 
-	return "", nil
+	return ""
 }
 
 // The keys of postgresScratchVersions hold a major version only, and a version of the flag

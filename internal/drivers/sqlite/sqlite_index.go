@@ -65,7 +65,7 @@ func parseIndexDefinition(definition string) ([]string, string) {
 		return nil, ""
 	}
 
-	keys := splitTopLevel(definition[opening+1:closing], ',')
+	keys := splitTopLevel(definition[opening+1 : closing])
 
 	for position, key := range keys {
 		keys[position] = strings.TrimSpace(key)

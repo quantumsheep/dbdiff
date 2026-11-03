@@ -48,7 +48,7 @@ func constraintColumnNames(list string) []string {
 
 	var names []string
 
-	for _, part := range splitTopLevel(inner, ',') {
+	for _, part := range splitTopLevel(inner) {
 		tokens := splitTopLevelTokens(part)
 		if len(tokens) == 0 {
 			continue
@@ -70,7 +70,7 @@ func constraintKeyClauses(list string) []string {
 
 	holdsModifier := false
 
-	for _, part := range splitTopLevel(inner, ',') {
+	for _, part := range splitTopLevel(inner) {
 		tokens := splitTopLevelTokens(part)
 		if len(tokens) == 0 {
 			continue
@@ -124,7 +124,7 @@ func parseTableOptions(definition string) (withoutRowID bool, strict bool) {
 		return false, false
 	}
 
-	for _, option := range splitTopLevel(definition[closing+1:], ',') {
+	for _, option := range splitTopLevel(definition[closing+1:]) {
 		option = strings.Join(strings.Fields(option), " ")
 
 		if strings.EqualFold(option, "WITHOUT ROWID") {
@@ -344,7 +344,7 @@ func splitColumnDefinitions(definition string) []string {
 		return nil
 	}
 
-	return splitTopLevel(definition[opening+1:closing], ',')
+	return splitTopLevel(definition[opening+1 : closing])
 }
 
 // A group in parentheses stays one token, so an expression keeps its text.
@@ -384,13 +384,13 @@ func splitTopLevelTokens(part string) []string {
 	return tokens
 }
 
-func splitTopLevel(text string, separator byte) []string {
+func splitTopLevel(text string) []string {
 	var parts []string
 
 	partStart := 0
 
 	scanTopLevel(text, func(position int, depth int) {
-		if depth == 0 && text[position] == separator {
+		if depth == 0 && text[position] == ',' {
 			parts = append(parts, text[partStart:position])
 			partStart = position + 1
 		}

@@ -5242,28 +5242,23 @@ func TestPostgresDriver(t *testing.T) {
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		version, err := driver.scratchVersionOfSources(t.Context(), liveSource, sqlSource)
-		require.NoError(t, err)
+		version := driver.scratchVersionOfSources(t.Context(), liveSource, sqlSource)
 		require.Equal(t, liveVersion, version)
 
-		version, err = driver.scratchVersionOfSources(t.Context(), sqlSource, liveSource)
-		require.NoError(t, err)
+		version = driver.scratchVersionOfSources(t.Context(), sqlSource, liveSource)
 		require.Equal(t, liveVersion, version)
 
-		version, err = driver.scratchVersionOfSources(t.Context(), sqlSource, sqlSource)
-		require.NoError(t, err)
+		version = driver.scratchVersionOfSources(t.Context(), sqlSource, sqlSource)
 		require.Equal(t, embeddedpostgres.PostgresVersion(""), version)
 
 		versionedDriver := NewPostgresDriver(&PostgresDriverConfig{
 			ScratchServerVersion: "17.11.0",
 		})
 
-		version, err = versionedDriver.scratchVersionOfSources(t.Context(), sqlSource, sqlSource)
-		require.NoError(t, err)
+		version = versionedDriver.scratchVersionOfSources(t.Context(), sqlSource, sqlSource)
 		require.Equal(t, embeddedpostgres.PostgresVersion("17.11.0"), version)
 
-		version, err = versionedDriver.scratchVersionOfSources(t.Context(), sqlSource, liveSource)
-		require.NoError(t, err)
+		version = versionedDriver.scratchVersionOfSources(t.Context(), sqlSource, liveSource)
 		require.Equal(t, liveVersion, version)
 	})
 
@@ -5293,8 +5288,7 @@ func TestPostgresDriver(t *testing.T) {
 		source := harness.source
 		target := driversshared.ParseDataSource(targetPath)
 
-		version, err := driver.scratchVersionOfSources(t.Context(), source, target)
-		require.NoError(t, err)
+		version := driver.scratchVersionOfSources(t.Context(), source, target)
 		require.Equal(t, DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString), version)
 
 		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
