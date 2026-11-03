@@ -112,7 +112,7 @@ func RunMigrationPreview(ctx context.Context, migrator Migrator, set *MigrationS
 		return fmt.Errorf("the target engine commits every DDL statement at once, so preview cannot roll the pending files back")
 	}
 
-	transaction, err := migrator.Begin(ctx, true)
+	transaction, err := migrator.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open the preview transaction: %w", err)
 	}
@@ -384,7 +384,7 @@ func RunMigrationBaseline(ctx context.Context, migrator Migrator, set *Migration
 		return nil
 	}
 
-	transaction, err := migrator.Begin(ctx, true)
+	transaction, err := migrator.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open the baseline transaction: %w", err)
 	}
@@ -448,7 +448,7 @@ func applyOneMigration(ctx context.Context, migrator Migrator, entry *MigrationE
 		return applyOneMigrationWithoutTransaction(ctx, migrator, entry, content, output)
 	}
 
-	transaction, err := migrator.Begin(ctx, true)
+	transaction, err := migrator.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to open the transaction of %s: %w", entry.FileName(), err)
 	}
@@ -486,11 +486,6 @@ func applyOneMigrationWithoutTransaction(ctx context.Context, migrator Migrator,
 		return fmt.Errorf("failed to record %s: %w", entry.FileName(), err)
 	}
 
-	transaction, err := migrator.Begin(ctx, false)
-	if err != nil {
-		return err
-	}
-
 	// The directive is the one signal that starts the split. A file without it runs in
 	// one call.
 	statements := []string{content}
@@ -500,7 +495,7 @@ func applyOneMigrationWithoutTransaction(ctx context.Context, migrator Migrator,
 	}
 
 	for _, statement := range statements {
-		err = transaction.Apply(ctx, statement)
+		err = migrator.Exec(ctx, statement)
 		if err != nil {
 			return fmt.Errorf("%s failed, and the statements before the failure stay applied. "+
 				"Repair the database, and run migrate repair: %w",

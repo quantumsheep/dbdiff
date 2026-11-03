@@ -2,7 +2,6 @@ package migrations
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
@@ -25,7 +24,8 @@ type Migrator interface {
 	TryLock(ctx context.Context) (bool, error)
 	Unlock(ctx context.Context) error
 
-	Begin(ctx context.Context, useTransaction bool) (MigrationTransaction, error)
+	Exec(ctx context.Context, statement string) error
+	Begin(ctx context.Context) (MigrationTransaction, error)
 
 	RecordDirty(ctx context.Context, migration *Migration) error
 	ClearDirty(ctx context.Context, migration *Migration) error
@@ -33,10 +33,6 @@ type Migrator interface {
 	UpdateChecksum(ctx context.Context, migration *Migration) error
 
 	DeleteRecord(ctx context.Context, version string) error
-}
-
-type MigrationExecutor interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 type MigrationTransaction interface {

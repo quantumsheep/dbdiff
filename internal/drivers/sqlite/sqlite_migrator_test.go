@@ -92,7 +92,7 @@ func TestSQLiteMigrator(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), true)
+		transaction, err := migrator.Begin(t.Context())
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
@@ -118,7 +118,7 @@ func TestSQLiteMigrator(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), true)
+		transaction, err := migrator.Begin(t.Context())
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
@@ -140,7 +140,7 @@ func TestSQLiteMigrator(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), true)
+		transaction, err := migrator.Begin(t.Context())
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, transaction.Rollback()) }()
@@ -153,15 +153,11 @@ func TestSQLiteMigrator(t *testing.T) {
 		require.NotNil(t, migrator)
 	})
 
-	t.Run("BeginWithNoTransactionCommitsEachStatement", func(t *testing.T) {
+	t.Run("ExecRunsTheStatementOutsideATransaction", func(t *testing.T) {
 		migrator := NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), false)
-		require.NoError(t, err)
-
-		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
-		require.NoError(t, transaction.Rollback())
+		require.NoError(t, migrator.Exec(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
 
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
 	})

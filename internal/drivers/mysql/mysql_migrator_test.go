@@ -120,6 +120,65 @@ func TestMySQLMigrator(t *testing.T) {
 		require.NoError(t, second.Unlock(t.Context()))
 	})
 
+	t.Run("EnsureHistoryTableAddsTheDirtyColumnToAnOldTable", func(t *testing.T) {
+		migrator := NewTestMySQLMigrator(t)
+
+		_, err := migrator.Connection.ExecContext(t.Context(), "CREATE TABLE `dbdiff_migrations` (\n"+
+			"\t`version`    varchar(255) NOT NULL PRIMARY KEY,\n"+
+			"\t`name`       text NOT NULL,\n"+
+			"\t`checksum`   text NOT NULL,\n"+
+			"\t`applied_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP\n"+
+			");")
+		require.NoError(t, err)
+
+		_, err = migrator.Connection.ExecContext(t.Context(), "INSERT INTO `dbdiff_migrations` VALUES ('20260814101500', 'init', 'aaa', '2026-08-14 10:15:00');")
+		require.NoError(t, err)
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []migrations.AppliedMigration{
+			{
+				Version:   "20260814101500",
+				Name:      "init",
+				Checksum:  "aaa",
+				AppliedAt: time.Date(2026, 8, 14, 10, 15, 0, 0, time.UTC),
+				Dirty:     false,
+			},
+		}, appliedMigrationsInUTC(applied))
+
+		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
+		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
+
+		applied, err = migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []migrations.AppliedMigration{
+			{
+				Version:   "20260814101500",
+				Name:      "init",
+				Checksum:  "aaa",
+				AppliedAt: time.Date(2026, 8, 14, 10, 15, 0, 0, time.UTC),
+				Dirty:     false,
+			},
+		}, appliedMigrationsInUTC(applied))
+
+		require.NoError(t, migrator.RecordDirty(t.Context(), &migrations.Migration{
+			Version:  "20260815101500",
+			Name:     "users",
+			Checksum: "bbb",
+		}))
+
+		applied, err = migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 2)
+		require.Equal(t, migrations.AppliedMigration{
+			Version:   "20260815101500",
+			Name:      "users",
+			Checksum:  "bbb",
+			AppliedAt: applied[1].AppliedAt,
+			Dirty:     true,
+		}, applied[1])
+	})
+
 	t.Run("RecordDirtyAndClearDirty", func(t *testing.T) {
 		migrator := NewTestMySQLMigrator(t)
 
@@ -149,7 +208,7 @@ func TestMySQLMigrator(t *testing.T) {
 		migrator := NewTestMySQLMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), true)
+		transaction, err := migrator.Begin(t.Context())
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), "CREATE TABLE `users` (`id` int NOT NULL, PRIMARY KEY (`id`));"))
@@ -173,7 +232,7 @@ func TestMySQLMigrator(t *testing.T) {
 		migrator := NewTestMySQLMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), true)
+		transaction, err := migrator.Begin(t.Context())
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Record(t.Context(), &migrations.Migration{
@@ -261,4 +320,13 @@ func TestMySQLMigrator(t *testing.T) {
 		require.NotNil(t, migrator)
 		require.False(t, migrator.SupportsTransactionalDDL())
 	})
+}
+
+// The driver can return the time in the local zone, so the test compares the times in UTC.
+func appliedMigrationsInUTC(applied []migrations.AppliedMigration) []migrations.AppliedMigration {
+	for index := range applied {
+		applied[index].AppliedAt = applied[index].AppliedAt.UTC()
+	}
+
+	return applied
 }

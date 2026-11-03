@@ -127,6 +127,69 @@ func TestPostgresMigrator(t *testing.T) {
 		require.NoError(t, second.Unlock(t.Context()))
 	})
 
+	t.Run("EnsureHistoryTableAddsTheDirtyColumnToAnOldTable", func(t *testing.T) {
+		migrator := NewTestPostgresMigrator(t)
+
+		_, err := migrator.Connection.ExecContext(t.Context(), `
+			CREATE TABLE "dbdiff_migrations" (
+				"version"    text        NOT NULL PRIMARY KEY,
+				"name"       text        NOT NULL,
+				"checksum"   text        NOT NULL,
+				"applied_at" timestamptz NOT NULL DEFAULT now()
+			);
+		`)
+		require.NoError(t, err)
+
+		_, err = migrator.Connection.ExecContext(t.Context(), `
+			INSERT INTO "dbdiff_migrations" VALUES ('20260814101500', 'init', 'aaa', '2026-08-14T10:15:00Z');
+		`)
+		require.NoError(t, err)
+
+		applied, err := migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []migrations.AppliedMigration{
+			{
+				Version:   "20260814101500",
+				Name:      "init",
+				Checksum:  "aaa",
+				AppliedAt: time.Date(2026, 8, 14, 10, 15, 0, 0, time.UTC),
+				Dirty:     false,
+			},
+		}, appliedMigrationsInUTC(applied))
+
+		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
+		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
+
+		applied, err = migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []migrations.AppliedMigration{
+			{
+				Version:   "20260814101500",
+				Name:      "init",
+				Checksum:  "aaa",
+				AppliedAt: time.Date(2026, 8, 14, 10, 15, 0, 0, time.UTC),
+				Dirty:     false,
+			},
+		}, appliedMigrationsInUTC(applied))
+
+		require.NoError(t, migrator.RecordDirty(t.Context(), &migrations.Migration{
+			Version:  "20260815101500",
+			Name:     "users",
+			Checksum: "bbb",
+		}))
+
+		applied, err = migrator.AppliedMigrations(t.Context())
+		require.NoError(t, err)
+		require.Len(t, applied, 2)
+		require.Equal(t, migrations.AppliedMigration{
+			Version:   "20260815101500",
+			Name:      "users",
+			Checksum:  "bbb",
+			AppliedAt: applied[1].AppliedAt,
+			Dirty:     true,
+		}, applied[1])
+	})
+
 	t.Run("RecordDirtyAndClearDirty", func(t *testing.T) {
 		migrator := NewTestPostgresMigrator(t)
 
@@ -163,7 +226,7 @@ func TestPostgresMigrator(t *testing.T) {
 		migrator := NewTestPostgresMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), true)
+		transaction, err := migrator.Begin(t.Context())
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" integer PRIMARY KEY);`))
@@ -187,7 +250,7 @@ func TestPostgresMigrator(t *testing.T) {
 		migrator := NewTestPostgresMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), true)
+		transaction, err := migrator.Begin(t.Context())
 		require.NoError(t, err)
 
 		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" integer PRIMARY KEY);`))
@@ -206,15 +269,11 @@ func TestPostgresMigrator(t *testing.T) {
 		require.NotNil(t, migrator)
 	})
 
-	t.Run("BeginWithNoTransactionCommitsEachStatement", func(t *testing.T) {
+	t.Run("ExecRunsTheStatementOutsideATransaction", func(t *testing.T) {
 		migrator := NewTestPostgresMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
-		transaction, err := migrator.Begin(t.Context(), false)
-		require.NoError(t, err)
-
-		require.NoError(t, transaction.Apply(t.Context(), `CREATE TABLE "users" ("id" integer PRIMARY KEY);`))
-		require.NoError(t, transaction.Rollback())
+		require.NoError(t, migrator.Exec(t.Context(), `CREATE TABLE "users" ("id" integer PRIMARY KEY);`))
 
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
 	})
@@ -293,4 +352,13 @@ func TestPostgresMigrator(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})
+}
+
+// The driver can return the time in the local zone, so the test compares the times in UTC.
+func appliedMigrationsInUTC(applied []migrations.AppliedMigration) []migrations.AppliedMigration {
+	for index := range applied {
+		applied[index].AppliedAt = applied[index].AppliedAt.UTC()
+	}
+
+	return applied
 }
