@@ -1623,6 +1623,62 @@ func TestMySQLDriver(t *testing.T) {
 		driver.RequireInstructions(nil)
 	})
 
+	t.Run("DataOfATableWithAGeneratedPrimaryKey", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.CompareData = true
+
+		schema := "CREATE TABLE users (id int NOT NULL, code int GENERATED ALWAYS AS (id * 10) STORED NOT NULL, name varchar(100), PRIMARY KEY (code));"
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget("INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');")
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource("INSERT INTO users (id, name) VALUES (1, 'Alicia'), (3, 'Cara');")
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Expressions: []string{"2", "'Bob'"},
+			},
+			&MySQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*MySQLSetClause{
+					{
+						ColumnName: "name",
+						Expression: "'Alice'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&MySQLEqualityCondition{
+							ColumnName: "code",
+							Expression: "10",
+						},
+					},
+				},
+			},
+			&MySQLDeleteInstruction{
+				TableName: "users",
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&MySQLEqualityCondition{
+							ColumnName: "code",
+							Expression: "30",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "code": int64(10), "name": "Alice"},
+			{"id": int64(2), "code": int64(20), "name": "Bob"},
+		}, driver.FetchAllFromSource("users", "ORDER BY code"))
+	})
+
 	t.Run("DataOfATableWithNoPrimaryKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true

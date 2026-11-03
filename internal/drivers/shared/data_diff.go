@@ -237,6 +237,10 @@ func getTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, db *s
 		selectExpression = quoteWith[Quoter]
 	}
 
+	// A generated column is not writable, but it can be a primary key column. The row key
+	// needs the value of each primary key column.
+	columnNames = lo.Union(columnNames, primaryKeyColumnNames)
+
 	selectExpressions := lo.Map(columnNames, func(name string, _ int) string {
 		return selectExpression(name)
 	})

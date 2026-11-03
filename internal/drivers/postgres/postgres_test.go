@@ -4627,6 +4627,62 @@ func TestPostgresDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsOfATableWithAGeneratedPrimaryKey", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		schema := `CREATE TABLE users (id INT NOT NULL, code INT GENERATED ALWAYS AS (id * 10) STORED, name TEXT, PRIMARY KEY (code));`
+
+		driver.ExecOnTarget(schema)
+		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');`)
+		driver.ExecOnSource(schema)
+		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alicia'), (3, 'Cara');`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Expressions: []string{"2", "'Bob'"},
+			},
+			&driversshared.SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*driversshared.SQLSetClause{
+					{
+						ColumnName: "name",
+						Expression: "'Alice'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "code",
+							Expression: "10",
+						},
+					},
+				},
+			},
+			&driversshared.SQLDeleteInstruction{
+				TableName: "users",
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "code",
+							Expression: "30",
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnSource(diff)
+		driver.RequireInstructions(nil)
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "code": int64(10), "name": "Alice"},
+			{"id": int64(2), "code": int64(20), "name": "Bob"},
+		}, driver.FetchAllFromSource("users", "ORDER BY code"))
+	})
+
 	t.Run("CompareRowsOfANewTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true
