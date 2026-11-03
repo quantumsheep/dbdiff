@@ -2321,9 +2321,23 @@ func TestParseMySQLConnectionString(t *testing.T) {
 		require.Equal(t, "tcp", config.Net)
 		require.Equal(t, "localhost:3307", config.Addr)
 		require.Equal(t, "app", config.DBName)
-		require.Equal(t, map[string]string{"tls": "skip-verify"}, config.Params)
+		require.Equal(t, "skip-verify", config.TLSConfig)
+		require.Empty(t, config.Params)
 		require.True(t, config.MultiStatements)
 		require.True(t, config.ParseTime)
+	})
+
+	t.Run("URLWithDriverParameters", func(t *testing.T) {
+		config, err := parseMySQLConnectionString("mysql://us%40er:p%3Fss@localhost/my%2Fdb?parseTime=true&timeout=5s&sql_mode=%27ANSI%27")
+
+		require.NoError(t, err)
+		require.Equal(t, "us@er", config.User)
+		require.Equal(t, "p?ss", config.Passwd)
+		require.Equal(t, "localhost:3306", config.Addr)
+		require.Equal(t, "my/db", config.DBName)
+		require.True(t, config.ParseTime)
+		require.Equal(t, 5*time.Second, config.Timeout)
+		require.Equal(t, map[string]string{"sql_mode": "'ANSI'"}, config.Params)
 	})
 
 	t.Run("URLWithNoPort", func(t *testing.T) {

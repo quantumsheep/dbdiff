@@ -40,26 +40,19 @@ func parseMySQLConnectionString(connectionString string) (*mysql.Config, error) 
 		return nil, err
 	}
 
-	config := mysql.NewConfig()
-	config.Net = "tcp"
-	config.User = parsed.User.Username()
-	config.Passwd, _ = parsed.User.Password()
-	config.DBName = strings.TrimPrefix(parsed.Path, "/")
-
 	address := parsed.Host
 	if parsed.Port() == "" {
 		address += ":3306"
 	}
 
-	config.Addr = address
-
-	for key, values := range parsed.Query() {
-		if config.Params == nil {
-			config.Params = make(map[string]string)
-		}
-
-		config.Params[key] = values[0]
+	config, err := mysql.ParseDSN("tcp(" + address + ")/?" + parsed.RawQuery)
+	if err != nil {
+		return nil, err
 	}
+
+	config.User = parsed.User.Username()
+	config.Passwd, _ = parsed.User.Password()
+	config.DBName = strings.TrimPrefix(parsed.Path, "/")
 
 	return config, nil
 }
