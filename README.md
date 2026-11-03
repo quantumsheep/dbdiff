@@ -67,6 +67,19 @@ dbdiff diff postgres://localhost:5432/source postgres://localhost:5432/target
 | `--exit-code`    | none                              | If the schemas differ, exit with code 1.                            |
 | `--ignore-table` | A table name                      | Ignore this table. Repeat the flag for more tables.                 |
 
+### Flags of `migrate`
+
+| Flag             | Value                             | Purpose                                                                                               |
+| ---------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `--config`       | A file path                       | Read this configuration file. The default is `dbdiff.yaml` in the working directory.                  |
+| `--source`       | A directory path                  | Read the migration files from this directory.                                                         |
+| `--target`       | A connection URL                  | Change this database. The default is `DBDIFF_TARGET`. For `generate`, the value is the wanted schema. |
+| `--to`           | A migration version               | For `up` and `baseline`, stop after this version. The default is the last migration.                  |
+| `--run`          | none                              | For `preview`, apply the pending files in one transaction. Then roll back the transaction.            |
+| `--driver`       | `sqlite3`, `postgres`, or `mysql` | Select the engine. dbdiff detects it from the source and the target by default.                       |
+| `--schema`       | A schema name                     | Select the PostgreSQL schema. The default is the search path.                                         |
+| `--ignore-table` | A table name                      | Ignore this table. Repeat the flag for more tables.                                                   |
+
 ## SQL files
 
 dbdiff runs a `.sql` file, or the `.sql` files of a directory in name order, in a temporary database. For PostgreSQL and MySQL, it downloads a temporary server on the first run, with the version of the other side. The `version` key of `dbdiff.yaml` sets another version.
