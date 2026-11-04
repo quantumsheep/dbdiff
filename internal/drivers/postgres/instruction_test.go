@@ -871,6 +871,26 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `ALTER TYPE "mood" ADD VALUE 'calm';`, instruction.String())
 	})
 
+	t.Run("PostgresAlterTypeAddValueBefore", func(t *testing.T) {
+		instruction := &PostgresAlterTypeAddValueInstruction{
+			Name:   "mood",
+			Value:  "calm",
+			Before: "happy",
+		}
+
+		require.Equal(t, `ALTER TYPE "mood" ADD VALUE 'calm' BEFORE 'happy';`, instruction.String())
+	})
+
+	t.Run("PostgresAlterTypeAddValueAfter", func(t *testing.T) {
+		instruction := &PostgresAlterTypeAddValueInstruction{
+			Name:  "mood",
+			Value: "calm",
+			After: "sad",
+		}
+
+		require.Equal(t, `ALTER TYPE "mood" ADD VALUE 'calm' AFTER 'sad';`, instruction.String())
+	})
+
 	t.Run("PostgresDropType", func(t *testing.T) {
 		instruction := &PostgresDropTypeInstruction{Name: "mood"}
 

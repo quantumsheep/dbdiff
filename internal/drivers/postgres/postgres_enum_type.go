@@ -9,13 +9,13 @@ import (
 	"github.com/samber/lo"
 )
 
-type PostgresType struct {
+type PostgresEnumType struct {
 	Name    string
 	Values  []string
 	Comment string
 }
 
-func (t *PostgresType) CreateInstruction() *PostgresCreateEnumTypeInstruction {
+func (t *PostgresEnumType) CreateInstruction() *PostgresCreateEnumTypeInstruction {
 	return &PostgresCreateEnumTypeInstruction{
 		Name:   t.Name,
 		Labels: t.Values,
@@ -23,7 +23,7 @@ func (t *PostgresType) CreateInstruction() *PostgresCreateEnumTypeInstruction {
 }
 
 // CREATE TYPE accepts no comment, so the comment takes its own statement.
-func (t *PostgresType) Instructions() []driversshared.Instruction {
+func (t *PostgresEnumType) Instructions() []driversshared.Instruction {
 	instructions := []driversshared.Instruction{t.CreateInstruction()}
 
 	if t.Comment != "" {
@@ -36,29 +36,51 @@ func (t *PostgresType) Instructions() []driversshared.Instruction {
 	return instructions
 }
 
-func (t *PostgresType) StartsWith(other *PostgresType) bool {
-	if len(other.Values) > len(t.Values) {
-		return false
+func (t *PostgresEnumType) KeepsOrderOf(other *PostgresEnumType) bool {
+	position := 0
+
+	for _, value := range t.Values {
+		if position < len(other.Values) && other.Values[position] == value {
+			position++
+		}
 	}
 
-	return slices.Equal(t.Values[:len(other.Values)], other.Values)
+	return position == len(other.Values)
 }
 
 // PostgreSQL adds a value to an enum, but it removes none and it moves none.
-func (t *PostgresType) Diff(other *PostgresType) []driversshared.Instruction {
-	if !slices.Equal(t.Values, other.Values) && !t.StartsWith(other) {
+func (t *PostgresEnumType) Diff(other *PostgresEnumType) []driversshared.Instruction {
+	if !t.KeepsOrderOf(other) {
 		instructions := []driversshared.Instruction{&PostgresDropTypeInstruction{Name: t.Name}}
 
 		return append(instructions, t.Instructions()...)
 	}
 
+	lastSourceValue, _ := lo.Last(other.Values)
+	lastSourceIndex := slices.Index(t.Values, lastSourceValue)
+
 	var instructions []driversshared.Instruction
 
-	for _, value := range t.Values[len(other.Values):] {
-		instructions = append(instructions, &PostgresAlterTypeAddValueInstruction{
+	for index, value := range t.Values {
+		if slices.Contains(other.Values, value) {
+			continue
+		}
+
+		instruction := &PostgresAlterTypeAddValueInstruction{
 			Name:  t.Name,
 			Value: value,
-		})
+		}
+
+		// A value after the last source value takes no position, so PostgreSQL adds it at the end.
+		if index < lastSourceIndex {
+			if index == 0 {
+				instruction.Before = other.Values[0]
+			} else {
+				instruction.After = t.Values[index-1]
+			}
+		}
+
+		instructions = append(instructions, instruction)
 	}
 
 	if t.Comment != other.Comment {
@@ -71,25 +93,25 @@ func (t *PostgresType) Diff(other *PostgresType) []driversshared.Instruction {
 	return instructions
 }
 
-func (d *PostgresDriver) DiffTypes(ctx context.Context) (*driversshared.SectionDiff, error) {
-	return diffSection(ctx, d, sectionRules[*PostgresType]{
-		Get: d.GetTypes,
-		Key: func(enumType *PostgresType) string {
+func (d *PostgresDriver) DiffEnumTypes(ctx context.Context) (*driversshared.SectionDiff, error) {
+	return diffSection(ctx, d, sectionRules[*PostgresEnumType]{
+		Get: d.GetEnumTypes,
+		Key: func(enumType *PostgresEnumType) string {
 			return enumType.Name
 		},
-		Create: func(enumType *PostgresType) []driversshared.Instruction {
+		Create: func(enumType *PostgresEnumType) []driversshared.Instruction {
 			return enumType.Instructions()
 		},
-		Change: func(target *PostgresType, source *PostgresType) []driversshared.Instruction {
+		Change: func(target *PostgresEnumType, source *PostgresEnumType) []driversshared.Instruction {
 			return target.Diff(source)
 		},
-		Drop: func(source *PostgresType) driversshared.Instruction {
+		Drop: func(source *PostgresEnumType) driversshared.Instruction {
 			return &PostgresDropTypeInstruction{Name: source.Name}
 		},
 	})
 }
 
-func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresType, error) {
+func (d *PostgresDriver) GetEnumTypes(ctx context.Context, db *sql.DB) ([]*PostgresEnumType, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT t.typname, e.enumlabel, coalesce(obj_description(t.oid, 'pg_type'), '')
 		FROM pg_type t
@@ -106,7 +128,7 @@ func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresT
 
 	defer func() { _ = rows.Close() }()
 
-	var types []*PostgresType
+	var types []*PostgresEnumType
 
 	for rows.Next() {
 		var typeName, value, comment string
@@ -118,7 +140,7 @@ func (d *PostgresDriver) GetTypes(ctx context.Context, db *sql.DB) ([]*PostgresT
 
 		lastType, _ := lo.Last(types)
 		if lastType == nil || lastType.Name != typeName {
-			lastType = &PostgresType{
+			lastType = &PostgresEnumType{
 				Name:    typeName,
 				Comment: comment,
 			}

@@ -41,18 +41,6 @@ func (p *PostgresPrivilege) RevokeInstruction(privileges []string) *PostgresRevo
 	}
 }
 
-func missingPrivileges(first []string, second []string) []string {
-	var missing []string
-
-	for _, privilege := range first {
-		if !slices.Contains(second, privilege) {
-			missing = append(missing, privilege)
-		}
-	}
-
-	return missing
-}
-
 type PostgresOwner struct {
 	ObjectType string
 	ObjectName string
@@ -156,12 +144,12 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*driversshared.Sec
 			continue
 		}
 
-		granted := missingPrivileges(targetPrivilege.Privileges, sourcePrivilege.Privileges)
+		granted := lo.Without(targetPrivilege.Privileges, sourcePrivilege.Privileges...)
 		if len(granted) > 0 {
 			additions = append(additions, targetPrivilege.GrantInstruction(granted))
 		}
 
-		revoked := missingPrivileges(sourcePrivilege.Privileges, targetPrivilege.Privileges)
+		revoked := lo.Without(sourcePrivilege.Privileges, targetPrivilege.Privileges...)
 		if len(revoked) > 0 {
 			additions = append(additions, targetPrivilege.RevokeInstruction(revoked))
 		}

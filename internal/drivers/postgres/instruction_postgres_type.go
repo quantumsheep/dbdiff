@@ -27,14 +27,25 @@ func (i *PostgresCreateEnumTypeInstruction) Comment() string {
 	return driversshared.ObjectComment("Create", "type", i.Name)
 }
 
+// If Before and After are empty, PostgreSQL adds the value at the end.
 type PostgresAlterTypeAddValueInstruction struct {
-	Name  string
-	Value string
+	Name   string
+	Value  string
+	Before string
+	After  string
 }
 
 func (i *PostgresAlterTypeAddValueInstruction) String() string {
-	return fmt.Sprintf("ALTER TYPE %s ADD VALUE %s;",
-		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteLiteral(i.Value))
+	position := ""
+
+	if i.Before != "" {
+		position = " BEFORE " + driversshared.QuoteLiteral(i.Before)
+	} else if i.After != "" {
+		position = " AFTER " + driversshared.QuoteLiteral(i.After)
+	}
+
+	return fmt.Sprintf("ALTER TYPE %s ADD VALUE %s%s;",
+		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteLiteral(i.Value), position)
 }
 
 func (i *PostgresAlterTypeAddValueInstruction) Comment() string {

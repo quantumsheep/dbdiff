@@ -28,10 +28,6 @@ func (f *PostgresFunction) CommentInstruction() *PostgresCommentOnRoutineInstruc
 	}
 }
 
-func (f *PostgresFunction) Signature() string {
-	return fmt.Sprintf("%s(%s)", f.Name, f.Arguments)
-}
-
 func (f *PostgresFunction) MatchKey() string {
 	return fmt.Sprintf("%s %s(%s)", f.Kind, f.Name, f.ArgumentTypes)
 }

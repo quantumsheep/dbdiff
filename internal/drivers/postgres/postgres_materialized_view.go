@@ -18,20 +18,6 @@ type PostgresMaterializedView struct {
 	Comment         string
 }
 
-func (v *PostgresMaterializedView) HasEqualColumns(other *PostgresMaterializedView) bool {
-	if len(v.Columns) != len(other.Columns) {
-		return false
-	}
-
-	for index, column := range v.Columns {
-		if *column != *other.Columns[index] {
-			return false
-		}
-	}
-
-	return true
-}
-
 func (v *PostgresMaterializedView) CreateInstruction() *PostgresCreateMaterializedViewInstruction {
 	return &PostgresCreateMaterializedViewInstruction{
 		Name:  v.Name,

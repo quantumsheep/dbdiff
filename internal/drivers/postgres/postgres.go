@@ -107,7 +107,7 @@ func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSour
 	// Every section comes after the sections that its objects use. Keep this order.
 	sections := []func(ctx context.Context) (*driversshared.SectionDiff, error){
 		d.DiffExtensions,
-		d.DiffTypes,
+		d.DiffEnumTypes,
 		d.DiffDomains,
 		d.DiffCompositeTypes,
 		d.DiffSequences,

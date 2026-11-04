@@ -619,13 +619,9 @@ func (t *PostgresTable) DiffRules(other *PostgresTable) []driversshared.Instruct
 }
 
 func (t *PostgresTable) RuleInstructions() []driversshared.Instruction {
-	var instructions []driversshared.Instruction
-
-	for _, rule := range t.Rules {
-		instructions = append(instructions, rule.CreateInstruction())
-	}
-
-	return instructions
+	return lo.Map(t.Rules, func(rule *PostgresRule, _ int) driversshared.Instruction {
+		return rule.CreateInstruction()
+	})
 }
 
 func diffStorageParameters(targetTable *PostgresTable, sourceTable *PostgresTable) []driversshared.Instruction {
@@ -957,7 +953,7 @@ func isTableDropped(name string, targetTables []*PostgresTable) bool {
 // relispartition separates the two. Without that test a table of INHERITS takes the
 // statement of a partition, and that statement holds no bound.
 func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*PostgresTable, error) {
-	tableRows, err := db.QueryContext(ctx, `
+	tables, err := driversshared.QueryAll(ctx, db, `
 		SELECT
 			c.relname,
 			coalesce(pg_get_partkeydef(c.oid), ''),
@@ -1001,101 +997,74 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		)
 		AND c.relname <> $1
 		ORDER BY c.relname
-	`, driversshared.MigrationHistoryTableName)
-	if err != nil {
-		return nil, err
-	}
+	`, func(rows *sql.Rows) (*PostgresTable, error) {
+		table := &PostgresTable{}
 
-	defer func() { _ = tableRows.Close() }()
+		var inherits, storageParameters string
 
-	var tables []*PostgresTable
-
-	for tableRows.Next() {
-		var tableName, partitionKey, partitionParent, partitionBound, inherits, comment string
-		var rowLevelSecurity, forceRowLevelSecurity, unlogged bool
-		var storageParameters, replicaIdentity, replicaIdentityIndex string
-
-		err := tableRows.Scan(&tableName, &partitionKey, &partitionParent, &partitionBound,
-			&inherits, &comment, &rowLevelSecurity, &forceRowLevelSecurity, &unlogged,
-			&storageParameters, &replicaIdentity, &replicaIdentityIndex)
+		err := rows.Scan(&table.Name, &table.PartitionKey, &table.PartitionParent,
+			&table.PartitionBound, &inherits, &table.Comment, &table.RowLevelSecurity,
+			&table.ForceRowLevelSecurity, &table.Unlogged, &storageParameters,
+			&table.ReplicaIdentity, &table.ReplicaIdentityIndex)
 		if err != nil {
 			return nil, err
 		}
-
-		if slices.Contains(d.IgnoreTables, tableName) {
-			continue
-		}
-
-		table, err := d.GetTable(ctx, db, tableName)
-		if err != nil {
-			return nil, err
-		}
-
-		table.PartitionKey = partitionKey
-		table.PartitionParent = partitionParent
-		table.PartitionBound = partitionBound
-		table.Comment = comment
 
 		if inherits != "" {
 			table.Inherits = strings.Split(inherits, ",")
 		}
-		table.Unlogged = unlogged
 
 		if storageParameters != "" {
 			table.StorageParameters = strings.Split(storageParameters, ",")
 		}
-		table.ReplicaIdentity = replicaIdentity
-		table.ReplicaIdentityIndex = replicaIdentityIndex
-		table.RowLevelSecurity = rowLevelSecurity
-		table.ForceRowLevelSecurity = forceRowLevelSecurity
 
-		policies, err := d.GetTablePolicies(ctx, db, tableName)
+		return table, nil
+	}, driversshared.MigrationHistoryTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	tables = slices.DeleteFunc(tables, func(table *PostgresTable) bool {
+		return slices.Contains(d.IgnoreTables, table.Name)
+	})
+
+	for _, table := range tables {
+		err = d.getTableDetails(ctx, db, table)
 		if err != nil {
 			return nil, err
 		}
-
-		table.Policies = policies
-
-		tables = append(tables, table)
-	}
-
-	err = tableRows.Err()
-	if err != nil {
-		return nil, err
 	}
 
 	return sortTablesByDependency(tables), nil
 }
 
-func (d *PostgresDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*PostgresTable, error) {
-	table := &PostgresTable{Name: tableName}
-
+func (d *PostgresDriver) getTableDetails(ctx context.Context, db *sql.DB, table *PostgresTable) error {
 	err := getTableColumns(ctx, db, table)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = getTableConstraints(ctx, db, table)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = getTableIndexes(ctx, db, table)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = getTableTriggers(ctx, db, table)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	rules, err := d.GetTableRules(ctx, db, tableName)
+	table.Rules, err = d.GetTableRules(ctx, db, table.Name)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	table.Rules = rules
+	table.Policies, err = d.GetTablePolicies(ctx, db, table.Name)
 
-	return table, nil
+	return err
 }

@@ -64,20 +64,15 @@ func (c *PostgresColumn) StatisticsInstructions(tableName string) []driversshare
 	}}
 }
 
-func (c *PostgresColumn) Copy() *PostgresColumn {
-	columnCopy := *c
-	return &columnCopy
-}
-
 func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
-	copy := c.Copy()
-	copy.Name = other.Name
+	columnCopy := *c
+	columnCopy.Name = other.Name
 
 	// A rename of the table keeps the old sequence name, and the name alone changes
 	// no behavior.
-	copy.SerialSequenceName = other.SerialSequenceName
+	columnCopy.SerialSequenceName = other.SerialSequenceName
 
-	return *copy == *other
+	return columnCopy == *other
 }
 
 func (c *PostgresColumn) Definition() string {

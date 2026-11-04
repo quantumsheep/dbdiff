@@ -32,18 +32,10 @@ type PostgresView struct {
 	Comment string
 }
 
-func (v *PostgresView) HasEqualColumns(other *PostgresView) bool {
-	if len(v.Columns) != len(other.Columns) {
-		return false
-	}
-
-	for index, column := range v.Columns {
-		if *column != *other.Columns[index] {
-			return false
-		}
-	}
-
-	return true
+func hasEqualViewColumns(first []*PostgresViewColumn, second []*PostgresViewColumn) bool {
+	return slices.EqualFunc(first, second, func(firstColumn *PostgresViewColumn, secondColumn *PostgresViewColumn) bool {
+		return *firstColumn == *secondColumn
+	})
 }
 
 func (v *PostgresView) CreateInstruction() *PostgresCreateViewInstruction {
@@ -100,12 +92,12 @@ func (r *PostgresRelation) HasEqualDefinition(other *PostgresRelation) bool {
 		return other.View != nil &&
 			r.View.Def == other.View.Def &&
 			r.View.CheckOption == other.View.CheckOption &&
-			r.View.HasEqualColumns(other.View)
+			hasEqualViewColumns(r.View.Columns, other.View.Columns)
 	}
 
 	return other.MaterializedView != nil &&
 		r.MaterializedView.Def == other.MaterializedView.Def &&
-		r.MaterializedView.HasEqualColumns(other.MaterializedView)
+		hasEqualViewColumns(r.MaterializedView.Columns, other.MaterializedView.Columns)
 }
 
 func (r *PostgresRelation) DropInstruction() driversshared.Instruction {

@@ -3331,6 +3331,40 @@ func TestPostgresDriver(t *testing.T) {
 		})
 	})
 
+	t.Run("InsertEnumValueBeforeAndBetweenExistingValues", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE people (current_mood mood);
+		`)
+		driver.ExecOnTarget(`
+			CREATE TYPE mood AS ENUM ('angry', 'sad', 'ok', 'fine', 'happy', 'joyful');
+			CREATE TABLE people (current_mood mood);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTypeAddValueInstruction{
+				Name:   "mood",
+				Value:  "angry",
+				Before: "sad",
+			},
+			&PostgresAlterTypeAddValueInstruction{
+				Name:  "mood",
+				Value: "ok",
+				After: "sad",
+			},
+			&PostgresAlterTypeAddValueInstruction{
+				Name:  "mood",
+				Value: "fine",
+				After: "ok",
+			},
+			&PostgresAlterTypeAddValueInstruction{
+				Name:  "mood",
+				Value: "joyful",
+			},
+		})
+	})
+
 	t.Run("RemoveEnumValue", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
