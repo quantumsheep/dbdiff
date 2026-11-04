@@ -15,12 +15,12 @@ func TestMigrateVerifyCommand(t *testing.T) {
 		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		up := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--target", project.DatabasePath)
+		up := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--database", project.DatabasePath)
 		require.Equal(t, 0, up.ExitCode, up.Stderr)
 
 		clitest.WriteSQLiteDatabase(t, project.DatabasePath, "CREATE TABLE audit (id INTEGER PRIMARY KEY);")
 
-		verify := clitest.Run(t, "migrate", "verify", "--config", project.ConfigPath, "--target", project.DatabasePath)
+		verify := clitest.Run(t, "migrate", "verify", "--config", project.ConfigPath, "--database", project.DatabasePath)
 		require.Equal(t, 1, verify.ExitCode)
 		require.Contains(t, verify.Stdout, `DROP TABLE "audit"`)
 	})
@@ -31,13 +31,13 @@ func TestMigrateVerifyCommand(t *testing.T) {
 		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		up := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--target", project.DatabasePath)
+		up := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--database", project.DatabasePath)
 		require.Equal(t, 0, up.ExitCode, up.Stderr)
 
 		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260810101500_early.sql",
 			"CREATE TABLE early (id INTEGER PRIMARY KEY);\n")
 
-		verify := clitest.Run(t, "migrate", "verify", "--config", project.ConfigPath, "--target", project.DatabasePath)
+		verify := clitest.Run(t, "migrate", "verify", "--config", project.ConfigPath, "--database", project.DatabasePath)
 		require.Equal(t, 0, verify.ExitCode, verify.Stderr)
 		require.Contains(t, verify.Stdout, "20260810101500_early is out of order")
 	})

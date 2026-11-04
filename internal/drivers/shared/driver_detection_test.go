@@ -83,7 +83,7 @@ func TestDetectDriver(t *testing.T) {
 
 		_, err := DetectDriver(ParseDataSource(targetPath), ParseDataSource(sourcePath))
 
-		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the source %q and the target %q. Name the driver", targetPath, sourcePath))
+		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the current schema %q and the desired schema %q. Name the driver", targetPath, sourcePath))
 	})
 
 	t.Run("TwoDirectories", func(t *testing.T) {
@@ -92,13 +92,13 @@ func TestDetectDriver(t *testing.T) {
 
 		_, err := DetectDriver(ParseDataSource(targetDirectory), ParseDataSource(sourceDirectory))
 
-		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the source %q and the target %q. Name the driver", targetDirectory, sourceDirectory))
+		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the current schema %q and the desired schema %q. Name the driver", targetDirectory, sourceDirectory))
 	})
 
 	t.Run("UnknownScheme", func(t *testing.T) {
 		_, err := DetectDriver(ParseDataSource("oracle://user@localhost/target"), ParseDataSource("oracle://user@localhost/source"))
 
-		require.EqualError(t, err, `cannot detect the driver of the source "oracle://user@localhost/target" and the target "oracle://user@localhost/source". Name the driver`)
+		require.EqualError(t, err, `cannot detect the driver of the current schema "oracle://user@localhost/target" and the desired schema "oracle://user@localhost/source". Name the driver`)
 	})
 
 	t.Run("MySQLScheme", func(t *testing.T) {
@@ -118,22 +118,22 @@ func TestDetectDriver(t *testing.T) {
 	t.Run("TwoDifferentEngines", func(t *testing.T) {
 		_, err := DetectDriver(ParseDataSource("sqlite://target.db"), ParseDataSource("postgres://user@localhost/source"))
 
-		require.EqualError(t, err, `the source "sqlite://target.db" names the sqlite3 driver and the target "postgres://user@localhost/source" names the postgres driver. Name the driver`)
+		require.EqualError(t, err, `the current schema "sqlite://target.db" names the sqlite3 driver and the desired schema "postgres://user@localhost/source" names the postgres driver. Name the driver`)
 	})
 }
 
-func TestDetectDriverOfTarget(t *testing.T) {
+func TestDetectDriverOfDatabase(t *testing.T) {
 	t.Run("ConnectionURL", func(t *testing.T) {
-		name, err := DetectDriverOfTarget(ParseDataSource("postgres://user@localhost/app"))
+		name, err := DetectDriverOfDatabase(ParseDataSource("postgres://user@localhost/app"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
-	t.Run("UnknownSchemeNamesTheTargetOneTime", func(t *testing.T) {
-		_, err := DetectDriverOfTarget(ParseDataSource("oracle://user@localhost/app"))
+	t.Run("UnknownSchemeNamesTheDatabaseOneTime", func(t *testing.T) {
+		_, err := DetectDriverOfDatabase(ParseDataSource("oracle://user@localhost/app"))
 
-		require.EqualError(t, err, `cannot detect the driver of the target "oracle://user@localhost/app". Name the driver`)
+		require.EqualError(t, err, `cannot detect the driver of the database "oracle://user@localhost/app". Name the driver`)
 	})
 }
 

@@ -22,38 +22,185 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		schemaPath := filepath.Join(directory, "schema.sql")
 
 		configPath := clitest.WriteMigrationConfig(t, directory,
-			"target: "+schemaPath+"\nsource: "+migrations+"\n")
+			"desired: "+schemaPath+"\nmigrations: "+migrations+"\n")
 
 		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, fmt.Sprintf("dbdiff: cannot detect the driver of the source %q and the target %q. Name the driver with the --driver flag\n",
+		require.Equal(t, fmt.Sprintf("dbdiff: cannot detect the driver of the current schema %q and the desired schema %q. Name the driver with the --driver flag\n",
 			migrations, schemaPath), result.Stderr)
 	})
 
-	t.Run("WithNoTarget", func(t *testing.T) {
+	t.Run("WithNoDesiredSchema", func(t *testing.T) {
 		directory := t.TempDir()
 
 		migrations := clitest.MakeMigrationsDirectory(t, directory)
 
 		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\nsource: "+migrations+"\n")
+			"driver: sqlite3\nmigrations: "+migrations+"\ndatabase: app.sqlite\n")
 
 		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: name the target with the --target flag, with the key target of dbdiff.yaml, or with the DBDIFF_TARGET variable\n", result.Stderr)
+		require.Equal(t, fmt.Sprintf("dbdiff: name the desired schema with the --desired flag, or with the key \"desired\" of %s\n", configPath), result.Stderr)
 	})
 
-	t.Run("WithNoSource", func(t *testing.T) {
+	t.Run("WithNoMigrations", func(t *testing.T) {
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
 		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\ntarget: "+filepath.Join(directory, "schema.sql")+"\n")
+			"driver: sqlite3\ndesired: "+filepath.Join(directory, "schema.sql")+"\n")
 
 		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
+		require.Equal(t, fmt.Sprintf("dbdiff: name the migration directory with the --migrations flag, or with the key \"migrations\" of %s\n", configPath), result.Stderr)
+	})
+
+	t.Run("TheDesiredFlagOverridesTheKey", func(t *testing.T) {
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		configPath := clitest.WriteMigrationConfig(t, directory,
+			"driver: sqlite3\nmigrations: "+migrations+"\ndesired: "+filepath.Join(directory, "absent.sql")+"\n")
+
+		result := clitest.Run(t, "migrate", "generate", "--config", configPath,
+			"--desired", filepath.Join(directory, "schema.sql"), "add_users")
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+		entries, err := os.ReadDir(migrations)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+	})
+
+	t.Run("TheMigrationsFlag", func(t *testing.T) {
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+
+		migrations := filepath.Join(directory, "migrations")
+
+		result := clitest.Run(t, "migrate", "generate", "--driver", "sqlite3",
+			"--config", filepath.Join(directory, "absent.yaml"),
+			"--migrations", migrations, "--desired", filepath.Join(directory, "schema.sql"), "add_users")
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, fmt.Sprintf("dbdiff: failed to read the configuration file: open %s: no such file or directory\n",
+			filepath.Join(directory, "absent.yaml")), result.Stderr)
+
+		result = clitest.Run(t, "migrate", "generate", "--driver", "sqlite3",
+			"--migrations", migrations, "--desired", filepath.Join(directory, "schema.sql"), "add_users")
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+		entries, err := os.ReadDir(migrations)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+	})
+
+	t.Run("RefusesTheDatabaseFlag", func(t *testing.T) {
+		result := clitest.Run(t, "migrate", "generate", "--database", "app.sqlite", "add_users")
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: flag provided but not defined: -database\n", result.Stderr)
+	})
+
+	t.Run("WithARemovedKey", func(t *testing.T) {
+		directory := t.TempDir()
+
+		configPath := clitest.WriteMigrationConfig(t, directory, "target: schema.sql\n")
+
+		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, fmt.Sprintf("dbdiff: failed to read the configuration file: the key \"target\" of %s no longer exists. "+
+			"Use \"database\" for the database, or \"desired\" for the wanted schema of migrate generate\n", configPath), result.Stderr)
+	})
+
+	t.Run("WithAVariableThatIsNotSet", func(t *testing.T) {
+		directory := t.TempDir()
+
+		configPath := clitest.WriteMigrationConfig(t, directory, "desired: ${DBDIFF_TEST_VARIABLE_THAT_IS_NOT_SET}\n")
+
+		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, fmt.Sprintf("dbdiff: failed to read the configuration file: the variable \"DBDIFF_TEST_VARIABLE_THAT_IS_NOT_SET\" "+
+			"of the key \"desired\" of %s is not set\n", configPath), result.Stderr)
+	})
+
+	t.Run("WithAVariableOfTheDesiredSchema", func(t *testing.T) {
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		t.Setenv("DBDIFF_TEST_DESIRED", filepath.Join(directory, "schema.sql"))
+
+		configPath := clitest.WriteMigrationConfig(t, directory,
+			"driver: sqlite3\nmigrations: "+migrations+"\ndesired: ${DBDIFF_TEST_DESIRED}\n")
+
+		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+		entries, err := os.ReadDir(migrations)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+	})
+
+	t.Run("WithTheServerVersionFlagOnTheSQLiteDriver", func(t *testing.T) {
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+
+		result := clitest.Run(t, "migrate", "generate", "--driver", "sqlite3", "--server-version", "16",
+			"--migrations", filepath.Join(directory, "migrations"), "--desired", filepath.Join(directory, "schema.sql"), "add_users")
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: use the --server-version flag and the key \"server-version\" of dbdiff.yaml only with the postgres driver and the mysql driver\n", result.Stderr)
+	})
+
+	t.Run("AFlagValueStaysLiteral", func(t *testing.T) {
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+
+		migrations := filepath.Join(directory, "${HOME}")
+
+		result := clitest.Run(t, "migrate", "generate", "--driver", "sqlite3",
+			"--config", clitest.WriteMigrationConfig(t, directory, ""),
+			"--migrations", migrations, "--desired", filepath.Join(directory, "schema.sql"), "add_users")
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+		entries, err := os.ReadDir(migrations)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+	})
+
+	t.Run("WithTheServerVersionFlagOnThePostgresDriver", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("the temporary postgres server needs a download on the first run")
+		}
+
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "schema.sql", `
+			DO $$ BEGIN
+				IF current_setting('server_version_num')::int / 10000 <> 17 THEN
+					RAISE EXCEPTION 'the server version is %', current_setting('server_version');
+				END IF;
+			END $$;
+			CREATE TABLE users (id INT NOT NULL);
+		`)
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		configPath := clitest.WriteMigrationConfig(t, directory,
+			"driver: postgres\nmigrations: "+migrations+"\ndesired: "+filepath.Join(directory, "schema.sql")+"\n")
+
+		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "--server-version", "17.6.0", "add_users")
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+		entries, err := os.ReadDir(migrations)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
 	})
 
 	t.Run("RefusesAnEmptyMigration", func(t *testing.T) {
@@ -68,12 +215,12 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql", schema)
 
 		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\ntarget: "+filepath.Join(directory, "schema.sql")+
-				"\nsource: "+migrations+"\n")
+			"driver: sqlite3\ndesired: "+filepath.Join(directory, "schema.sql")+
+				"\nmigrations: "+migrations+"\n")
 
 		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: the migrations hold the schema of the target already, so dbdiff wrote no file\n", result.Stderr)
+		require.Equal(t, "dbdiff: the migrations hold the desired schema already, so dbdiff wrote no file\n", result.Stderr)
 
 		entries, err := os.ReadDir(migrations)
 		require.NoError(t, err)
@@ -92,12 +239,12 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql", schema)
 
 		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\ntarget: "+filepath.Join(directory, "schema.sql")+
-				"\nsource: "+migrations+"\nignore:\n  tables:\n    - example\n")
+			"driver: sqlite3\ndesired: "+filepath.Join(directory, "schema.sql")+
+				"\nmigrations: "+migrations+"\nignore-table:\n  - example\n")
 
 		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_example")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: the migrations hold the schema of the target already, so dbdiff wrote no file\n", result.Stderr)
+		require.Equal(t, "dbdiff: the migrations hold the desired schema already, so dbdiff wrote no file\n", result.Stderr)
 	})
 
 	t.Run("BuildsTheMigrationsDirectory", func(t *testing.T) {
@@ -108,8 +255,8 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		migrations := filepath.Join(directory, "migrations")
 
 		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\ntarget: "+filepath.Join(directory, "schema.sql")+
-				"\nsource: "+migrations+"\n")
+			"driver: sqlite3\ndesired: "+filepath.Join(directory, "schema.sql")+
+				"\nmigrations: "+migrations+"\n")
 
 		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "add_users")
 		require.Equal(t, 0, result.ExitCode, result.Stderr)

@@ -1,6 +1,7 @@
 package cmdmigrate_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -18,9 +19,9 @@ func TestMigrateRepairCommand(t *testing.T) {
 
 		configPath := clitest.WriteMigrationConfig(t, directory, "driver: sqlite3\n")
 
-		result := clitest.Run(t, "migrate", "repair", "--config", configPath, "--target", databasePath)
+		result := clitest.Run(t, "migrate", "repair", "--config", configPath, "--database", databasePath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
+		require.Equal(t, fmt.Sprintf("dbdiff: name the migration directory with the --migrations flag, or with the key \"migrations\" of %s\n", configPath), result.Stderr)
 	})
 
 	t.Run("ACleanRecordNeedsNoRepair", func(t *testing.T) {
@@ -29,10 +30,10 @@ func TestMigrateRepairCommand(t *testing.T) {
 		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		result := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--target", project.DatabasePath)
+		result := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--database", project.DatabasePath)
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
 
-		result = clitest.Run(t, "migrate", "repair", "--config", project.ConfigPath, "--target", project.DatabasePath)
+		result = clitest.Run(t, "migrate", "repair", "--config", project.ConfigPath, "--database", project.DatabasePath)
 		require.Equal(t, 0, result.ExitCode, result.Stderr)
 		require.Contains(t, result.Stdout, "The record needs no repair.")
 	})

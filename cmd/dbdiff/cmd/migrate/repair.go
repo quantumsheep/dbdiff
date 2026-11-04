@@ -14,7 +14,7 @@ func repairCommand() *cli.Command {
 		Usage: "Make the history table agree with the migration files",
 		Description: "Update the checksum of a changed row, and delete a missing row and a dirty row. " +
 			"A dirty row names a half-applied file. Repair the database before you delete that row",
-		Flags:        migrationFlags(databaseTargetUsage),
+		Flags:        databaseMigrationFlags(),
 		OnUsageError: helpers.OnUsageError,
 		Action:       withRunner(repairAction),
 	}

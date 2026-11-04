@@ -94,12 +94,12 @@ func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSour
 
 	d.recreatedObjectNames = nil
 
-	err = d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "target")
+	err = d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "desired")
 	if err != nil {
 		return nil, err
 	}
 
-	err = d.VerifySchema(ctx, d.SourceDatabaseConnection, d.SourceSchema, "source")
+	err = d.VerifySchema(ctx, d.SourceDatabaseConnection, d.SourceSchema, "current")
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (d *PostgresDriver) openSides(ctx context.Context, source driversshared.Dat
 	target driversshared.DataSource) (func(), error) {
 	d.ScratchVersion = d.scratchVersionOfSources(ctx, source, target)
 
-	targetDatabaseConnection, err := d.OpenSide(ctx, target, d.TargetSchema, "target")
+	targetDatabaseConnection, err := d.OpenSide(ctx, target, d.TargetSchema, "desired")
 	if err != nil {
 		_ = d.StopScratchServer()
 		return nil, err
@@ -172,7 +172,7 @@ func (d *PostgresDriver) openSides(ctx context.Context, source driversshared.Dat
 
 	d.TargetDatabaseConnection = targetDatabaseConnection
 
-	sourceDatabaseConnection, err := d.OpenSide(ctx, source, d.SourceSchema, "source")
+	sourceDatabaseConnection, err := d.OpenSide(ctx, source, d.SourceSchema, "current")
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
 		_ = d.StopScratchServer()

@@ -83,7 +83,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 	target driversshared.DataSource) (func(), error) {
 	d.detailsByConnection = make(map[*sql.DB]*mysqlConnectionDetails)
 
-	targetDatabaseConnection, err := d.OpenSide(ctx, target, source, "target")
+	targetDatabaseConnection, err := d.OpenSide(ctx, target, source, "desired")
 	if err != nil {
 		_ = d.releaseScratchResources(ctx)
 		return nil, err
@@ -99,7 +99,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 		return nil, err
 	}
 
-	sourceDatabaseConnection, err := d.OpenSide(ctx, source, target, "source")
+	sourceDatabaseConnection, err := d.OpenSide(ctx, source, target, "current")
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
 		_ = d.releaseScratchResources(ctx)

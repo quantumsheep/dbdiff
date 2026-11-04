@@ -79,7 +79,7 @@ func (d *SQLiteDriver) Diff(ctx context.Context, source driversshared.DataSource
 
 func (d *SQLiteDriver) openSides(ctx context.Context, source driversshared.DataSource,
 	target driversshared.DataSource) (func(), error) {
-	targetDatabaseConnection, err := d.OpenSide(ctx, target, "target")
+	targetDatabaseConnection, err := d.OpenSide(ctx, target, "desired")
 	if err != nil {
 		_ = d.RemoveTemporaryDirectory()
 
@@ -88,7 +88,7 @@ func (d *SQLiteDriver) openSides(ctx context.Context, source driversshared.DataS
 
 	d.TargetDatabaseConnection = targetDatabaseConnection
 
-	sourceDatabaseConnection, err := d.OpenSide(ctx, source, "source")
+	sourceDatabaseConnection, err := d.OpenSide(ctx, source, "current")
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
 		_ = d.RemoveTemporaryDirectory()

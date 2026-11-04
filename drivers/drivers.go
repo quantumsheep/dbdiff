@@ -54,42 +54,42 @@ func NewConnectionStringDataSource(connectionString string) ConnectionStringData
 	}
 }
 
-// DetectDriver names the engine of two data sources. A SQL source gives no engine, so
-// the other side decides.
-func DetectDriver(source DataSource, target DataSource) (DriverName, error) {
-	return driversshared.DetectDriver(source, target)
+// DetectDriver names the engine of the two sides of a diff. A SQL data source gives no
+// engine, so the other side decides.
+func DetectDriver(current DataSource, desired DataSource) (DriverName, error) {
+	return driversshared.DetectDriver(current, desired)
 }
 
 type driverOptions struct {
-	version      string
-	postgres     *PostgreSQLDriverConfig
-	mysql        *MySQLDriverConfig
-	ignoreTables []string
+	serverVersion string
+	postgres      *PostgreSQLDriverConfig
+	mysql         *MySQLDriverConfig
+	ignoreTables  []string
 }
 
 // Option configures NewDriver.
 type Option func(*driverOptions)
 
-// WithVersion names the version of the engine. Today only the PostgreSQL scratch server
-// reads it.
-func WithVersion(version string) Option {
-	return func(target *driverOptions) {
-		target.version = version
+// WithServerVersion names the version of the temporary server that runs a SQL data
+// source. Only the postgres driver and the mysql driver accept this option.
+func WithServerVersion(serverVersion string) Option {
+	return func(merged *driverOptions) {
+		merged.serverVersion = serverVersion
 	}
 }
 
 // PostgreSQLDriverConfig holds the options of the postgres driver.
 type PostgreSQLDriverConfig struct {
-	// Schema names the schema on both sides. Without it the search path of the
-	// connection string applies.
+	// Schema names the PostgreSQL schema on both sides. Without it, the search path of
+	// the connection string applies.
 	Schema string
 
 	ComparePrivileges bool
 }
 
 func WithPostgreSQLDriverConfig(config PostgreSQLDriverConfig) Option {
-	return func(target *driverOptions) {
-		target.postgres = &config
+	return func(merged *driverOptions) {
+		merged.postgres = &config
 	}
 }
 
@@ -99,15 +99,15 @@ type MySQLDriverConfig struct {
 }
 
 func WithMySQLDriverConfig(config MySQLDriverConfig) Option {
-	return func(target *driverOptions) {
-		target.mysql = &config
+	return func(merged *driverOptions) {
+		merged.mysql = &config
 	}
 }
 
 // WithIgnoreTables names the tables that the diff ignores.
 func WithIgnoreTables(tables ...string) Option {
-	return func(target *driverOptions) {
-		target.ignoreTables = append(target.ignoreTables, tables...)
+	return func(merged *driverOptions) {
+		merged.ignoreTables = append(merged.ignoreTables, tables...)
 	}
 }
 
@@ -134,8 +134,8 @@ func NewDriver(name DriverName, options ...Option) (*Driver, error) {
 	}
 
 	internalOptions := internaldrivers.DriverOptions{
-		Version:      merged.version,
-		IgnoreTables: merged.ignoreTables,
+		ServerVersion: merged.serverVersion,
+		IgnoreTables:  merged.ignoreTables,
 	}
 
 	if merged.postgres != nil {
@@ -174,8 +174,8 @@ type DiffOption func(*diffOptions)
 
 // WithData adds the comparison of the rows.
 func WithData() DiffOption {
-	return func(target *diffOptions) {
-		target.compareData = true
+	return func(merged *diffOptions) {
+		merged.compareData = true
 	}
 }
 
@@ -203,9 +203,9 @@ func (statements Statements) String() string {
 	return strings.Join(texts, "\n")
 }
 
-// Diff reads the schema of the source and of the target, and it gives the statements
-// that change the source.
-func (d *Driver) Diff(ctx context.Context, source DataSource, target DataSource,
+// Diff reads the current schema and the desired schema, and it gives the statements
+// that make the current schema equal to the desired schema.
+func (d *Driver) Diff(ctx context.Context, current DataSource, desired DataSource,
 	options ...DiffOption) (Statements, error) {
 	merged := &diffOptions{}
 
@@ -213,7 +213,7 @@ func (d *Driver) Diff(ctx context.Context, source DataSource, target DataSource,
 		option(merged)
 	}
 
-	instructions, err := d.inner.Diff(ctx, source, target, driversshared.DiffOptions{
+	instructions, err := d.inner.Diff(ctx, current, desired, driversshared.DiffOptions{
 		CompareData: merged.compareData,
 	})
 	if err != nil {

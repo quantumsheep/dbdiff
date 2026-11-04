@@ -12,7 +12,7 @@ func statusCommand() *cli.Command {
 	return &cli.Command{
 		Name:         "status",
 		Usage:        "List each migration and its state",
-		Flags:        migrationFlags(databaseTargetUsage),
+		Flags:        databaseMigrationFlags(),
 		OnUsageError: helpers.OnUsageError,
 		Action:       withRunner(statusAction),
 	}

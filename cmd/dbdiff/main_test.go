@@ -89,15 +89,29 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Equal(t, "No help topic for 'current.sqlite'\n", result.Stderr)
 	})
 
-	t.Run("MissingSourceArgument", func(t *testing.T) {
+	t.Run("MissingCurrentArgument", func(t *testing.T) {
 		result := clitest.Run(t, "diff")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: source database URL is required\n", result.Stderr)
+		require.Equal(t, "dbdiff: give the current schema as the first argument\n", result.Stderr)
+	})
+
+	t.Run("MissingDesiredArgument", func(t *testing.T) {
+		result := clitest.Run(t, "diff", "current.sqlite")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: give the desired schema as the second argument\n", result.Stderr)
+	})
+
+	t.Run("ServerVersionFlagWithSQLiteDriver", func(t *testing.T) {
+		result := clitest.Run(t, "diff", "--server-version", "16", "current.sqlite", "desired.sqlite")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: use the --server-version flag only with the postgres driver and the mysql driver\n", result.Stderr)
 	})
 
 	t.Run("UnsupportedDriver", func(t *testing.T) {
-		result := clitest.Run(t, "diff", "--driver", "oracle", "source.sqlite", "target.sqlite")
+		result := clitest.Run(t, "diff", "--driver", "oracle", "current.sqlite", "desired.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
 		require.Equal(t, "dbdiff: invalid value \"oracle\" for flag -driver: unsupported driver: oracle\n", result.Stderr)
@@ -111,7 +125,7 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, "diff", "--schema", "public", currentPath, finalPath)
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: the schema option applies to the postgres driver only\n", result.Stderr)
+		require.Equal(t, "dbdiff: use the --schema flag only with the postgres driver\n", result.Stderr)
 	})
 
 	t.Run("DiffTwoDatabases", func(t *testing.T) {
@@ -140,7 +154,7 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, "diff", currentPath, finalPath)
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, fmt.Sprintf("dbdiff: failed to diff databases: the target database %q does not exist\n", finalPath), result.Stderr)
+		require.Equal(t, fmt.Sprintf("dbdiff: failed to compare the schemas: the desired database %q does not exist\n", finalPath), result.Stderr)
 		require.NoFileExists(t, finalPath)
 	})
 
@@ -274,16 +288,26 @@ CREATE TABLE "posts" (
 		result := clitest.Run(t, "diff", currentPath, finalPath)
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, fmt.Sprintf("dbdiff: cannot detect the driver of the source %q and the target %q. Name the driver with the --driver flag\n", currentPath, finalPath), result.Stderr)
+		require.Equal(t, fmt.Sprintf("dbdiff: cannot detect the driver of the current schema %q and the desired schema %q. Name the driver with the --driver flag\n", currentPath, finalPath), result.Stderr)
 		require.Empty(t, result.Stdout)
 	})
 
 	t.Run("TwoDifferentEnginesWithoutDriver", func(t *testing.T) {
-		result := clitest.Run(t, "diff", "sqlite://source.db", "postgres://user@localhost/target")
+		result := clitest.Run(t, "diff", "sqlite://current.db", "postgres://user@localhost/desired")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: the source \"sqlite://source.db\" names the sqlite3 driver and the target \"postgres://user@localhost/target\" names the postgres driver. Name the driver with the --driver flag\n", result.Stderr)
+		require.Equal(t, "dbdiff: the current schema \"sqlite://current.db\" names the sqlite3 driver and the desired schema \"postgres://user@localhost/desired\" names the postgres driver. Name the driver with the --driver flag\n", result.Stderr)
 		require.Empty(t, result.Stdout)
+	})
+
+	t.Run("ServerVersionFlagWithPostgresDriver", func(t *testing.T) {
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql", "")
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "desired.sql", "SELECT 1;")
+
+		result := clitest.Run(t, "diff", "--driver", "postgres", "--server-version", "8", currentPath, desiredPath)
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: unknown postgres version \"8\"\n", result.Stderr)
 	})
 
 	t.Run("SQLFileSourceWithPostgresDriver", func(t *testing.T) {

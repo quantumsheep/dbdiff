@@ -17,8 +17,8 @@ var ErrDifferencesFound = errors.New("the schemas differ")
 func Command() *cli.Command {
 	return &cli.Command{
 		Name:         "diff",
-		Usage:        "Compare two schemas and print the statements that change the source",
-		UsageText:    "dbdiff diff [options] <source> <target>",
+		Usage:        "Print the statements that make the current schema equal to the desired schema",
+		UsageText:    "dbdiff diff [options] <current> <desired>",
 		Action:       action,
 		OnUsageError: helpers.OnUsageError,
 		Flags: []cli.Flag{
@@ -32,7 +32,7 @@ func Command() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:  "data",
-				Usage: "Compare the rows of each table that the source and the target both hold. The comparison needs a primary key",
+				Usage: "Compare the rows of each table that the current schema and the desired schema both hold. The comparison needs a primary key",
 			},
 			&cli.BoolFlag{
 				Name:  "exit-code",
@@ -41,34 +41,34 @@ func Command() *cli.Command {
 		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
-				Name:      "source",
+				Name:      "current",
 				UsageText: "The current schema, which the output changes. A connection URL, a .sql file, or a directory of .sql files",
 			},
 			&cli.StringArg{
-				Name:      "target",
-				UsageText: "The final schema, which the output builds. A connection URL, a .sql file, or a directory of .sql files",
+				Name:      "desired",
+				UsageText: "The desired schema, which the output builds. A connection URL, a .sql file, or a directory of .sql files",
 			},
 		},
 	}
 }
 
 func action(ctx context.Context, command *cli.Command) error {
-	currentSchema := command.StringArg("source")
-	if currentSchema == "" {
-		return fmt.Errorf("source database URL is required")
+	currentArgument := command.StringArg("current")
+	if currentArgument == "" {
+		return fmt.Errorf("give the current schema as the first argument")
 	}
 
-	finalSchema := command.StringArg("target")
-	if finalSchema == "" {
-		return fmt.Errorf("target database URL is required")
+	desiredArgument := command.StringArg("desired")
+	if desiredArgument == "" {
+		return fmt.Errorf("give the desired schema as the second argument")
 	}
 
-	source := driversshared.ParseDataSource(currentSchema)
-	target := driversshared.ParseDataSource(finalSchema)
+	current := driversshared.ParseDataSource(currentArgument)
+	desired := driversshared.ParseDataSource(desiredArgument)
 
 	driverName := driversshared.DriverName(command.String("driver"))
 	if driverName == "" {
-		detected, err := helpers.DetectDriverName(source, target)
+		detected, err := helpers.DetectDriverName(current, desired)
 		if err != nil {
 			return err
 		}
@@ -76,7 +76,13 @@ func action(ctx context.Context, command *cli.Command) error {
 		driverName = detected
 	}
 
+	err := helpers.CheckDriverSettings(driverName, command.String("schema"), command.String("server-version"), "")
+	if err != nil {
+		return err
+	}
+
 	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
+		ServerVersion:     command.String("server-version"),
 		Schema:            command.String("schema"),
 		ComparePrivileges: command.Bool("privileges"),
 		IgnoreTables:      command.StringSlice("ignore-table"),
@@ -85,11 +91,11 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	instructions, err := driver.Diff(ctx, source, target, driversshared.DiffOptions{
+	instructions, err := driver.Diff(ctx, current, desired, driversshared.DiffOptions{
 		CompareData: command.Bool("data"),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to diff databases: %w", err)
+		return fmt.Errorf("failed to compare the schemas: %w", err)
 	}
 
 	if command.Bool("comments") {

@@ -35,10 +35,10 @@ func TestMigrations(t *testing.T) {
 			"ALTER TABLE users ADD COLUMN created_at TEXT;\n")
 
 		migrator := newSQLiteMigrator(t,
-			migrations.WithTargetDataSource(
+			migrations.WithDatabase(
 				dbdiffdrivers.NewConnectionStringDataSource(filepath.Join(t.TempDir(), "app.sqlite")),
 			),
-			migrations.WithMigrationDirectory(directory),
+			migrations.WithMigrations(directory),
 		)
 
 		err := migrator.Up(t.Context())
@@ -65,10 +65,10 @@ func TestMigrations(t *testing.T) {
 			"ALTER TABLE users ADD COLUMN created_at TEXT;\n")
 
 		migrator := newSQLiteMigrator(t,
-			migrations.WithTargetDataSource(
+			migrations.WithDatabase(
 				dbdiffdrivers.NewConnectionStringDataSource(filepath.Join(t.TempDir(), "app.sqlite")),
 			),
-			migrations.WithMigrationDirectory(directory),
+			migrations.WithMigrations(directory),
 		)
 
 		err := migrator.Up(t.Context(), migrations.WithToVersion("20260814101500"))
@@ -83,19 +83,19 @@ func TestMigrations(t *testing.T) {
 
 	t.Run("UpRefusesAMissingOption", func(t *testing.T) {
 		migrator := newSQLiteMigrator(t,
-			migrations.WithMigrationDirectory(t.TempDir()),
+			migrations.WithMigrations(t.TempDir()),
 		)
 
 		err := migrator.Up(t.Context())
-		require.ErrorContains(t, err, "WithTargetDataSource")
+		require.EqualError(t, err, "name the database with the WithDatabase option")
 
 		migrator = newSQLiteMigrator(t,
-			migrations.WithTargetDataSource(
+			migrations.WithDatabase(
 				dbdiffdrivers.NewConnectionStringDataSource(filepath.Join(t.TempDir(), "app.sqlite")),
 			),
 		)
 
 		err = migrator.Up(t.Context())
-		require.ErrorContains(t, err, "WithMigrationDirectory")
+		require.EqualError(t, err, "name the migration directory with the WithMigrations option")
 	})
 }

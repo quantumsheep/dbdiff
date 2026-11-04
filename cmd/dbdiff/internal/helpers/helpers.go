@@ -31,15 +31,15 @@ func OnUsageError(ctx context.Context, command *cli.Command, err error, isSubcom
 
 // DetectDriverName names the engine of two data sources. The error of the detection
 // names no CLI flag, so this wrap names the flag that gives the driver.
-func DetectDriverName(source driversshared.DataSource, target driversshared.DataSource) (driversshared.DriverName, error) {
-	driverName, err := driversshared.DetectDriver(source, target)
+func DetectDriverName(current driversshared.DataSource, desired driversshared.DataSource) (driversshared.DriverName, error) {
+	driverName, err := driversshared.DetectDriver(current, desired)
 
 	return driverName, nameTheDriverFlag(err)
 }
 
-// DetectDriverNameOfTarget names the engine of the target of a migration.
-func DetectDriverNameOfTarget(target driversshared.DataSource) (driversshared.DriverName, error) {
-	driverName, err := driversshared.DetectDriverOfTarget(target)
+// DetectDriverNameOfDatabase names the engine of the database of a migration.
+func DetectDriverNameOfDatabase(database driversshared.DataSource) (driversshared.DriverName, error) {
+	driverName, err := driversshared.DetectDriverOfDatabase(database)
 
 	return driverName, nameTheDriverFlag(err)
 }
@@ -50,4 +50,26 @@ func nameTheDriverFlag(err error) error {
 	}
 
 	return fmt.Errorf("%w with the --driver flag", err)
+}
+
+// CheckDriverSettings refuses a setting that the driver does not read. An empty
+// configPath names only the flag, because the diff command reads no configuration file.
+func CheckDriverSettings(driverName driversshared.DriverName, schema string, serverVersion string, configPath string) error {
+	if schema != "" && driverName != driversshared.PostgresDriverName {
+		return fmt.Errorf("use %s only with the postgres driver", settingName("schema", configPath))
+	}
+
+	if serverVersion != "" && driverName == driversshared.SQLiteDriverName {
+		return fmt.Errorf("use %s only with the postgres driver and the mysql driver", settingName("server-version", configPath))
+	}
+
+	return nil
+}
+
+func settingName(name string, configPath string) string {
+	if configPath == "" {
+		return fmt.Sprintf("the --%s flag", name)
+	}
+
+	return fmt.Sprintf("the --%s flag and the key %q of %s", name, name, configPath)
 }

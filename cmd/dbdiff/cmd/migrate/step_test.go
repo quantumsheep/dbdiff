@@ -1,6 +1,7 @@
 package cmdmigrate_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -18,9 +19,9 @@ func TestMigrateStepCommand(t *testing.T) {
 
 		configPath := clitest.WriteMigrationConfig(t, directory, "driver: sqlite3\n")
 
-		result := clitest.Run(t, "migrate", "step", "--config", configPath, "--target", databasePath)
+		result := clitest.Run(t, "migrate", "step", "--config", configPath, "--database", databasePath)
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: name the source with the --source flag, or with the key source of dbdiff.yaml\n", result.Stderr)
+		require.Equal(t, fmt.Sprintf("dbdiff: name the migration directory with the --migrations flag, or with the key \"migrations\" of %s\n", configPath), result.Stderr)
 	})
 
 	t.Run("WithoutATerminal", func(t *testing.T) {
@@ -29,7 +30,7 @@ func TestMigrateStepCommand(t *testing.T) {
 		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		result := clitest.Run(t, "migrate", "step", "--config", project.ConfigPath, "--target", project.DatabasePath)
+		result := clitest.Run(t, "migrate", "step", "--config", project.ConfigPath, "--database", project.DatabasePath)
 		require.Equal(t, 1, result.ExitCode)
 		require.Equal(t, "dbdiff: step needs a terminal. Use the command up to apply a migration with no prompt\n", result.Stderr)
 	})

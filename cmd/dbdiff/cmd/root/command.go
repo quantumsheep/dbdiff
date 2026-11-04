@@ -20,14 +20,14 @@ func Command() *cli.Command {
 		Version:      helpers.Version(),
 		Usage:        "Compare database schemas and generate migration scripts",
 		Description:  "Compare database schemas and generate migration scripts",
-		UsageText:    "dbdiff <command> [options] <source> <target>",
+		UsageText:    "dbdiff <command> [options]",
 		OnUsageError: helpers.OnUsageError,
 		// The default handler calls os.Exit inside Run. ExitCode handles the error instead.
 		ExitErrHandler: func(ctx context.Context, command *cli.Command, err error) {},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "driver",
-				Usage: "Database driver to use. Supported drivers: sqlite3, postgres, mysql. The default is the driver of the source and the target",
+				Usage: "Database driver to use. Supported drivers: sqlite3, postgres, mysql. The default is the driver that dbdiff detects from the connection URLs",
 				// An empty value starts the detection of DetectDriver.
 				Validator: func(s string) error {
 					if s == "" || slices.Contains(driversshared.SupportedDriverNames, driversshared.DriverName(s)) {
@@ -40,6 +40,10 @@ func Command() *cli.Command {
 			&cli.StringFlag{
 				Name:  "schema",
 				Usage: "Name of the schema. The postgres driver accepts this flag. The default is the schema of the search path",
+			},
+			&cli.StringFlag{
+				Name:  "server-version",
+				Usage: "Version of the temporary server that runs the SQL files. The postgres driver and the mysql driver accept this flag",
 			},
 			&cli.StringSliceFlag{
 				Name:  "ignore-table",

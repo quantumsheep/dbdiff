@@ -1,6 +1,6 @@
 # dbdiff - Agent Context
 
-dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the source schema equal to the target schema. dbdiff supports SQLite, PostgreSQL, MySQL, and MariaDB. Each side is a database, a `.sql` file, or a directory of `.sql` files.
+dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the source schema equal to the target schema. dbdiff supports SQLite, PostgreSQL, MySQL, and MariaDB. Each side is a database, a `.sql` file, or a directory of `.sql` files. The CLI and the public packages call the two sides current and desired. The engine code still calls them source and target.
 
 This file gives the principles. The code holds the details. Before you change a part of the code, read the files near it and copy their patterns. The code comments hold the engine rules and the order constraints.
 

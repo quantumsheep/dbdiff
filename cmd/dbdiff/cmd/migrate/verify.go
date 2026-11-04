@@ -14,19 +14,19 @@ func verifyCommand() *cli.Command {
 	return &cli.Command{
 		Name:         "verify",
 		Usage:        "Compare the database against the replay of the applied migrations",
-		Flags:        migrationFlags(databaseTargetUsage),
+		Flags:        databaseMigrationFlags(),
 		OnUsageError: helpers.OnUsageError,
 		Action:       withRunner(verifyAction),
 	}
 }
 
 func verifyAction(ctx context.Context, command *cli.Command, config *internalmigrations.Config, runner *internalmigrations.Runner) error {
-	source := driversshared.ParseDataSource(config.Target)
+	database := driversshared.ParseDataSource(config.Database)
 
 	return runner.Verify(ctx, func(ctx context.Context, replay driversshared.DataSource) (driversshared.Instructions, error) {
 		driverName := config.Driver
 		if driverName == "" {
-			detected, err := helpers.DetectDriverName(source, replay)
+			detected, err := helpers.DetectDriverName(database, replay)
 			if err != nil {
 				return nil, err
 			}
@@ -35,14 +35,14 @@ func verifyAction(ctx context.Context, command *cli.Command, config *internalmig
 		}
 
 		driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
-			Version:      config.Version,
-			Schema:       config.Schema,
-			IgnoreTables: config.Ignore.Tables,
+			ServerVersion: config.ServerVersion,
+			Schema:        config.Schema,
+			IgnoreTables:  config.IgnoreTables,
 		})
 		if err != nil {
 			return nil, err
 		}
 
-		return driver.Diff(ctx, source, replay, driversshared.DiffOptions{})
+		return driver.Diff(ctx, database, replay, driversshared.DiffOptions{})
 	})
 }

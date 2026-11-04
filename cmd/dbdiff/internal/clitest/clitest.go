@@ -56,7 +56,7 @@ func NewMigrationProject(tb testing.TB, databaseStatements string) MigrationProj
 	databasePath := filepath.Join(directory, "app.sqlite")
 	WriteSQLiteDatabase(tb, databasePath, databaseStatements)
 
-	configPath := WriteMigrationConfig(tb, directory, "driver: sqlite3\nsource: "+migrationsDirectory+"\n")
+	configPath := WriteMigrationConfig(tb, directory, "driver: sqlite3\nmigrations: "+migrationsDirectory+"\n")
 
 	return MigrationProject{
 		MigrationsDirectory: migrationsDirectory,

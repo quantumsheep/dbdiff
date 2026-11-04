@@ -12,7 +12,7 @@ func upCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "up",
 		Usage: "Apply every pending migration",
-		Flags: migrationFlags(databaseTargetUsage,
+		Flags: databaseMigrationFlags(
 			&cli.StringFlag{
 				Name:  "to",
 				Usage: "Version of the last migration to apply, for example 20260822143000. The default applies every pending migration",

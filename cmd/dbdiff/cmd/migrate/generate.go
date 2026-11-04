@@ -15,10 +15,15 @@ import (
 
 func generateCommand() *cli.Command {
 	return &cli.Command{
-		Name:         "generate",
-		Usage:        "Write the next migration file",
-		UsageText:    "dbdiff migrate generate [options] <name>",
-		Flags:        migrationFlags("The wanted schema. A .sql file, a directory of .sql files, or a connection URL. The default is the DBDIFF_TARGET variable"),
+		Name:      "generate",
+		Usage:     "Write the next migration file",
+		UsageText: "dbdiff migrate generate [options] <name>",
+		Flags: migrationFlags(
+			&cli.StringFlag{
+				Name:  "desired",
+				Usage: "The desired schema. A .sql file, a directory of .sql files, or a connection URL",
+			},
+		),
 		OnUsageError: helpers.OnUsageError,
 		Arguments: []cli.Argument{
 			&cli.StringArg{
@@ -31,7 +36,7 @@ func generateCommand() *cli.Command {
 }
 
 func generateAction(ctx context.Context, command *cli.Command) error {
-	config, err := migrationConfigFromCommand(command)
+	config, path, err := migrationConfigFromCommand(command, "desired")
 	if err != nil {
 		return err
 	}
@@ -46,17 +51,17 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 		return fmt.Errorf("the name of a migration holds no letter and no digit")
 	}
 
-	err = os.MkdirAll(config.Source, 0o750)
+	err = os.MkdirAll(config.Migrations, 0o750)
 	if err != nil {
 		return err
 	}
 
-	source := driversshared.ParseDataSource(config.Source)
-	target := driversshared.ParseDataSource(config.Target)
+	current := driversshared.ParseDataSource(config.Migrations)
+	desired := driversshared.ParseDataSource(config.Desired)
 
 	driverName := config.Driver
 	if driverName == "" {
-		detected, err := helpers.DetectDriverName(source, target)
+		detected, err := helpers.DetectDriverName(current, desired)
 		if err != nil {
 			return err
 		}
@@ -64,28 +69,33 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 		driverName = detected
 	}
 
+	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, path)
+	if err != nil {
+		return err
+	}
+
 	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
-		Version:      config.Version,
-		Schema:       config.Schema,
-		IgnoreTables: config.Ignore.Tables,
+		ServerVersion: config.ServerVersion,
+		Schema:        config.Schema,
+		IgnoreTables:  config.IgnoreTables,
 	})
 	if err != nil {
 		return err
 	}
 
-	instructions, err := driver.Diff(ctx, source, target, driversshared.DiffOptions{})
+	instructions, err := driver.Diff(ctx, current, desired, driversshared.DiffOptions{})
 	if err != nil {
 		return err
 	}
 
-	paths, err := internalmigrations.WriteFiles(config.Source, slug,
+	paths, err := internalmigrations.WriteFiles(config.Migrations, slug,
 		time.Now(), helpers.Version(), instructions)
 	if err != nil {
 		return err
 	}
 
 	if len(paths) == 0 {
-		return fmt.Errorf("the migrations hold the schema of the target already, so dbdiff wrote no file")
+		return fmt.Errorf("the migrations hold the desired schema already, so dbdiff wrote no file")
 	}
 
 	for _, path := range paths {

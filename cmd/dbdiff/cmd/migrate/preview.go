@@ -12,7 +12,7 @@ func previewCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "preview",
 		Usage: "Print the statements of the pending migrations",
-		Flags: migrationFlags(databaseTargetUsage,
+		Flags: databaseMigrationFlags(
 			&cli.BoolFlag{
 				Name:  "run",
 				Usage: "Apply the statements of every pending file in one transaction, and roll that transaction back",

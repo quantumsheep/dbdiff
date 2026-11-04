@@ -1,6 +1,7 @@
 package internalmigrations
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,20 +113,108 @@ func TestMigrationIdentity(t *testing.T) {
 }
 
 func TestConfig(t *testing.T) {
-	t.Run("ReadEveryKey", func(t *testing.T) {
-		directory := t.TempDir()
+	writeConfig := func(t *testing.T, content string) string {
+		t.Helper()
 
-		path := filepath.Join(directory, "dbdiff.yaml")
-		err := os.WriteFile(path, []byte("driver: postgres\ntarget: schema.sql\nsource: ./migrations\nschema: public\nignore:\n  tables:\n    - example\n"), 0o600)
+		path := filepath.Join(t.TempDir(), "dbdiff.yaml")
+
+		err := os.WriteFile(path, []byte(content), 0o600)
 		require.NoError(t, err)
+
+		return path
+	}
+
+	t.Run("ReadEveryKey", func(t *testing.T) {
+		path := writeConfig(t, "driver: postgres\nmigrations: ./migrations\ndatabase: postgres://localhost/app\n"+
+			"desired: schema.sql\nschema: public\nserver-version: 17.11.0\nignore-table:\n  - example\n")
 
 		config, err := ReadConfig(path, false)
 		require.NoError(t, err)
-		require.Equal(t, driversshared.PostgresDriverName, config.Driver)
-		require.Equal(t, "schema.sql", config.Target)
-		require.Equal(t, "./migrations", config.Source)
-		require.Equal(t, "public", config.Schema)
-		require.Equal(t, []string{"example"}, config.Ignore.Tables)
+		require.Equal(t, &Config{
+			Driver:        driversshared.PostgresDriverName,
+			Migrations:    "./migrations",
+			Database:      "postgres://localhost/app",
+			Desired:       "schema.sql",
+			Schema:        "public",
+			ServerVersion: "17.11.0",
+			IgnoreTables:  []string{"example"},
+		}, config)
+	})
+
+	t.Run("ExpandsAVariable", func(t *testing.T) {
+		t.Setenv("DBDIFF_TEST_DATABASE_URL", "postgres://user:pa$word@localhost/app")
+		t.Setenv("DBDIFF_TEST_TABLE", "example")
+
+		path := writeConfig(t, "database: ${DBDIFF_TEST_DATABASE_URL}\nschema: $DBDIFF_TEST_TABLE\n"+
+			"ignore-table:\n  - ${DBDIFF_TEST_TABLE}_audit\n")
+
+		config, err := ReadConfig(path, false)
+		require.NoError(t, err)
+		require.Equal(t, &Config{
+			Database:     "postgres://user:pa$word@localhost/app",
+			Schema:       "$DBDIFF_TEST_TABLE",
+			IgnoreTables: []string{"example_audit"},
+		}, config)
+	})
+
+	t.Run("AVariableThatIsNotSet", func(t *testing.T) {
+		path := writeConfig(t, "migrations: ./migrations\ndatabase: ${DBDIFF_TEST_VARIABLE_THAT_IS_NOT_SET}\n")
+
+		_, err := ReadConfig(path, false)
+		require.EqualError(t, err, fmt.Sprintf(`the variable "DBDIFF_TEST_VARIABLE_THAT_IS_NOT_SET" of the key "database" of %s is not set`, path))
+	})
+
+	t.Run("AVariableThatIsNotSetInTheList", func(t *testing.T) {
+		path := writeConfig(t, "ignore-table:\n  - ${DBDIFF_TEST_VARIABLE_THAT_IS_NOT_SET}\n")
+
+		_, err := ReadConfig(path, false)
+		require.EqualError(t, err, fmt.Sprintf(`the variable "DBDIFF_TEST_VARIABLE_THAT_IS_NOT_SET" of the key "ignore-table" of %s is not set`, path))
+	})
+
+	t.Run("ARemovedKey", func(t *testing.T) {
+		messages := map[string]string{
+			"source: ./migrations\n":   `the key "source" of %s no longer exists. Use "migrations" for the migration directory`,
+			"target: schema.sql\n":     `the key "target" of %s no longer exists. Use "database" for the database, or "desired" for the wanted schema of migrate generate`,
+			"version: 17.11.0\n":       `the key "version" of %s no longer exists. Use "server-version" for the version of the temporary server`,
+			"ignore:\n  tables: [a]\n": `the key "ignore" of %s no longer exists. Use "ignore-table" with a list of table names`,
+		}
+
+		for content, message := range messages {
+			path := writeConfig(t, content)
+
+			_, err := ReadConfig(path, false)
+			require.EqualError(t, err, fmt.Sprintf(message, path))
+		}
+	})
+
+	t.Run("ARemovedKeyOfAnotherFile", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ci.yaml")
+
+		err := os.WriteFile(path, []byte("target: schema.sql\n"), 0o600)
+		require.NoError(t, err)
+
+		_, err = ReadConfig(path, false)
+		require.EqualError(t, err, fmt.Sprintf(`the key "target" of %s no longer exists. `+
+			`Use "database" for the database, or "desired" for the wanted schema of migrate generate`, path))
+	})
+
+	t.Run("AFileThatHoldsNoMapping", func(t *testing.T) {
+		path := writeConfig(t, "- driver: sqlite3\n")
+
+		_, err := ReadConfig(path, false)
+		require.EqualError(t, err, fmt.Sprintf("the configuration file %s must hold a mapping of keys", path))
+	})
+
+	t.Run("AnEmptyFile", func(t *testing.T) {
+		config, err := ReadConfig(writeConfig(t, ""), false)
+		require.NoError(t, err)
+		require.Equal(t, &Config{}, config)
+	})
+
+	t.Run("AFileThatHoldsOnlyAComment", func(t *testing.T) {
+		config, err := ReadConfig(writeConfig(t, "# no key\n"), false)
+		require.NoError(t, err)
+		require.Equal(t, &Config{}, config)
 	})
 
 	t.Run("AnOptionalFileThatIsAbsent", func(t *testing.T) {
@@ -155,14 +244,8 @@ func TestConfig(t *testing.T) {
 	})
 
 	t.Run("AnUnknownKey", func(t *testing.T) {
-		directory := t.TempDir()
-
-		path := filepath.Join(directory, "dbdiff.yaml")
-		err := os.WriteFile(path, []byte("drivers: postgres\n"), 0o600)
-		require.NoError(t, err)
-
-		_, err = ReadConfig(path, false)
-		require.ErrorContains(t, err, "drivers")
+		_, err := ReadConfig(writeConfig(t, "drivers: postgres\n"), false)
+		require.EqualError(t, err, "yaml: unmarshal errors:\n  line 1: field drivers not found in type internalmigrations.Config")
 	})
 }
 

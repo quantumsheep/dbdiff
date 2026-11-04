@@ -12,7 +12,7 @@
 </div>
 
 ```console
-$ dbdiff diff current.sqlite final.sqlite
+$ dbdiff diff current.sqlite desired.sqlite
 ALTER TABLE "users" ADD COLUMN "created_at" TEXT;
 CREATE INDEX "users_email" ON "users" ("email");
 DROP TABLE "audit";
@@ -33,23 +33,23 @@ The SQLite driver needs `CGO_ENABLED=1`.
 
 ## Usage
 
-| Command                          | Result                                                            |
-| -------------------------------- | ----------------------------------------------------------------- |
-| `dbdiff diff <source> <target>`  | Print the statements that make the source equal to the target     |
-| `dbdiff migrate generate <name>` | Write the next migration file                                     |
-| `dbdiff migrate status`          | List each migration and its state                                 |
-| `dbdiff migrate preview`         | Print the statements that `up` will run                           |
-| `dbdiff migrate up`              | Apply every pending migration                                     |
-| `dbdiff migrate step`            | Apply every pending migration, and ask before each file           |
-| `dbdiff migrate verify`          | Compare the database against the replay of the applied migrations |
-| `dbdiff migrate repair`          | Make the history table agree with the migration files             |
-| `dbdiff migrate baseline`        | Record every migration file as applied, and run no file           |
+| Command                           | Result                                                                        |
+| --------------------------------- | ----------------------------------------------------------------------------- |
+| `dbdiff diff <current> <desired>` | Print the statements that make the current schema equal to the desired schema |
+| `dbdiff migrate generate <name>`  | Write the next migration file                                                 |
+| `dbdiff migrate status`           | List each migration and its state                                             |
+| `dbdiff migrate preview`          | Print the statements that `up` will run                                       |
+| `dbdiff migrate up`               | Apply every pending migration                                                 |
+| `dbdiff migrate step`             | Apply every pending migration, and ask before each file                       |
+| `dbdiff migrate verify`           | Compare the database against the replay of the applied migrations             |
+| `dbdiff migrate repair`           | Make the history table agree with the migration files                         |
+| `dbdiff migrate baseline`         | Record every migration file as applied, and run no file                       |
 
 `dbdiff diff` changes no database. To apply its output, send it to the client of the engine:
 
 ```bash
 dbdiff diff current.sqlite schema.sql | sqlite3 current.sqlite
-dbdiff diff postgres://localhost:5432/source postgres://localhost:5432/target
+dbdiff diff postgres://localhost:5432/current postgres://localhost:5432/desired
 ```
 
 > [!CAUTION]
@@ -57,32 +57,35 @@ dbdiff diff postgres://localhost:5432/source postgres://localhost:5432/target
 
 ### Flags of `diff`
 
-| Flag             | Value                             | Purpose                                                             |
-| ---------------- | --------------------------------- | ------------------------------------------------------------------- |
-| `--driver`       | `sqlite3`, `postgres`, or `mysql` | Select the engine. dbdiff detects it from the arguments by default. |
-| `--schema`       | A schema name                     | Select the PostgreSQL schema. The default is the search path.       |
-| `--data`         | none                              | Compare the rows too.                                               |
-| `--comments`     | none                              | Print a comment before each change.                                 |
-| `--privileges`   | none                              | Compare the owners and the privileges (PostgreSQL and MySQL).       |
-| `--exit-code`    | none                              | If the schemas differ, exit with code 1.                            |
-| `--ignore-table` | A table name                      | Ignore this table. Repeat the flag for more tables.                 |
+| Flag               | Value                             | Purpose                                                                                                     |
+| ------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `--driver`         | `sqlite3`, `postgres`, or `mysql` | Select the engine. dbdiff detects it from the arguments by default.                                         |
+| `--schema`         | A schema name                     | Select the PostgreSQL schema. The default is the search path. Only the postgres driver accepts this flag.   |
+| `--data`           | none                              | Compare the rows too.                                                                                       |
+| `--comments`       | none                              | Print a comment before each change.                                                                         |
+| `--privileges`     | none                              | Compare the owners and the privileges (PostgreSQL and MySQL).                                               |
+| `--exit-code`      | none                              | If the schemas differ, exit with code 1.                                                                    |
+| `--ignore-table`   | A table name                      | Ignore this table. Repeat the flag for more tables.                                                         |
+| `--server-version` | A server version                  | Select the version of the temporary server. Only the postgres driver and the mysql driver accept this flag. |
 
 ### Flags of `migrate`
 
-| Flag             | Value                             | Purpose                                                                                               |
-| ---------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `--config`       | A file path                       | Read this configuration file. The default is `dbdiff.yaml` in the working directory.                  |
-| `--source`       | A directory path                  | Read the migration files from this directory.                                                         |
-| `--target`       | A connection URL                  | Change this database. The default is `DBDIFF_TARGET`. For `generate`, the value is the wanted schema. |
-| `--to`           | A migration version               | For `up` and `baseline`, stop after this version. The default is the last migration.                  |
-| `--run`          | none                              | For `preview`, apply the pending files in one transaction. Then roll back the transaction.            |
-| `--driver`       | `sqlite3`, `postgres`, or `mysql` | Select the engine. dbdiff detects it from the source and the target by default.                       |
-| `--schema`       | A schema name                     | Select the PostgreSQL schema. The default is the search path.                                         |
-| `--ignore-table` | A table name                      | Ignore this table. Repeat the flag for more tables.                                                   |
+| Flag               | Value                                           | Purpose                                                                                                     |
+| ------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `--config`         | A file path                                     | Read this configuration file. The default is `dbdiff.yaml` in the working directory.                        |
+| `--migrations`     | A directory path                                | Read the migration files from this directory.                                                               |
+| `--desired`        | A `.sql` file, a directory, or a connection URL | Compare the migration files with this schema. Only `generate` accepts this flag.                            |
+| `--database`       | A connection URL                                | Read or change this database. Each command except `generate` accepts this flag.                             |
+| `--to`             | A migration version                             | For `up` and `baseline`, stop after this version. The default is the last migration.                        |
+| `--run`            | none                                            | For `preview`, apply the pending files in one transaction. Then roll back the transaction.                  |
+| `--driver`         | `sqlite3`, `postgres`, or `mysql`               | Select the engine. dbdiff detects it from the arguments by default.                                         |
+| `--schema`         | A schema name                                   | Select the PostgreSQL schema. The default is the search path. Only the postgres driver accepts this flag.   |
+| `--server-version` | A server version                                | Select the version of the temporary server. Only the postgres driver and the mysql driver accept this flag. |
+| `--ignore-table`   | A table name                                    | Ignore this table. Repeat the flag for more tables.                                                         |
 
 ## SQL files
 
-dbdiff runs a `.sql` file, or the `.sql` files of a directory in name order, in a temporary database. For PostgreSQL and MySQL, it downloads a temporary server on the first run, with the version of the other side. The `version` key of `dbdiff.yaml` sets another version.
+dbdiff runs a `.sql` file, or the `.sql` files of a directory in name order, in a temporary database. For PostgreSQL and MySQL, it downloads a temporary server on the first run, with the version of the other side. The `--server-version` flag sets another version.
 
 Each file runs in one transaction. If a file holds a statement that cannot run in a transaction, for example `CREATE INDEX CONCURRENTLY`, add the line `-- dbdiff:no-transaction` to the file.
 
@@ -107,30 +110,32 @@ dbdiff does not support MariaDB on Linux with arm64.
 
 ## Migrations
 
-`dbdiff migrate` reads `dbdiff.yaml` from the working directory. A flag overrides its key.
+`dbdiff migrate` reads `dbdiff.yaml` from the working directory. Each key has the name of its long flag. A flag overrides its key. The keys are `driver`, `migrations`, `desired`, `database`, `schema`, `server-version`, and `ignore-table`. `--config`, `--to`, and `--run` have no key.
 
 ```yaml
 driver: postgres
-source: ./migrations # migration files
-target: ./schema.sql # wanted schema, for `migrate generate`
+migrations: ./migrations      # migration files
+desired: ./schema.sql         # desired schema, for `migrate generate`
+database: ${DATABASE_URL}     # database, for the other commands
 schema: app
-version: 17.11.0     # temporary server version
-ignore:
-  tables:
-    - example
+server-version: 17.11.0       # temporary server version
+ignore-table:
+  - example
 ```
 
-`migrate generate` writes the difference between the target and the migration files as a new file:
+dbdiff replaces each `${NAME}` in a value of the file with the environment variable `NAME`. If the variable is not set, dbdiff stops with an error. dbdiff replaces only the form `${NAME}`. It does not replace `$NAME`, and it does not replace a value of a flag. A value of the file cannot hold the literal text `${NAME}`.
+
+`migrate generate` writes the difference between the migration files and the desired schema as a new file:
 
 ```console
 $ dbdiff migrate generate add_created_at
 migrations/20260822143000_add_created_at.sql
 ```
 
-The other commands act on the database that `--target` or `DBDIFF_TARGET` names:
+The other commands act on the database that `--database` or the `database` key names:
 
 ```bash
-export DBDIFF_TARGET=postgres://user:password@localhost:5432/production
+export DATABASE_URL=postgres://user:password@localhost:5432/production
 dbdiff migrate up
 ```
 
@@ -166,10 +171,10 @@ import (
 driver, err := drivers.NewDriver(drivers.PostgresDriverName)
 
 migrator := driver.Migrator(
-	migrations.WithTargetDataSource(
+	migrations.WithDatabase(
 		drivers.NewConnectionStringDataSource(os.Getenv("DATABASE_URL")),
 	),
-	migrations.WithMigrationDirectory("migrations"),
+	migrations.WithMigrations("migrations"),
 )
 
 err = migrator.Up(ctx)

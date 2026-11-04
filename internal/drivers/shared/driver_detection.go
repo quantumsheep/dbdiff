@@ -16,34 +16,34 @@ const (
 
 var SupportedDriverNames = []DriverName{SQLiteDriverName, PostgresDriverName, MySQLDriverName}
 
-func DetectDriver(source DataSource, target DataSource) (DriverName, error) {
-	sourceDriverName := detectDriverOfDataSource(source)
-	targetDriverName := detectDriverOfDataSource(target)
+func DetectDriver(current DataSource, desired DataSource) (DriverName, error) {
+	currentDriverName := detectDriverOfDataSource(current)
+	desiredDriverName := detectDriverOfDataSource(desired)
 
-	if sourceDriverName == "" && targetDriverName == "" {
-		return "", fmt.Errorf("cannot detect the driver of the source %q and the target %q. Name the driver",
-			dataSourceArgument(source), dataSourceArgument(target))
+	if currentDriverName == "" && desiredDriverName == "" {
+		return "", fmt.Errorf("cannot detect the driver of the current schema %q and the desired schema %q. Name the driver",
+			dataSourceArgument(current), dataSourceArgument(desired))
 	}
 
-	if sourceDriverName != "" && targetDriverName != "" && sourceDriverName != targetDriverName {
-		return "", fmt.Errorf("the source %q names the %s driver and the target %q names the %s driver. Name the driver",
-			dataSourceArgument(source), sourceDriverName, dataSourceArgument(target), targetDriverName)
+	if currentDriverName != "" && desiredDriverName != "" && currentDriverName != desiredDriverName {
+		return "", fmt.Errorf("the current schema %q names the %s driver and the desired schema %q names the %s driver. Name the driver",
+			dataSourceArgument(current), currentDriverName, dataSourceArgument(desired), desiredDriverName)
 	}
 
-	if sourceDriverName != "" {
-		return sourceDriverName, nil
+	if currentDriverName != "" {
+		return currentDriverName, nil
 	}
 
-	return targetDriverName, nil
+	return desiredDriverName, nil
 }
 
 // A migration holds one database, so the two-sided detection would name that database
 // two times.
-func DetectDriverOfTarget(target DataSource) (DriverName, error) {
-	driverName := detectDriverOfDataSource(target)
+func DetectDriverOfDatabase(database DataSource) (DriverName, error) {
+	driverName := detectDriverOfDataSource(database)
 	if driverName == "" {
-		return "", fmt.Errorf("cannot detect the driver of the target %q. Name the driver",
-			dataSourceArgument(target))
+		return "", fmt.Errorf("cannot detect the driver of the database %q. Name the driver",
+			dataSourceArgument(database))
 	}
 
 	return driverName, nil

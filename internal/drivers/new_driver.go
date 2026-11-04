@@ -12,7 +12,7 @@ import (
 )
 
 type DriverOptions struct {
-	Version           string
+	ServerVersion     string
 	Schema            string
 	ComparePrivileges bool
 	IgnoreTables      []string
@@ -29,8 +29,8 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 			return nil, fmt.Errorf("the privileges option applies to the postgres driver and to the mysql driver")
 		}
 
-		if options.Version != "" {
-			return nil, fmt.Errorf("the version option applies to the postgres driver and to the mysql driver")
+		if options.ServerVersion != "" {
+			return nil, fmt.Errorf("the server version option applies to the postgres driver and to the mysql driver")
 		}
 
 		return driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{
@@ -43,11 +43,11 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 
 		return driversmysql.NewMySQLDriver(&driversmysql.MySQLDriverConfig{
 			ComparePrivileges:    options.ComparePrivileges,
-			ScratchServerVersion: options.Version,
+			ScratchServerVersion: options.ServerVersion,
 			IgnoreTables:         options.IgnoreTables,
 		}), nil
 	case driversshared.PostgresDriverName:
-		err := driverspostgres.ValidateScratchServerVersion(options.Version)
+		err := driverspostgres.ValidateScratchServerVersion(options.ServerVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -55,7 +55,7 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 		return driverspostgres.NewPostgresDriver(&driverspostgres.PostgresDriverConfig{
 			Schema:               options.Schema,
 			ComparePrivileges:    options.ComparePrivileges,
-			ScratchServerVersion: options.Version,
+			ScratchServerVersion: options.ServerVersion,
 			IgnoreTables:         options.IgnoreTables,
 		}), nil
 	default:
@@ -66,7 +66,7 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
 	schema string) (internalmigrations.Migrator, error) {
 	if driverName == "" {
-		detected, err := driversshared.DetectDriverOfTarget(target)
+		detected, err := driversshared.DetectDriverOfDatabase(target)
 		if err != nil {
 			return nil, err
 		}

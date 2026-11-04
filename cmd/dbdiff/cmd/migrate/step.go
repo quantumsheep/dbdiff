@@ -12,7 +12,7 @@ func stepCommand() *cli.Command {
 	return &cli.Command{
 		Name:         "step",
 		Usage:        "Apply every pending migration, and ask before each file",
-		Flags:        migrationFlags(databaseTargetUsage),
+		Flags:        databaseMigrationFlags(),
 		OnUsageError: helpers.OnUsageError,
 		Action:       withRunner(stepAction),
 	}

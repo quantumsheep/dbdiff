@@ -23,10 +23,10 @@ type ConnectionStringDataSource = driversshared.ConnectionStringDataSource
 // of the drivers package creates it, so the migrator carries the engine name and the
 // schema of the driver.
 type Migrator struct {
-	driver    DriverName
-	schema    string
-	target    ConnectionStringDataSource
-	directory string
+	driver     DriverName
+	schema     string
+	database   ConnectionStringDataSource
+	migrations string
 }
 
 // NewMigrator creates a migrator for the named engine. Use Driver.Migrator of the
@@ -47,17 +47,17 @@ func NewMigrator(driver DriverName, schema string, options ...MigratorOption) *M
 // MigratorOption configures NewMigrator and Driver.Migrator of the drivers package.
 type MigratorOption func(*Migrator)
 
-// WithTargetDataSource names the database that receives the migrations.
-func WithTargetDataSource(target ConnectionStringDataSource) MigratorOption {
+// WithDatabase names the database that the migrator reads or changes.
+func WithDatabase(database ConnectionStringDataSource) MigratorOption {
 	return func(migrator *Migrator) {
-		migrator.target = target
+		migrator.database = database
 	}
 }
 
-// WithMigrationDirectory names the directory that holds the migration files.
-func WithMigrationDirectory(directory string) MigratorOption {
+// WithMigrations names the directory that holds the migration files.
+func WithMigrations(directory string) MigratorOption {
 	return func(migrator *Migrator) {
-		migrator.directory = directory
+		migrator.migrations = directory
 	}
 }
 
@@ -176,15 +176,15 @@ func stateOf(state internalmigrations.State) State {
 }
 
 func (m *Migrator) open(ctx context.Context) (internalmigrations.Migrator, *internalmigrations.Set, error) {
-	if m.target.ConnectionString == "" {
-		return nil, nil, fmt.Errorf("name the target with the WithTargetDataSource option")
+	if m.database.ConnectionString == "" {
+		return nil, nil, fmt.Errorf("name the database with the WithDatabase option")
 	}
 
-	if m.directory == "" {
-		return nil, nil, fmt.Errorf("name the migrations directory with the WithMigrationDirectory option")
+	if m.migrations == "" {
+		return nil, nil, fmt.Errorf("name the migration directory with the WithMigrations option")
 	}
 
-	migrator, set, err := internaldrivers.OpenMigrationSet(ctx, m.driver, m.target, m.schema, m.directory)
+	migrator, set, err := internaldrivers.OpenMigrationSet(ctx, m.driver, m.database, m.schema, m.migrations)
 
 	var openDatabaseError *internaldrivers.OpenDatabaseError
 	if errors.As(err, &openDatabaseError) {

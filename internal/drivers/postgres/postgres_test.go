@@ -5052,7 +5052,7 @@ func TestPostgresDriver(t *testing.T) {
 		target := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
 
 		_, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
-		require.EqualError(t, err, `the target database has no schema with the name "schema_that_does_not_exist"`)
+		require.EqualError(t, err, `the desired database has no schema with the name "schema_that_does_not_exist"`)
 	})
 
 	t.Run("SQLFileTarget", func(t *testing.T) {
