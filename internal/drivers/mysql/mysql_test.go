@@ -953,6 +953,23 @@ func TestMySQLDriver(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateViewKeepsDatabaseNameInStringLiteral", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		label := "`" + driver.targetDatabase + "`.x"
+
+		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));" +
+			"CREATE VIEW labeled_users AS SELECT id, '" + label + "' AS label FROM users;")
+		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateViewInstruction{
+				Name:       "labeled_users",
+				Definition: "select `users`.`id` AS `id`,'" + label + "' AS `label` from `users`",
+			},
+		})
+	})
+
 	t.Run("CreateTableWithEngineAndCollation", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 

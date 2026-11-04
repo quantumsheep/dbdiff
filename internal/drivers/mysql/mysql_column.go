@@ -35,16 +35,11 @@ func (c *MySQLColumn) IsGenerated() bool {
 	return c.GeneratedExpression != ""
 }
 
-func (c *MySQLColumn) Copy() *MySQLColumn {
-	columnCopy := *c
-	return &columnCopy
-}
-
 func (c *MySQLColumn) HasEqualAttributes(other *MySQLColumn) bool {
-	copy := c.Copy()
-	copy.Name = other.Name
+	copied := *c
+	copied.Name = other.Name
 
-	return *copy == *other
+	return copied == *other
 }
 
 func (c *MySQLColumn) Definition() string {

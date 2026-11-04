@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	embeddedmysql "github.com/quantumsheep/embedded-mysql"
@@ -28,13 +29,6 @@ type MySQLDriver struct {
 	scratchServer       *embeddedmysql.EmbeddedMySQL
 	scratchDatabases    []*mysqlScratchDatabase
 	detailsByConnection map[*sql.DB]*mysqlConnectionDetails
-
-	disableForeignKeyChecks bool
-
-	// DiffTables keeps the two table lists here, so the data comparison reads the
-	// schema one time.
-	targetTables []*MySQLTable
-	sourceTables []*MySQLTable
 }
 
 type mysqlConnectionDetails struct {
@@ -42,6 +36,10 @@ type mysqlConnectionDetails struct {
 	databaseName     string
 	defaultEngine    string
 	defaultCollation string
+}
+
+func isMariaDB(version string) bool {
+	return strings.Contains(strings.ToLower(version), "mariadb")
 }
 
 func NewMySQLDriver(config *MySQLDriverConfig) *MySQLDriver {
@@ -72,7 +70,7 @@ func (d *MySQLDriver) registerConnection(ctx context.Context, db *sql.DB) error 
 	}
 
 	d.detailsByConnection[db] = &mysqlConnectionDetails{
-		mariadb:          strings.Contains(strings.ToLower(version), "mariadb"),
+		mariadb:          isMariaDB(version),
 		databaseName:     databaseName.String,
 		defaultEngine:    defaultEngine,
 		defaultCollation: defaultCollation.String,
@@ -87,7 +85,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 
 	targetDatabaseConnection, err := d.OpenSide(ctx, target, source, "target")
 	if err != nil {
-		_ = d.releaseScratchResources()
+		_ = d.releaseScratchResources(ctx)
 		return nil, err
 	}
 
@@ -96,7 +94,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 	err = d.registerConnection(ctx, targetDatabaseConnection)
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
-		_ = d.releaseScratchResources()
+		_ = d.releaseScratchResources(ctx)
 
 		return nil, err
 	}
@@ -104,7 +102,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 	sourceDatabaseConnection, err := d.OpenSide(ctx, source, target, "source")
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
-		_ = d.releaseScratchResources()
+		_ = d.releaseScratchResources(ctx)
 
 		return nil, err
 	}
@@ -115,7 +113,7 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 	if err != nil {
 		_ = d.TargetDatabaseConnection.Close()
 		_ = d.SourceDatabaseConnection.Close()
-		_ = d.releaseScratchResources()
+		_ = d.releaseScratchResources(ctx)
 
 		return nil, err
 	}
@@ -125,15 +123,20 @@ func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSo
 		_ = d.SourceDatabaseConnection.Close()
 		d.TargetDatabaseConnection = nil
 		d.SourceDatabaseConnection = nil
-		_ = d.releaseScratchResources()
+		_ = d.releaseScratchResources(ctx)
 	}, nil
 }
 
-func (d *MySQLDriver) releaseScratchResources() error {
+// If the context of the diff stops, the cleanup must still run. The time limit stops a
+// cleanup that waits for a server that does not answer.
+func (d *MySQLDriver) releaseScratchResources(ctx context.Context) error {
+	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
 	var firstError error
 
 	for _, scratch := range d.scratchDatabases {
-		err := scratch.drop()
+		err := scratch.drop(cleanupContext)
 		if err != nil && firstError == nil {
 			firstError = err
 		}
@@ -158,77 +161,6 @@ func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
 
 	defer release()
 
-	d.disableForeignKeyChecks = false
-	d.targetTables = nil
-	d.sourceTables = nil
-
-	var instructions []driversshared.Instruction
-
-	// A column default can read a sequence, so the sequences come before the tables.
-	sequenceInstructions, err := d.DiffSequences(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, sequenceInstructions...)
-
-	tableInstructions, err := d.DiffTables(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, tableInstructions...)
-
-	// A view can call a function, and MySQL checks the call at the creation of the view,
-	// so the routines come before the views.
-	routineInstructions, err := d.DiffRoutines(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, routineInstructions...)
-
-	viewInstructions, err := d.DiffViews(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, viewInstructions...)
-
-	eventInstructions, err := d.DiffEvents(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, eventInstructions...)
-
-	if d.ComparePrivileges {
-		privilegeInstructions, err := d.DiffPrivileges(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		instructions = append(instructions, privilegeInstructions...)
-	}
-
-	if options.CompareData {
-		dataInstructions, err := d.DiffData(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		instructions = append(instructions, dataInstructions...)
-	}
-
-	if d.disableForeignKeyChecks {
-		instructions = append([]driversshared.Instruction{&MySQLSetForeignKeyChecksInstruction{}}, instructions...)
-		instructions = append(instructions, &MySQLSetForeignKeyChecksInstruction{Enabled: true})
-	}
-
-	return instructions, nil
-}
-
-func (d *MySQLDriver) DiffTables(ctx context.Context) ([]driversshared.Instruction, error) {
 	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
 	if err != nil {
 		return nil, err
@@ -239,13 +171,49 @@ func (d *MySQLDriver) DiffTables(ctx context.Context) ([]driversshared.Instructi
 		return nil, err
 	}
 
-	d.targetTables = targetTables
-	d.sourceTables = sourceTables
-
-	if needsForeignKeyChecksOff(targetTables, sourceTables) {
-		d.disableForeignKeyChecks = true
+	steps := []func(context.Context) ([]driversshared.Instruction, error){
+		// A column default can read a sequence, so the sequences come before the tables.
+		d.DiffSequences,
+		func(context.Context) ([]driversshared.Instruction, error) {
+			return d.DiffTables(targetTables, sourceTables)
+		},
+		// A view can call a function, and MySQL checks the call at the creation of the view,
+		// so the routines come before the views.
+		d.DiffRoutines,
+		d.DiffViews,
+		d.DiffEvents,
 	}
 
+	if d.ComparePrivileges {
+		steps = append(steps, d.DiffPrivileges)
+	}
+
+	if options.CompareData {
+		steps = append(steps, func(ctx context.Context) ([]driversshared.Instruction, error) {
+			return d.DiffData(ctx, targetTables, sourceTables)
+		})
+	}
+
+	var instructions []driversshared.Instruction
+
+	for _, step := range steps {
+		stepInstructions, err := step(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		instructions = append(instructions, stepInstructions...)
+	}
+
+	if needsForeignKeyChecksOff(targetTables, sourceTables) {
+		instructions = append([]driversshared.Instruction{&MySQLSetForeignKeyChecksInstruction{}}, instructions...)
+		instructions = append(instructions, &MySQLSetForeignKeyChecksInstruction{Enabled: true})
+	}
+
+	return instructions, nil
+}
+
+func (d *MySQLDriver) DiffTables(targetTables []*MySQLTable, sourceTables []*MySQLTable) ([]driversshared.Instruction, error) {
 	additions, removals, err := driversshared.DiffByKey(targetTables, sourceTables, driversshared.DiffRules[*MySQLTable]{
 		Key: func(table *MySQLTable) string {
 			return table.Name
@@ -500,7 +468,12 @@ func (d *MySQLDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName
 		}
 
 		if generationExpression.Valid && generationExpression.String != "" {
-			column.GeneratedExpression = unescapeCatalogText(mariadb, generationExpression.String)
+			column.GeneratedExpression = generationExpression.String
+
+			if !mariadb {
+				column.GeneratedExpression = unescapeCatalogText(column.GeneratedExpression)
+			}
+
 			column.GeneratedStored = strings.Contains(extraLower, "stored generated")
 		}
 
@@ -537,7 +510,7 @@ func applyColumnDefault(column *MySQLColumn, columnDefault sql.NullString, extra
 
 	value := columnDefault.String
 	if column.DefaultIsExpression {
-		value = unescapeCatalogText(mariadb, value)
+		value = unescapeCatalogText(value)
 	}
 
 	column.Default = sql.NullString{
@@ -549,11 +522,7 @@ func applyColumnDefault(column *MySQLColumn, columnDefault sql.NullString, extra
 // The information_schema tables of MySQL escape a quote and a backslash of an expression
 // text, and the statement needs the bare characters. One pass keeps an escaped backslash
 // before a quote correct.
-func unescapeCatalogText(mariadb bool, value string) string {
-	if mariadb {
-		return value
-	}
-
+func unescapeCatalogText(value string) string {
 	var builder strings.Builder
 
 	for position := 0; position < len(value); position++ {
@@ -570,8 +539,10 @@ func unescapeCatalogText(mariadb bool, value string) string {
 }
 
 func (d *MySQLDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]string, []*MySQLIndex, error) {
+	mariadb := d.detailsByConnection[db].mariadb
+
 	expressionColumn := "NULL"
-	if !d.detailsByConnection[db].mariadb {
+	if !mariadb {
 		expressionColumn = "EXPRESSION"
 	}
 
@@ -623,7 +594,11 @@ func (d *MySQLDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName
 			indexes = append(indexes, index)
 		}
 
-		index.Keys = append(index.Keys, indexKey(d.detailsByConnection[db].mariadb, index.Kind,
+		if !mariadb {
+			expression.String = unescapeCatalogText(expression.String)
+		}
+
+		index.Keys = append(index.Keys, indexKey(index.Kind,
 			columnName, subPart, collation, expression))
 	}
 
@@ -649,10 +624,10 @@ func indexKind(indexType string, nonUnique int) string {
 
 // A FULLTEXT index and a SPATIAL index report an internal prefix length, and the CREATE
 // INDEX statement refuses it.
-func indexKey(mariadb bool, kind string, columnName sql.NullString, subPart sql.NullInt64,
+func indexKey(kind string, columnName sql.NullString, subPart sql.NullInt64,
 	collation sql.NullString, expression sql.NullString) string {
 	if expression.Valid && expression.String != "" {
-		return "(" + unescapeCatalogText(mariadb, expression.String) + ")"
+		return "(" + expression.String + ")"
 	}
 
 	key := QuoteIdentifier(columnName.String)
@@ -756,9 +731,13 @@ func (d *MySQLDriver) GetTableCheckConstraints(ctx context.Context, db *sql.DB, 
 			return nil, err
 		}
 
+		if !mariadb {
+			clause = unescapeCatalogText(clause)
+		}
+
 		return &MySQLCheckConstraint{
 			Name:       name,
-			Expression: unescapeCatalogText(mariadb, clause),
+			Expression: clause,
 		}, nil
 	}, tableName)
 }
@@ -823,7 +802,7 @@ func (d *MySQLDriver) GetViews(ctx context.Context, db *sql.DB) ([]*MySQLView, e
 
 		return &MySQLView{
 			Name:       name,
-			Definition: strings.ReplaceAll(definition.String, databaseQualifier, ""),
+			Definition: removeDatabaseQualifier(definition.String, databaseQualifier),
 		}, nil
 	})
 }

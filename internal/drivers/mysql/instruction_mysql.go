@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 // MySQL quotes with the backtick, and the shared instruction types quote with the double quote.
@@ -13,13 +14,9 @@ func QuoteIdentifier(name string) string {
 }
 
 func QuoteIdentifiers(names []string) []string {
-	quoted := make([]string, len(names))
-
-	for i, name := range names {
-		quoted[i] = QuoteIdentifier(name)
-	}
-
-	return quoted
+	return lo.Map(names, func(name string, _ int) string {
+		return QuoteIdentifier(name)
+	})
 }
 
 // MySQL reads a backslash of a string as an escape character, so the shared QuoteLiteral

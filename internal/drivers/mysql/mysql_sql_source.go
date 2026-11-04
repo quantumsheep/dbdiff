@@ -113,7 +113,7 @@ func (d *MySQLDriver) OpenSide(ctx context.Context, source driversshared.DataSou
 
 	d.scratchDatabases = append(d.scratchDatabases, scratch)
 
-	connection, err := scratch.open()
+	connection, err := scratch.open(scratch.name)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func DetectMySQLScratchVersion(ctx context.Context, connectionString string) (st
 		return "", false
 	}
 
-	mariadb := strings.Contains(strings.ToLower(version), "mariadb")
+	mariadb := isMariaDB(version)
 
 	// A server writes a build suffix into the version, for example "8.0.43-0ubuntu0.22.04.1",
 	// and the download reads the three numbers alone.
@@ -209,7 +209,7 @@ func (d *MySQLDriver) StopScratchServer() error {
 }
 
 func (s *mysqlScratchDatabase) create(ctx context.Context) error {
-	connection, err := s.openServer()
+	connection, err := s.open("")
 	if err != nil {
 		return err
 	}
@@ -224,15 +224,15 @@ func (s *mysqlScratchDatabase) create(ctx context.Context) error {
 	return nil
 }
 
-func (s *mysqlScratchDatabase) drop() error {
-	connection, err := s.openServer()
+func (s *mysqlScratchDatabase) drop(ctx context.Context) error {
+	connection, err := s.open("")
 	if err != nil {
 		return err
 	}
 
 	defer func() { _ = connection.Close() }()
 
-	_, err = connection.Exec("DROP DATABASE " + QuoteIdentifier(s.name) + ";")
+	_, err = connection.ExecContext(ctx, "DROP DATABASE "+QuoteIdentifier(s.name)+";")
 	if err != nil {
 		return fmt.Errorf("failed to drop the temporary database %q: %w", s.name, err)
 	}
@@ -240,21 +240,9 @@ func (s *mysqlScratchDatabase) drop() error {
 	return nil
 }
 
-func (s *mysqlScratchDatabase) openServer() (*sql.DB, error) {
+func (s *mysqlScratchDatabase) open(databaseName string) (*sql.DB, error) {
 	config := s.serverConfig.Clone()
-	config.DBName = ""
-
-	connector, err := mysql.NewConnector(config)
-	if err != nil {
-		return nil, err
-	}
-
-	return sql.OpenDB(connector), nil
-}
-
-func (s *mysqlScratchDatabase) open() (*sql.DB, error) {
-	config := s.serverConfig.Clone()
-	config.DBName = s.name
+	config.DBName = databaseName
 
 	connector, err := mysql.NewConnector(config)
 	if err != nil {

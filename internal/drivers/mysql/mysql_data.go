@@ -29,28 +29,8 @@ type (
 )
 
 // The schema section already creates or drops the other tables.
-func (d *MySQLDriver) DiffData(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetTables := d.targetTables
-	sourceTables := d.sourceTables
-
-	if targetTables == nil {
-		var err error
-
-		targetTables, err = d.GetTables(ctx, d.TargetDatabaseConnection)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if sourceTables == nil {
-		var err error
-
-		sourceTables, err = d.GetTables(ctx, d.SourceDatabaseConnection)
-		if err != nil {
-			return nil, err
-		}
-	}
-
+func (d *MySQLDriver) DiffData(ctx context.Context, targetTables []*MySQLTable,
+	sourceTables []*MySQLTable) ([]driversshared.Instruction, error) {
 	return driversshared.DiffData(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection,
 		targetTables, sourceTables, driversshared.DataRules[*MySQLTable, Backtick]{
 			TableName: func(table *MySQLTable) string {
