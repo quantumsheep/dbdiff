@@ -385,7 +385,7 @@ func (t *SQLiteTable) recreationInstructions(current *SQLiteTable, renamedFrom m
 			TableName:         temporaryTable.Name,
 			ColumnNames:       insertColumns,
 			SelectExpressions: selectColumns,
-			CurrentTableName:  t.Name,
+			FromTableName:     t.Name,
 		},
 		&driversshared.SQLDropTableInstruction{
 			Name: t.Name,

@@ -642,7 +642,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "name", "age"},
 					SelectExpressions: []string{`"id"`, `"name"`, `"age"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -706,7 +706,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "name"},
 					SelectExpressions: []string{`"id"`, `"name"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -769,7 +769,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "name"},
 					SelectExpressions: []string{`"id"`, `"name"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -912,7 +912,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_measures_temp",
 					ColumnNames:       []string{"value"},
 					SelectExpressions: []string{`"value"`},
-					CurrentTableName:  "measures",
+					FromTableName:     "measures",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "measures"},
 				&SQLiteAlterTableInstruction{
@@ -983,7 +983,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_measures_temp",
 					ColumnNames:       []string{"label", "value"},
 					SelectExpressions: []string{`"label"`, `"value"`},
-					CurrentTableName:  "measures",
+					FromTableName:     "measures",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "measures"},
 				&SQLiteAlterTableInstruction{
@@ -1049,7 +1049,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_measures_temp",
 					ColumnNames:       []string{"value"},
 					SelectExpressions: []string{`"value"`},
-					CurrentTableName:  "measures",
+					FromTableName:     "measures",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "measures"},
 				&SQLiteAlterTableInstruction{
@@ -1132,7 +1132,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_events_temp",
 					ColumnNames:       []string{"id", "label"},
 					SelectExpressions: []string{`"id"`, `"label"`},
-					CurrentTableName:  "events",
+					FromTableName:     "events",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "events"},
 				&SQLiteAlterTableInstruction{
@@ -1362,7 +1362,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_people_temp",
 					ColumnNames:       []string{"name"},
 					SelectExpressions: []string{`"name"`},
-					CurrentTableName:  "people",
+					FromTableName:     "people",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "people"},
 				&SQLiteAlterTableInstruction{
@@ -1420,7 +1420,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_people_temp",
 					ColumnNames:       []string{"age", "name"},
 					SelectExpressions: []string{`"age"`, `"name"`},
-					CurrentTableName:  "people",
+					FromTableName:     "people",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "people"},
 				&SQLiteAlterTableInstruction{
@@ -1472,7 +1472,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_people_temp",
 					ColumnNames:       []string{"name"},
 					SelectExpressions: []string{`"name"`},
-					CurrentTableName:  "people",
+					FromTableName:     "people",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "people"},
 				&SQLiteAlterTableInstruction{
@@ -1672,7 +1672,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_t_temp",
 					ColumnNames:       []string{"id"},
 					SelectExpressions: []string{`"id"`},
-					CurrentTableName:  "t",
+					FromTableName:     "t",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "t"},
 				&SQLiteAlterTableInstruction{
@@ -1727,7 +1727,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_t_temp3",
 					ColumnNames:       []string{"id"},
 					SelectExpressions: []string{`"id"`},
-					CurrentTableName:  "t",
+					FromTableName:     "t",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "t"},
 				&SQLiteAlterTableInstruction{
@@ -1901,7 +1901,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_children_temp",
 					ColumnNames:       []string{"id", "parent"},
 					SelectExpressions: []string{`"id"`, `"parent"`},
-					CurrentTableName:  "children",
+					FromTableName:     "children",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "children"},
 				&SQLiteAlterTableInstruction{
@@ -1984,7 +1984,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_items_temp",
 					ColumnNames:       []string{"owner"},
 					SelectExpressions: []string{`"owner"`},
-					CurrentTableName:  "items",
+					FromTableName:     "items",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "items"},
 				&SQLiteAlterTableInstruction{
@@ -2127,7 +2127,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_items_temp",
 					ColumnNames:       []string{"id"},
 					SelectExpressions: []string{`"id"`},
-					CurrentTableName:  "items",
+					FromTableName:     "items",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "items"},
 				&SQLiteAlterTableInstruction{
@@ -2531,7 +2531,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "name", "active"},
 					SelectExpressions: []string{`"id"`, `"name"`, `"active"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -2635,7 +2635,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "email", "age"},
 					SelectExpressions: []string{`"id"`, `"email"`, `"age"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -2921,7 +2921,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_members_temp",
 					ColumnNames:       []string{"id", "team", "name"},
 					SelectExpressions: []string{`"id"`, `"team"`, `"name"`},
-					CurrentTableName:  "members",
+					FromTableName:     "members",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "members"},
 				&SQLiteAlterTableInstruction{
@@ -3000,7 +3000,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_members_temp",
 					ColumnNames:       []string{"id", "team", "name"},
 					SelectExpressions: []string{`"id"`, `"team"`, `"name"`},
-					CurrentTableName:  "members",
+					FromTableName:     "members",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "members"},
 				&SQLiteAlterTableInstruction{
@@ -3172,7 +3172,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_memberships_temp",
 					ColumnNames:       []string{"team", "member", "level"},
 					SelectExpressions: []string{`"team"`, `"member"`, `"level"`},
-					CurrentTableName:  "memberships",
+					FromTableName:     "memberships",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "memberships"},
 				&SQLiteAlterTableInstruction{
@@ -3240,7 +3240,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_memberships_temp",
 					ColumnNames:       []string{"team", "member"},
 					SelectExpressions: []string{`"team"`, `"member"`},
-					CurrentTableName:  "memberships",
+					FromTableName:     "memberships",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "memberships"},
 				&SQLiteAlterTableInstruction{
@@ -3315,7 +3315,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_memberships_temp",
 					ColumnNames:       []string{"team", "member", "role"},
 					SelectExpressions: []string{`"team"`, `"member"`, `"role"`},
-					CurrentTableName:  "memberships",
+					FromTableName:     "memberships",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "memberships"},
 				&SQLiteAlterTableInstruction{
@@ -3379,7 +3379,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"email", "age"},
 					SelectExpressions: []string{`"email"`, `"age"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -3448,7 +3448,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "age"},
 					SelectExpressions: []string{`"id"`, `"age"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -3516,7 +3516,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "age"},
 					SelectExpressions: []string{`"id"`, `"age"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -3580,7 +3580,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "age"},
 					SelectExpressions: []string{`"id"`, `"age"`},
-					CurrentTableName:  "users",
+					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
 				&SQLiteAlterTableInstruction{
@@ -3884,7 +3884,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_posts_temp",
 					ColumnNames:       []string{"id", "user_id", "title"},
 					SelectExpressions: []string{`"id"`, `"user_id"`, `"title"`},
-					CurrentTableName:  "posts",
+					FromTableName:     "posts",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "posts"},
 				&SQLiteAlterTableInstruction{
@@ -4300,7 +4300,7 @@ func TestSQLiteDriver(t *testing.T) {
 					TableName:         "_items_temp",
 					ColumnNames:       []string{"a", "b"},
 					SelectExpressions: []string{`"a"`, `"b"`},
-					CurrentTableName:  "items",
+					FromTableName:     "items",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "items"},
 				&SQLiteAlterTableInstruction{

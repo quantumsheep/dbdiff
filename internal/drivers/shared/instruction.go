@@ -121,7 +121,7 @@ type SQLInsertSelectInstruction struct {
 	TableName         string
 	ColumnNames       []string
 	SelectExpressions []string
-	CurrentTableName  string
+	FromTableName     string
 }
 
 func (i *SQLInsertSelectInstruction) String() string {
@@ -129,7 +129,7 @@ func (i *SQLInsertSelectInstruction) String() string {
 		QuoteIdentifier(i.TableName),
 		strings.Join(QuoteIdentifiers(i.ColumnNames), ", "),
 		strings.Join(i.SelectExpressions, ", "),
-		QuoteIdentifier(i.CurrentTableName))
+		QuoteIdentifier(i.FromTableName))
 }
 
 func (i *SQLInsertSelectInstruction) Comment() string {
