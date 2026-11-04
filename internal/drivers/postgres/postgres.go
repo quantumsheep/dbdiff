@@ -105,7 +105,7 @@ func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSour
 	}
 
 	// Every section comes after the sections that its objects use. Keep this order.
-	sections := []func(ctx context.Context) (*driversshared.SectionDiff, error){
+	sections := []func(ctx context.Context) (*SectionDiff, error){
 		d.DiffExtensions,
 		d.DiffEnumTypes,
 		d.DiffDomains,
@@ -121,7 +121,7 @@ func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSour
 		d.DiffPrivileges,
 	}
 
-	sectionDiffs := make([]*driversshared.SectionDiff, 0, len(sections))
+	sectionDiffs := make([]*SectionDiff, 0, len(sections))
 
 	for _, section := range sections {
 		sectionDiff, err := section(ctx)
@@ -191,6 +191,13 @@ func (d *PostgresDriver) openSides(ctx context.Context, source driversshared.Dat
 	}, nil
 }
 
+// An early removal covers the object that blocks an addition of another section.
+type SectionDiff struct {
+	EarlyRemovals []driversshared.Instruction
+	Additions     []driversshared.Instruction
+	Removals      []driversshared.Instruction
+}
+
 type sectionRules[T any] struct {
 	Get    func(ctx context.Context, db *sql.DB) ([]T, error)
 	Key    func(object T) string
@@ -199,18 +206,8 @@ type sectionRules[T any] struct {
 	Drop   func(source T) driversshared.Instruction
 }
 
-func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules sectionRules[T]) (*driversshared.SectionDiff, error) {
-	targetObjects, err := rules.Get(ctx, driver.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceObjects, err := rules.Get(ctx, driver.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	additions, removals, err := driversshared.DiffByKey(targetObjects, sourceObjects, driversshared.DiffRules[T]{
+func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules sectionRules[T]) (*SectionDiff, error) {
+	additions, removals, err := driversshared.DiffSides(ctx, driver.TargetDatabaseConnection, driver.SourceDatabaseConnection, rules.Get, driversshared.DiffRules[T]{
 		Key:    rules.Key,
 		Create: rules.Create,
 		Change: func(target T, source T) ([]driversshared.Instruction, error) {
@@ -224,7 +221,7 @@ func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules secti
 		return nil, err
 	}
 
-	return &driversshared.SectionDiff{
+	return &SectionDiff{
 		Additions: additions,
 		Removals:  removals,
 	}, nil

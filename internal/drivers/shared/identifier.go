@@ -1,6 +1,10 @@
 package driversshared
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/samber/lo"
+)
 
 func QuoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
@@ -11,11 +15,7 @@ func QuoteLiteral(value string) string {
 }
 
 func QuoteIdentifiers(names []string) []string {
-	quoted := make([]string, len(names))
-
-	for i, name := range names {
-		quoted[i] = QuoteIdentifier(name)
-	}
-
-	return quoted
+	return lo.Map(names, func(name string, _ int) string {
+		return QuoteIdentifier(name)
+	})
 }

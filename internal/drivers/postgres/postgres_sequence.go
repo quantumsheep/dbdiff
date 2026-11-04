@@ -127,7 +127,7 @@ func (s *PostgresSequence) RestartValue() int64 {
 	return value
 }
 
-func (d *PostgresDriver) DiffSequences(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresSequence]{
 		Get: d.GetSequences,
 		Key: func(sequence *PostgresSequence) string {

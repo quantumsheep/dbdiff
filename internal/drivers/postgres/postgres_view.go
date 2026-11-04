@@ -236,7 +236,7 @@ func (d *PostgresDriver) GetViewDependencyNames(ctx context.Context, db *sql.DB,
 
 // A view can read a materialized view, and a materialized view can read a view, so the
 // two kinds share one section and one dependency order.
-func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*SectionDiff, error) {
 	var earlyRemovals []driversshared.Instruction
 	var additions []driversshared.Instruction
 
@@ -325,7 +325,7 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*dr
 		}
 	}
 
-	return &driversshared.SectionDiff{
+	return &SectionDiff{
 		EarlyRemovals: earlyRemovals,
 		Additions:     additions,
 	}, nil

@@ -114,19 +114,15 @@ func definitionTokens(definition string) []string {
 
 	characters := []rune(definition)
 	inQuotes := false
-	skip := false
 
-	for index, character := range characters {
-		if skip {
-			skip = false
-			continue
-		}
+	for index := 0; index < len(characters); index++ {
+		character := characters[index]
 
 		if character == '"' {
 			// A quoted identifier holds a doubled quote for one quote of its name.
 			if inQuotes && index+1 < len(characters) && characters[index+1] == '"' {
 				token.WriteRune('"')
-				skip = true
+				index++
 				continue
 			}
 

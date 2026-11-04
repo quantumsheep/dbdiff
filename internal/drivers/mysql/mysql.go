@@ -743,17 +743,7 @@ func (d *MySQLDriver) GetTableCheckConstraints(ctx context.Context, db *sql.DB, 
 }
 
 func (d *MySQLDriver) DiffViews(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetViews, err := d.GetViews(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	additions, removals, err := driversshared.DiffByKey(targetViews, sourceViews, driversshared.DiffRules[*MySQLView]{
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetViews, driversshared.DiffRules[*MySQLView]{
 		Key: func(view *MySQLView) string {
 			return view.Name
 		},

@@ -24,17 +24,7 @@ func (e *MySQLEvent) CreateInstruction() *MySQLCreateEventInstruction {
 }
 
 func (d *MySQLDriver) DiffEvents(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetEvents, err := d.GetEvents(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceEvents, err := d.GetEvents(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	additions, removals, err := driversshared.DiffByKey(targetEvents, sourceEvents, driversshared.DiffRules[*MySQLEvent]{
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetEvents, driversshared.DiffRules[*MySQLEvent]{
 		Key: func(event *MySQLEvent) string {
 			return event.Name
 		},

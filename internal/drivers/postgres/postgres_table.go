@@ -858,7 +858,7 @@ func (t *PostgresTable) Instructions() []driversshared.Instruction {
 	return instructions
 }
 
-func (d *PostgresDriver) DiffTables(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	var earlyRemovals []driversshared.Instruction
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
@@ -931,7 +931,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*driversshared.Section
 		removals = append(removals, &driversshared.SQLDropTableInstruction{Name: sourceTable.Name})
 	}
 
-	return &driversshared.SectionDiff{
+	return &SectionDiff{
 		EarlyRemovals: earlyRemovals,
 		Additions:     additions,
 		Removals:      removals,

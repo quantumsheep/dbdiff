@@ -104,7 +104,7 @@ func ReadDirectory(directory string) ([]*Migration, error) {
 	var migrations []*Migration
 
 	for _, entry := range entries {
-		if entry.IsDir() || !driversshared.HasSQLExtension(entry.Name()) || driversshared.IsDownMigration(entry.Name()) {
+		if !driversshared.IsUpSQLFile(entry) {
 			continue
 		}
 

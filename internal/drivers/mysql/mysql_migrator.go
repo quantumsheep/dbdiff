@@ -3,6 +3,7 @@ package driversmysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -78,7 +79,7 @@ func (m *MySQLMigrator) Close() error {
 	connectionError := m.Connection.Close()
 	databaseError := m.Database.Close()
 
-	return driversshared.FirstError(connectionError, databaseError)
+	return errors.Join(connectionError, databaseError)
 }
 
 // MySQL commits every DDL statement at once, so a transaction rolls no schema change back.

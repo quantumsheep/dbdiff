@@ -46,36 +46,25 @@ func (d *SQLiteDriver) Diff(ctx context.Context, source driversshared.DataSource
 
 	defer release()
 
-	var instructions []driversshared.Instruction
-
-	tableInstructions, err := d.DiffTables(ctx)
-	if err != nil {
-		return nil, err
+	steps := []func(context.Context) ([]driversshared.Instruction, error){
+		d.DiffTables,
+		d.DiffVirtualTables,
+		d.DiffViews,
 	}
-
-	instructions = append(instructions, tableInstructions...)
-
-	virtualTableInstructions, err := d.DiffVirtualTables(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, virtualTableInstructions...)
-
-	viewInstructions, err := d.DiffViews(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, viewInstructions...)
 
 	if options.CompareData {
-		dataInstructions, err := d.DiffData(ctx)
+		steps = append(steps, d.DiffData)
+	}
+
+	var instructions []driversshared.Instruction
+
+	for _, step := range steps {
+		stepInstructions, err := step(ctx)
 		if err != nil {
 			return nil, err
 		}
 
-		instructions = append(instructions, dataInstructions...)
+		instructions = append(instructions, stepInstructions...)
 	}
 
 	// SQLite refuses the DROP TABLE of a recreation while another table names the
@@ -195,17 +184,7 @@ func (d *SQLiteDriver) getReservedNames(ctx context.Context) (map[string]bool, e
 }
 
 func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetViews, err := d.GetViews(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	additions, removals, err := driversshared.DiffByKey(targetViews, sourceViews, driversshared.DiffRules[*SQLiteView]{
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetViews, driversshared.DiffRules[*SQLiteView]{
 		Key: func(view *SQLiteView) string {
 			return view.Name
 		},

@@ -1,6 +1,8 @@
 package driversshared
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -69,6 +71,48 @@ func TestDiffByKey(t *testing.T) {
 		require.Nil(t, additions)
 		require.Nil(t, removals)
 	})
+
+	targetDatabase := &sql.DB{}
+	sourceDatabase := &sql.DB{}
+
+	t.Run("DiffSides", func(t *testing.T) {
+		get := func(_ context.Context, db *sql.DB) ([]string, error) {
+			if db == targetDatabase {
+				return []string{"a1", "b2"}, nil
+			}
+
+			return []string{"b2", "c3"}, nil
+		}
+
+		additions, removals, err := DiffSides(t.Context(), targetDatabase, sourceDatabase, get, rules)
+		require.NoError(t, err)
+		require.Equal(t, []Instruction{
+			&SQLCommentInstruction{
+				Text: "create a1",
+			},
+		}, additions)
+		require.Equal(t, []Instruction{
+			&SQLCommentInstruction{
+				Text: "drop c3",
+			},
+		}, removals)
+	})
+
+	t.Run("DiffSidesGetError", func(t *testing.T) {
+		get := func(_ context.Context, db *sql.DB) ([]string, error) {
+			if db == sourceDatabase {
+				return nil, errors.New("get failed")
+			}
+
+			return []string{"a1"}, nil
+		}
+
+		additions, removals, err := DiffSides(t.Context(), targetDatabase, sourceDatabase, get, rules)
+		require.EqualError(t, err, "get failed")
+		require.Nil(t, additions)
+		require.Nil(t, removals)
+	})
+
 	replaceKey := func(object string) string {
 		return object[:1]
 	}

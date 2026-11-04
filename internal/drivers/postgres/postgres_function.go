@@ -58,7 +58,7 @@ func (f *PostgresFunction) DropInstruction() driversshared.Instruction {
 	}
 }
 
-func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error) {
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
 
@@ -118,7 +118,7 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*driversshared.Sect
 		}
 	}
 
-	return &driversshared.SectionDiff{
+	return &SectionDiff{
 		Additions: additions,
 		Removals:  removals,
 	}, nil

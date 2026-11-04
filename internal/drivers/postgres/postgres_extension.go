@@ -27,7 +27,7 @@ func (e *PostgresExtension) DropInstruction() *PostgresDropExtensionInstruction 
 	return &PostgresDropExtensionInstruction{Name: e.Name}
 }
 
-func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresExtension]{
 		Get: d.GetExtensions,
 		Key: func(extension *PostgresExtension) string {

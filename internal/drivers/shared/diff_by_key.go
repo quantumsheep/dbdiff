@@ -1,6 +1,9 @@
 package driversshared
 
 import (
+	"context"
+	"database/sql"
+
 	"github.com/samber/lo"
 )
 
@@ -42,6 +45,21 @@ func DiffByKey[T any](targetObjects []T, sourceObjects []T, rules DiffRules[T]) 
 	}
 
 	return additions, removals, nil
+}
+
+func DiffSides[T any](ctx context.Context, targetDatabase *sql.DB, sourceDatabase *sql.DB,
+	get func(context.Context, *sql.DB) ([]T, error), rules DiffRules[T]) ([]Instruction, []Instruction, error) {
+	targetObjects, err := get(ctx, targetDatabase)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sourceObjects, err := get(ctx, sourceDatabase)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return DiffByKey(targetObjects, sourceObjects, rules)
 }
 
 // The rules drop a changed object and create it again. The DROP statement and the CREATE

@@ -50,7 +50,7 @@ func (t *PostgresCompositeType) Diff(other *PostgresCompositeType) []driversshar
 	return []driversshared.Instruction{other.DropInstruction(), t.CreateInstruction()}
 }
 
-func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresCompositeType]{
 		Get: d.GetCompositeTypes,
 		Key: func(compositeType *PostgresCompositeType) string {

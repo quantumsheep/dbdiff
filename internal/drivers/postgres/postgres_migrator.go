@@ -3,6 +3,7 @@ package driverspostgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -85,7 +86,7 @@ func (m *PostgresMigrator) Close() error {
 	connectionError := m.Connection.Close()
 	databaseError := m.Database.Close()
 
-	return driversshared.FirstError(connectionError, databaseError)
+	return errors.Join(connectionError, databaseError)
 }
 
 func (m *PostgresMigrator) SupportsTransactionalDDL() bool {

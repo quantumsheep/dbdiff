@@ -17,20 +17,3 @@ type DiffOptions struct {
 type Driver interface {
 	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) (Instructions, error)
 }
-
-func FirstError(candidates ...error) error {
-	for _, err := range candidates {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// An early removal covers the object that blocks an addition of another section.
-type SectionDiff struct {
-	EarlyRemovals []Instruction
-	Additions     []Instruction
-	Removals      []Instruction
-}

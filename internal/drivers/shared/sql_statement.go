@@ -96,17 +96,14 @@ func isSQLWordStart(letter byte) bool {
 		(letter >= 'A' && letter <= 'Z')
 }
 
+func isSQLWordLetter(letter byte) bool {
+	return isSQLWordStart(letter) || (letter >= '0' && letter <= '9')
+}
+
 func readSQLWord(content string, index int) (string, int) {
 	end := index
 
-	for end < len(content) {
-		letter := content[end]
-
-		isWordLetter := isSQLWordStart(letter) || (letter >= '0' && letter <= '9')
-		if !isWordLetter {
-			break
-		}
-
+	for end < len(content) && isSQLWordLetter(content[end]) {
 		end++
 	}
 
@@ -114,21 +111,12 @@ func readSQLWord(content string, index int) (string, int) {
 }
 
 func nextSQLWord(content string, index int) string {
-	for index < len(content) {
-		letter := content[index]
-
-		if letter != ' ' && letter != '\t' && letter != '\n' && letter != '\r' {
-			break
-		}
-
-		index++
-	}
-
-	if index >= len(content) || !isSQLWordStart(content[index]) {
+	rest := strings.TrimLeft(content[index:], " \t\n\r")
+	if rest == "" || !isSQLWordStart(rest[0]) {
 		return ""
 	}
 
-	word, _ := readSQLWord(content, index)
+	word, _ := readSQLWord(rest, 0)
 
 	return word
 }
@@ -237,11 +225,7 @@ func dollarQuoteTag(content string, index int) string {
 			return content[index : offset+1]
 		}
 
-		isTagLetter := letter == '_' ||
-			(letter >= 'a' && letter <= 'z') ||
-			(letter >= 'A' && letter <= 'Z') ||
-			(offset > index+1 && letter >= '0' && letter <= '9')
-
+		isTagLetter := isSQLWordStart(letter) || (offset > index+1 && isSQLWordLetter(letter))
 		if !isTagLetter {
 			return ""
 		}

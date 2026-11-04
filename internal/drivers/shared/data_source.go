@@ -35,7 +35,7 @@ func ParseDataSource(argument string) DataSource {
 		}
 	}
 
-	if HasSQLExtension(argument) {
+	if hasSQLExtension(argument) {
 		return FileDataSource{
 			Path: argument,
 		}

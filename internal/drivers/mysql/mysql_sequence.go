@@ -35,17 +35,7 @@ func (s *MySQLSequence) CreateInstruction() *MySQLCreateSequenceInstruction {
 }
 
 func (d *MySQLDriver) DiffSequences(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetSequences, err := d.GetSequences(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceSequences, err := d.GetSequences(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	additions, removals, err := driversshared.DiffByKey(targetSequences, sourceSequences, driversshared.DiffRules[*MySQLSequence]{
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetSequences, driversshared.DiffRules[*MySQLSequence]{
 		Key: func(sequence *MySQLSequence) string {
 			return sequence.Name
 		},

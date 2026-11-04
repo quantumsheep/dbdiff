@@ -93,7 +93,7 @@ func (t *PostgresEnumType) Diff(other *PostgresEnumType) []driversshared.Instruc
 	return instructions
 }
 
-func (d *PostgresDriver) DiffEnumTypes(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffEnumTypes(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresEnumType]{
 		Get: d.GetEnumTypes,
 		Key: func(enumType *PostgresEnumType) string {

@@ -91,9 +91,9 @@ func joinPrivileges(privileges []string) string {
 	return strings.Join(privileges, ", ")
 }
 
-func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, error) {
 	if !d.ComparePrivileges {
-		return &driversshared.SectionDiff{}, nil
+		return &SectionDiff{}, nil
 	}
 
 	var additions []driversshared.Instruction
@@ -176,7 +176,7 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*driversshared.Sec
 		}
 	}
 
-	return &driversshared.SectionDiff{Additions: additions}, nil
+	return &SectionDiff{Additions: additions}, nil
 }
 
 func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {

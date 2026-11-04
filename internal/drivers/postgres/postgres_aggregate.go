@@ -92,7 +92,7 @@ func (a *PostgresAggregate) Diff(other *PostgresAggregate) []driversshared.Instr
 	return []driversshared.Instruction{other.DropInstruction(), a.CreateInstruction()}
 }
 
-func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresAggregate]{
 		Get: d.GetAggregates,
 		Key: func(aggregate *PostgresAggregate) string {

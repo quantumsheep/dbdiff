@@ -52,17 +52,16 @@ func DetectDriverOfTarget(target DataSource) (DriverName, error) {
 // dataSourceArgument names the value that the user gave for a data source, so the
 // detection error can name what defeated it.
 func dataSourceArgument(source DataSource) string {
-	path, isSQLSource := SQLSourcePath(source)
-	if isSQLSource {
-		return path
+	switch value := source.(type) {
+	case FileDataSource:
+		return value.Path
+	case FolderDataSource:
+		return value.Path
+	case ConnectionStringDataSource:
+		return value.ConnectionString
+	default:
+		return ""
 	}
-
-	connection, ok := source.(ConnectionStringDataSource)
-	if ok {
-		return connection.ConnectionString
-	}
-
-	return ""
 }
 
 func detectDriverOfDataSource(source DataSource) DriverName {

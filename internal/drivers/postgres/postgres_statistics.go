@@ -25,7 +25,7 @@ func (s *PostgresStatistics) DropInstruction() *PostgresDropStatisticsInstructio
 }
 
 // An extended statistics object names a table, so this section comes after the tables.
-func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresStatistics]{
 		Get: d.GetStatistics,
 		Key: func(statistics *PostgresStatistics) string {

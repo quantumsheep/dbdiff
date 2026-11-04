@@ -27,17 +27,7 @@ func (r *MySQLRoutine) CreateInstruction() *MySQLCreateRoutineInstruction {
 }
 
 func (d *MySQLDriver) DiffRoutines(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetRoutines, err := d.GetRoutines(ctx, d.TargetDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	sourceRoutines, err := d.GetRoutines(ctx, d.SourceDatabaseConnection)
-	if err != nil {
-		return nil, err
-	}
-
-	additions, removals, err := driversshared.DiffByKey(targetRoutines, sourceRoutines, driversshared.DiffRules[*MySQLRoutine]{
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetRoutines, driversshared.DiffRules[*MySQLRoutine]{
 		Key: func(routine *MySQLRoutine) string {
 			return routine.Type + " " + routine.Name
 		},

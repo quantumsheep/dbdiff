@@ -94,7 +94,7 @@ func (d *PostgresDriver) HasAutomaticCast(ctx context.Context, db *sql.DB, oldTy
 	return automatic, nil
 }
 
-func (d *PostgresDriver) DiffCasts(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffCasts(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresCast]{
 		Get: d.GetCasts,
 		Key: func(cast *PostgresCast) string {

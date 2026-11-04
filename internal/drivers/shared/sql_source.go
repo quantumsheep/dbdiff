@@ -21,18 +21,13 @@ func NewSQLSource(path string) (*SQLSource, error) {
 		return nil, err
 	}
 
-	if !information.IsDir() {
-		sqlSource := &SQLSource{
-			Path:  path,
-			Files: []string{path},
+	files := []string{path}
+
+	if information.IsDir() {
+		files, err = collectSQLFiles(path)
+		if err != nil {
+			return nil, err
 		}
-
-		return sqlSource, nil
-	}
-
-	files, err := collectSQLFiles(path)
-	if err != nil {
-		return nil, err
 	}
 
 	sqlSource := &SQLSource{
@@ -50,7 +45,7 @@ func (s *SQLSource) ApplyTo(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
-		err = ApplySQLContent(ctx, db, TrimGooseDownSection(string(content)))
+		err = applySQLContent(ctx, db, trimGooseDownSection(string(content)))
 		if err != nil {
 			return fmt.Errorf("failed to apply %q: %w", file, err)
 		}
@@ -59,7 +54,7 @@ func (s *SQLSource) ApplyTo(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func ApplySQLContent(ctx context.Context, db *sql.DB, content string) error {
+func applySQLContent(ctx context.Context, db *sql.DB, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
@@ -89,7 +84,7 @@ func collectSQLFiles(directory string) ([]string, error) {
 	var files []string
 
 	for _, entry := range entries {
-		if entry.IsDir() || !HasSQLExtension(entry.Name()) || IsDownMigration(entry.Name()) {
+		if !IsUpSQLFile(entry) {
 			continue
 		}
 
@@ -103,7 +98,7 @@ func collectSQLFiles(directory string) ([]string, error) {
 
 // A goose file holds the up migration and the down migration in one file, and the down
 // part removes the schema that the up part built.
-func TrimGooseDownSection(content string) string {
+func trimGooseDownSection(content string) string {
 	lines := strings.Split(content, "\n")
 
 	for index, line := range lines {
@@ -118,10 +113,14 @@ func TrimGooseDownSection(content string) string {
 	return content
 }
 
-func HasSQLExtension(path string) bool {
+func IsUpSQLFile(entry os.DirEntry) bool {
+	return !entry.IsDir() && hasSQLExtension(entry.Name()) && !isDownMigration(entry.Name())
+}
+
+func hasSQLExtension(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".sql")
 }
 
-func IsDownMigration(name string) bool {
+func isDownMigration(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".down.sql")
 }

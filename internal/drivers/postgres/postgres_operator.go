@@ -70,7 +70,7 @@ func (o *PostgresOperator) Diff(other *PostgresOperator) []driversshared.Instruc
 	return []driversshared.Instruction{other.DropInstruction(), o.CreateInstruction()}
 }
 
-func (d *PostgresDriver) DiffOperators(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresOperator]{
 		Get: d.GetOperators,
 		Key: func(operator *PostgresOperator) string {

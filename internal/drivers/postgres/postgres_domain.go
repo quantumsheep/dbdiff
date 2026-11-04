@@ -128,7 +128,7 @@ func (d *PostgresDomain) Diff(other *PostgresDomain) []driversshared.Instruction
 	return instructions
 }
 
-func (d *PostgresDriver) DiffDomains(ctx context.Context) (*driversshared.SectionDiff, error) {
+func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) {
 	return diffSection(ctx, d, sectionRules[*PostgresDomain]{
 		Get: d.GetDomains,
 		Key: func(domain *PostgresDomain) string {
