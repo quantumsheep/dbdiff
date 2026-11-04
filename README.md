@@ -55,6 +55,16 @@ dbdiff diff postgres://localhost:5432/current postgres://localhost:5432/desired
 > [!CAUTION]
 > Read the output before you apply it. It can drop tables, columns, and rows.
 
+### Shell completion
+
+`dbdiff completion <shell>` prints the completion script for `bash`, `zsh`, `fish`, or `pwsh`.
+
+```bash
+source <(dbdiff completion bash)                         # bash
+source <(dbdiff completion zsh)                          # zsh
+dbdiff completion fish > ~/.config/fish/completions/dbdiff.fish   # fish
+```
+
 ### Flags of `diff`
 
 | Flag               | Value                             | Purpose                                                                                                     |

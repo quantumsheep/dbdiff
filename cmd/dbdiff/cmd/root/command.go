@@ -16,12 +16,13 @@ import (
 
 func Command() *cli.Command {
 	return &cli.Command{
-		Name:         "dbdiff",
-		Version:      helpers.Version(),
-		Usage:        "Compare database schemas and generate migration scripts",
-		Description:  "Compare database schemas and generate migration scripts",
-		UsageText:    "dbdiff <command> [options]",
-		OnUsageError: helpers.OnUsageError,
+		Name:                  "dbdiff",
+		Version:               helpers.Version(),
+		Usage:                 "Compare database schemas and generate migration scripts",
+		Description:           "Compare database schemas and generate migration scripts",
+		UsageText:             "dbdiff <command> [options]",
+		OnUsageError:          helpers.OnUsageError,
+		EnableShellCompletion: true,
 		// The default handler calls os.Exit inside Run. ExitCode handles the error instead.
 		ExitErrHandler: func(ctx context.Context, command *cli.Command, err error) {},
 		Flags: []cli.Flag{

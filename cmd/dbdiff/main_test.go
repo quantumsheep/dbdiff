@@ -19,6 +19,22 @@ func TestDbdiffCommand(t *testing.T) {
 		require.NotContains(t, result.Stdout, "version \n")
 	})
 
+	t.Run("ShellCompletionOfMigrate", func(t *testing.T) {
+		result := clitest.Run(t, "migrate", "--generate-shell-completion")
+
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+		require.Equal(t, `generate:Write the next migration file
+status:List each migration and its state
+preview:Print the statements of the pending migrations
+up:Apply every pending migration
+step:Apply every pending migration, and ask before each file
+verify:Compare the database against the replay of the applied migrations
+repair:Make the history table agree with the migration files
+baseline:Record every migration file as applied, and run no file
+help:Shows a list of commands or help for one command
+`, result.Stdout)
+	})
+
 	t.Run("DiffCommandName", func(t *testing.T) {
 		directory := t.TempDir()
 
