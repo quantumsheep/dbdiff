@@ -237,7 +237,10 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 	return diff
 }
 
-func (t *SQLiteTable) DiffTable(other *SQLiteTable, reservedNames map[string]bool) ([]driversshared.Instruction, error) {
+func (t *SQLiteTable) DiffTable(
+	other *SQLiteTable,
+	reservedNames map[string]bool,
+) ([]driversshared.Instruction, error) {
 	columnsDiff := t.DiffColumns(other)
 
 	// SQLite holds no ALTER COLUMN, so a changed column or constraint recreates the table.
@@ -344,8 +347,11 @@ func temporaryTableName(tableName string, reservedNames map[string]bool) string 
 	return name
 }
 
-func (t *SQLiteTable) recreationInstructions(current *SQLiteTable, renamedFrom map[string]string,
-	reservedNames map[string]bool) []driversshared.Instruction {
+func (t *SQLiteTable) recreationInstructions(
+	current *SQLiteTable,
+	renamedFrom map[string]string,
+	reservedNames map[string]bool,
+) []driversshared.Instruction {
 	temporaryTable := *t
 	temporaryTable.Name = temporaryTableName(t.Name, reservedNames)
 

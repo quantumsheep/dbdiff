@@ -83,8 +83,12 @@ func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema st
 	return nil
 }
 
-func (d *PostgresDriver) Diff(ctx context.Context, current driversshared.DataSource,
-	desired driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
+func (d *PostgresDriver) Diff(
+	ctx context.Context,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+	options driversshared.DiffOptions,
+) (driversshared.Instructions, error) {
 	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
@@ -160,8 +164,11 @@ func (d *PostgresDriver) Diff(ctx context.Context, current driversshared.DataSou
 	return instructions, nil
 }
 
-func (d *PostgresDriver) openSides(ctx context.Context, current driversshared.DataSource,
-	desired driversshared.DataSource) (func(), error) {
+func (d *PostgresDriver) openSides(
+	ctx context.Context,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+) (func(), error) {
 	d.ScratchVersion = d.scratchVersionOfSources(ctx, current, desired)
 
 	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, d.DesiredSchema, "desired")

@@ -14,7 +14,11 @@ type DiffRules[T any] struct {
 	Drop   func(current T) []Instruction
 }
 
-func DiffByKey[T any](desiredObjects []T, currentObjects []T, rules DiffRules[T]) ([]Instruction, []Instruction, error) {
+func DiffByKey[T any](
+	desiredObjects []T,
+	currentObjects []T,
+	rules DiffRules[T],
+) ([]Instruction, []Instruction, error) {
 	var additions []Instruction
 	var removals []Instruction
 
@@ -47,8 +51,13 @@ func DiffByKey[T any](desiredObjects []T, currentObjects []T, rules DiffRules[T]
 	return additions, removals, nil
 }
 
-func DiffSides[T any](ctx context.Context, desiredDatabase *sql.DB, currentDatabase *sql.DB,
-	get func(context.Context, *sql.DB) ([]T, error), rules DiffRules[T]) ([]Instruction, []Instruction, error) {
+func DiffSides[T any](
+	ctx context.Context,
+	desiredDatabase *sql.DB,
+	currentDatabase *sql.DB,
+	get func(context.Context, *sql.DB) ([]T, error),
+	rules DiffRules[T],
+) ([]Instruction, []Instruction, error) {
 	desiredObjects, err := get(ctx, desiredDatabase)
 	if err != nil {
 		return nil, nil, err
@@ -64,7 +73,12 @@ func DiffSides[T any](ctx context.Context, desiredDatabase *sql.DB, currentDatab
 
 // The rules drop a changed object and create it again. The DROP statement and the CREATE
 // statement stay together in the additions, so the drop runs before the create.
-func ReplaceRules[T any](key func(T) string, equal func(T, T) bool, create func(T) Instruction, drop func(T) Instruction) DiffRules[T] {
+func ReplaceRules[T any](
+	key func(T) string,
+	equal func(T, T) bool,
+	create func(T) Instruction,
+	drop func(T) Instruction,
+) DiffRules[T] {
 	return DiffRules[T]{
 		Key: key,
 		Create: func(desired T) []Instruction {
@@ -86,7 +100,14 @@ func ReplaceRules[T any](key func(T) string, equal func(T, T) bool, create func(
 // The drop of a changed object goes into the removals, in the order of the
 // desired objects and before the drops of the removed objects. The caller can then run
 // every drop before every create.
-func ReplaceByKey[T any](desiredObjects []T, currentObjects []T, key func(T) string, equal func(T, T) bool, create func(T) Instruction, drop func(T) Instruction) ([]Instruction, []Instruction) {
+func ReplaceByKey[T any](
+	desiredObjects []T,
+	currentObjects []T,
+	key func(T) string,
+	equal func(T, T) bool,
+	create func(T) Instruction,
+	drop func(T) Instruction,
+) ([]Instruction, []Instruction) {
 	var changedDrops []Instruction
 
 	rules := ReplaceRules(key, equal, create, drop)

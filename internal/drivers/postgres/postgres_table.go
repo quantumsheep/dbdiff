@@ -166,7 +166,10 @@ func identityOptionDefaults(currentOptions string, columnType string) string {
 	return strings.Join(defaults, " ")
 }
 
-func (t *PostgresTable) DiffTable(other *PostgresTable, hasAutomaticCast AutomaticCastLookup) ([]driversshared.Instruction, error) {
+func (t *PostgresTable) DiffTable(
+	other *PostgresTable,
+	hasAutomaticCast AutomaticCastLookup,
+) ([]driversshared.Instruction, error) {
 	var instructions []driversshared.Instruction
 
 	if t.IsPartition() != other.IsPartition() {

@@ -37,8 +37,12 @@ func TrimSQLitePrefix(path string) string {
 	return strings.TrimPrefix(path, "sqlite://")
 }
 
-func (d *SQLiteDriver) Diff(ctx context.Context, current driversshared.DataSource,
-	desired driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
+func (d *SQLiteDriver) Diff(
+	ctx context.Context,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+	options driversshared.DiffOptions,
+) (driversshared.Instructions, error) {
 	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
@@ -77,8 +81,11 @@ func (d *SQLiteDriver) Diff(ctx context.Context, current driversshared.DataSourc
 	return instructions, nil
 }
 
-func (d *SQLiteDriver) openSides(ctx context.Context, current driversshared.DataSource,
-	desired driversshared.DataSource) (func(), error) {
+func (d *SQLiteDriver) openSides(
+	ctx context.Context,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+) (func(), error) {
 	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, "desired")
 	if err != nil {
 		_ = d.RemoveTemporaryDirectory()
@@ -370,8 +377,12 @@ const (
 // PRAGMA table_info gives no generated column, so this method reads PRAGMA table_xinfo.
 // That PRAGMA gives no expression, so the parsed definition gives it. The second value
 // holds a primary key of two or more columns, in the order of the key.
-func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string,
-	parsed *SQLiteTableDefinition) ([]*SQLiteColumn, []string, error) {
+func (d *SQLiteDriver) GetTableColumns(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	parsed *SQLiteTableDefinition,
+) ([]*SQLiteColumn, []string, error) {
 	type primaryKeyColumn struct {
 		Column   *SQLiteColumn
 		Position int
@@ -465,7 +476,11 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 }
 
 // This method sorts the keys, because SQLite gives no stable order.
-func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, indexList []sqliteIndexListEntry) ([][]string, error) {
+func (d *SQLiteDriver) GetTableUniqueKeys(
+	ctx context.Context,
+	db *sql.DB,
+	indexList []sqliteIndexListEntry,
+) ([][]string, error) {
 	var keys [][]string
 
 	for _, index := range indexList {
@@ -496,8 +511,12 @@ func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, index
 	return keys, nil
 }
 
-func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string,
-	indexList []sqliteIndexListEntry) ([]*SQLiteIndex, error) {
+func (d *SQLiteDriver) GetTableIndexes(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	indexList []sqliteIndexListEntry,
+) ([]*SQLiteIndex, error) {
 	definitions, err := d.GetIndexDefinitions(ctx, db, tableName)
 	if err != nil {
 		return nil, err
@@ -574,7 +593,11 @@ func (d *SQLiteDriver) getIndexInfo(ctx context.Context, db *sql.DB, indexName s
 }
 
 // An index that a UNIQUE constraint or a PRIMARY KEY builds holds no text.
-func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tableName string) (map[string]string, error) {
+func (d *SQLiteDriver) GetIndexDefinitions(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
 	if err != nil {
 		return nil, err
@@ -605,7 +628,12 @@ func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tabl
 
 // PRAGMA index_info gives no name for an expression key, no direction, and no collation,
 // so definitionKeys and indexKeyModifiers read those parts from the text.
-func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName string, definitionKeys []string) ([]string, error) {
+func (d *SQLiteDriver) GetIndexKeys(
+	ctx context.Context,
+	db *sql.DB,
+	indexName string,
+	definitionKeys []string,
+) ([]string, error) {
 	indexInfo, err := d.getIndexInfo(ctx, db, indexName)
 	if err != nil {
 		return nil, err
@@ -673,7 +701,12 @@ func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView,
 
 // PRAGMA foreign_key_list reports no name and no DEFERRABLE clause, so each key takes them
 // from its clause in parsedForeignKeys.
-func (d *SQLiteDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tableName string, parsedForeignKeys []*parsedConstraint) ([]*SQLiteForeignKey, error) {
+func (d *SQLiteDriver) GetTableForeignKeys(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	parsedForeignKeys []*parsedConstraint,
+) ([]*SQLiteForeignKey, error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_list("+driversshared.QuoteIdentifier(tableName)+");")
 	if err != nil {
 		return nil, err

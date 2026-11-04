@@ -79,8 +79,11 @@ func (d *MySQLDriver) registerConnection(ctx context.Context, db *sql.DB) error 
 	return nil
 }
 
-func (d *MySQLDriver) openSides(ctx context.Context, current driversshared.DataSource,
-	desired driversshared.DataSource) (func(), error) {
+func (d *MySQLDriver) openSides(
+	ctx context.Context,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+) (func(), error) {
 	d.detailsByConnection = make(map[*sql.DB]*mysqlConnectionDetails)
 
 	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, current, "desired")
@@ -152,8 +155,12 @@ func (d *MySQLDriver) releaseScratchResources(ctx context.Context) error {
 	return firstError
 }
 
-func (d *MySQLDriver) Diff(ctx context.Context, current driversshared.DataSource,
-	desired driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
+func (d *MySQLDriver) Diff(
+	ctx context.Context,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+	options driversshared.DiffOptions,
+) (driversshared.Instructions, error) {
 	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
@@ -213,7 +220,10 @@ func (d *MySQLDriver) Diff(ctx context.Context, current driversshared.DataSource
 	return instructions, nil
 }
 
-func (d *MySQLDriver) DiffTables(desiredTables []*MySQLTable, currentTables []*MySQLTable) ([]driversshared.Instruction, error) {
+func (d *MySQLDriver) DiffTables(
+	desiredTables []*MySQLTable,
+	currentTables []*MySQLTable,
+) ([]driversshared.Instruction, error) {
 	additions, removals, err := driversshared.DiffByKey(desiredTables, currentTables, driversshared.DiffRules[*MySQLTable]{
 		Key: func(table *MySQLTable) string {
 			return table.Name
@@ -329,8 +339,14 @@ func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable,
 	return tables, nil
 }
 
-func (d *MySQLDriver) GetTable(ctx context.Context, db *sql.DB, tableName string,
-	engine sql.NullString, tableCollation sql.NullString, partitioned bool) (*MySQLTable, error) {
+func (d *MySQLDriver) GetTable(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	engine sql.NullString,
+	tableCollation sql.NullString,
+	partitioned bool,
+) (*MySQLTable, error) {
 	columns, err := d.GetTableColumns(ctx, db, tableName, tableCollation)
 	if err != nil {
 		return nil, err
@@ -431,8 +447,12 @@ func (d *MySQLDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableNam
 	}, tableName)
 }
 
-func (d *MySQLDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string,
-	tableCollation sql.NullString) ([]*MySQLColumn, error) {
+func (d *MySQLDriver) GetTableColumns(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	tableCollation sql.NullString,
+) ([]*MySQLColumn, error) {
 	mariadb := d.detailsByConnection[db].mariadb
 
 	return driversshared.QueryAll(ctx, db, `
@@ -538,7 +558,11 @@ func unescapeCatalogText(value string) string {
 	return builder.String()
 }
 
-func (d *MySQLDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]string, []*MySQLIndex, error) {
+func (d *MySQLDriver) GetTableIndexes(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+) ([]string, []*MySQLIndex, error) {
 	mariadb := d.detailsByConnection[db].mariadb
 
 	expressionColumn := "NULL"
@@ -624,8 +648,13 @@ func indexKind(indexType string, nonUnique int) string {
 
 // A FULLTEXT index and a SPATIAL index report an internal prefix length, and the CREATE
 // INDEX statement refuses it.
-func indexKey(kind string, columnName sql.NullString, subPart sql.NullInt64,
-	collation sql.NullString, expression sql.NullString) string {
+func indexKey(
+	kind string,
+	columnName sql.NullString,
+	subPart sql.NullInt64,
+	collation sql.NullString,
+	expression sql.NullString,
+) string {
 	if expression.Valid && expression.String != "" {
 		return "(" + expression.String + ")"
 	}
@@ -643,7 +672,11 @@ func indexKey(kind string, columnName sql.NullString, subPart sql.NullInt64,
 	return key
 }
 
-func (d *MySQLDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, tableName string) ([]*MySQLForeignKey, error) {
+func (d *MySQLDriver) GetTableForeignKeys(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+) ([]*MySQLForeignKey, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT rc.CONSTRAINT_NAME, rc.UPDATE_RULE, rc.DELETE_RULE, rc.REFERENCED_TABLE_NAME,
 			kcu.COLUMN_NAME, kcu.REFERENCED_COLUMN_NAME
@@ -701,7 +734,11 @@ func (d *MySQLDriver) GetTableForeignKeys(ctx context.Context, db *sql.DB, table
 // The CHECK_CONSTRAINTS table of MySQL holds no table name, so the query joins the
 // TABLE_CONSTRAINTS table. The table of MariaDB holds the table name, and MariaDB needs
 // it, because two tables can hold a column constraint with one name.
-func (d *MySQLDriver) GetTableCheckConstraints(ctx context.Context, db *sql.DB, tableName string) ([]*MySQLCheckConstraint, error) {
+func (d *MySQLDriver) GetTableCheckConstraints(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+) ([]*MySQLCheckConstraint, error) {
 	query := `
 		SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
 		FROM information_schema.TABLE_CONSTRAINTS tc

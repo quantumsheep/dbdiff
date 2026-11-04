@@ -63,8 +63,12 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 	}
 }
 
-func NewMigrator(ctx context.Context, driverName driversshared.DriverName, database driversshared.ConnectionStringDataSource,
-	schema string) (internalmigrations.Migrator, error) {
+func NewMigrator(
+	ctx context.Context,
+	driverName driversshared.DriverName,
+	database driversshared.ConnectionStringDataSource,
+	schema string,
+) (internalmigrations.Migrator, error) {
 	if driverName == "" {
 		detected, err := driversshared.DetectDriverOfDatabase(database)
 		if err != nil {
@@ -100,8 +104,13 @@ func (openDatabaseError *OpenDatabaseError) Unwrap() error {
 	return openDatabaseError.Err
 }
 
-func OpenMigrationSet(ctx context.Context, driverName driversshared.DriverName, database driversshared.ConnectionStringDataSource,
-	schema string, directory string) (internalmigrations.Migrator, *internalmigrations.Set, error) {
+func OpenMigrationSet(
+	ctx context.Context,
+	driverName driversshared.DriverName,
+	database driversshared.ConnectionStringDataSource,
+	schema string,
+	directory string,
+) (internalmigrations.Migrator, *internalmigrations.Set, error) {
 	migrator, err := NewMigrator(ctx, driverName, database, schema)
 	if err != nil {
 		return nil, nil, &OpenDatabaseError{

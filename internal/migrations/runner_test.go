@@ -938,7 +938,11 @@ func TestRunnerVerify(t *testing.T) {
 	})
 }
 
-func newRunner(migrator internalmigrations.Migrator, set *internalmigrations.Set, output io.Writer) *internalmigrations.Runner {
+func newRunner(
+	migrator internalmigrations.Migrator,
+	set *internalmigrations.Set,
+	output io.Writer,
+) *internalmigrations.Runner {
 	return &internalmigrations.Runner{
 		Migrator: migrator,
 		Set:      set,

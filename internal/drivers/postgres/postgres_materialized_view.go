@@ -109,7 +109,11 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 	return views, nil
 }
 
-func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresIndex, error) {
+func (d *PostgresDriver) GetMaterializedViewIndexes(
+	ctx context.Context,
+	db *sql.DB,
+	viewName string,
+) ([]*PostgresIndex, error) {
 	// Every query that reads a definition text removes the current_schema() prefix. Without
 	// this step the diff drops and recreates an object that did not change.
 	return driversshared.QueryAll(ctx, db, `
@@ -138,7 +142,10 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql
 	}, viewName)
 }
 
-func diffMaterializedViewIndexes(desiredView *PostgresMaterializedView, currentView *PostgresMaterializedView) []driversshared.Instruction {
+func diffMaterializedViewIndexes(
+	desiredView *PostgresMaterializedView,
+	currentView *PostgresMaterializedView,
+) []driversshared.Instruction {
 	var instructions []driversshared.Instruction
 
 	for _, desiredIndex := range desiredView.Indexes {

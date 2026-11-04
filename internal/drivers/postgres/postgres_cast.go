@@ -50,7 +50,11 @@ func (c *PostgresCast) DropInstruction() *PostgresDropCastInstruction {
 
 type AutomaticCastLookup func(oldType string, newType string) (bool, error)
 
-func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, hasAutomaticCast AutomaticCastLookup) (bool, error) {
+func columnUsingClause(
+	newColumn *PostgresColumn,
+	oldColumn *PostgresColumn,
+	hasAutomaticCast AutomaticCastLookup,
+) (bool, error) {
 	automatic, err := hasAutomaticCast(oldColumn.Type, newColumn.Type)
 	if err != nil {
 		return false, err
@@ -62,7 +66,12 @@ func columnUsingClause(newColumn *PostgresColumn, oldColumn *PostgresColumn, has
 // The rules of pg_cast are long, so this function asks the database. ALTER TABLE ALTER
 // COLUMN TYPE uses the assignment context. An unknown type name gives true, and the output
 // then keeps the form that it had before this rule.
-func (d *PostgresDriver) HasAutomaticCast(ctx context.Context, db *sql.DB, oldType string, newType string) (bool, error) {
+func (d *PostgresDriver) HasAutomaticCast(
+	ctx context.Context,
+	db *sql.DB,
+	oldType string,
+	newType string,
+) (bool, error) {
 	row := db.QueryRowContext(ctx, `
 		SELECT
 			old_type IS NULL

@@ -23,6 +23,11 @@ func baselineCommand() *cli.Command {
 	}
 }
 
-func baselineAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+func baselineAction(
+	ctx context.Context,
+	command *cli.Command,
+	_ *internalmigrations.Config,
+	runner *internalmigrations.Runner,
+) error {
 	return runner.Baseline(ctx, command.String("to"))
 }

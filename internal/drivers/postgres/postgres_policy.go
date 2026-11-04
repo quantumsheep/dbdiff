@@ -56,7 +56,11 @@ func (p *PostgresPolicy) DropInstruction() *PostgresDropPolicyInstruction {
 	}
 }
 
-func (d *PostgresDriver) GetTablePolicies(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresPolicy, error) {
+func (d *PostgresDriver) GetTablePolicies(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+) ([]*PostgresPolicy, error) {
 	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			policyname,

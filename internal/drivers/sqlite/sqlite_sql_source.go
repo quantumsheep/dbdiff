@@ -12,7 +12,11 @@ import (
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
-func (d *SQLiteDriver) OpenSide(ctx context.Context, dataSource driversshared.DataSource, role string) (*sql.DB, error) {
+func (d *SQLiteDriver) OpenSide(
+	ctx context.Context,
+	dataSource driversshared.DataSource,
+	role string,
+) (*sql.DB, error) {
 	path, isSQLSource := driversshared.SQLSourcePath(dataSource)
 	if !isSQLSource {
 		connectionSource := dataSource.(driversshared.ConnectionStringDataSource)

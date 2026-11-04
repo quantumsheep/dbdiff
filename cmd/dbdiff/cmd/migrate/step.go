@@ -18,6 +18,11 @@ func stepCommand() *cli.Command {
 	}
 }
 
-func stepAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+func stepAction(
+	ctx context.Context,
+	command *cli.Command,
+	_ *internalmigrations.Config,
+	runner *internalmigrations.Runner,
+) error {
 	return runner.Step(ctx, command.Root().Reader)
 }

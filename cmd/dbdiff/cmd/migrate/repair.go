@@ -20,6 +20,11 @@ func repairCommand() *cli.Command {
 	}
 }
 
-func repairAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+func repairAction(
+	ctx context.Context,
+	command *cli.Command,
+	_ *internalmigrations.Config,
+	runner *internalmigrations.Runner,
+) error {
 	return runner.Repair(ctx)
 }

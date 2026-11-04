@@ -117,7 +117,10 @@ func (r *PostgresRelation) Instructions() []driversshared.Instruction {
 }
 
 // Two independent relations keep the order that the queries give.
-func sortRelationsByDependency(views []*PostgresView, materializedViews []*PostgresMaterializedView) []*PostgresRelation {
+func sortRelationsByDependency(
+	views []*PostgresView,
+	materializedViews []*PostgresMaterializedView,
+) []*PostgresRelation {
 	relations := make([]*PostgresRelation, 0, len(views)+len(materializedViews))
 
 	for _, view := range views {
@@ -181,7 +184,11 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 }
 
 // The type of each column comes with it, because a type change makes the view invalid.
-func (d *PostgresDriver) GetViewColumns(ctx context.Context, db *sql.DB, viewName string) ([]*PostgresViewColumn, error) {
+func (d *PostgresDriver) GetViewColumns(
+	ctx context.Context,
+	db *sql.DB,
+	viewName string,
+) ([]*PostgresViewColumn, error) {
 	return driversshared.QueryAll(ctx, db, `
 		SELECT DISTINCT
 			source_class.relname,

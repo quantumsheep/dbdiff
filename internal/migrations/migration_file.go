@@ -44,8 +44,13 @@ func RenderFile(toolVersion string, generatedAt time.Time, instructions []driver
 	return builder.String()
 }
 
-func WriteFiles(directory string, slug string, generatedAt time.Time,
-	toolVersion string, instructions []driversshared.Instruction) ([]string, error) {
+func WriteFiles(
+	directory string,
+	slug string,
+	generatedAt time.Time,
+	toolVersion string,
+	instructions []driversshared.Instruction,
+) ([]string, error) {
 	groups := splitMigrationInstructions(instructions)
 	if len(groups) == 0 {
 		return nil, nil

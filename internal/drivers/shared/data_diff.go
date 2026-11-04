@@ -29,8 +29,14 @@ type DataRules[Table any, Quoter IdentifierQuoter] struct {
 }
 
 // The schema section already creates or drops the other tables.
-func DiffData[Table any, Quoter IdentifierQuoter](ctx context.Context, desiredDatabaseConnection *sql.DB, currentDatabaseConnection *sql.DB,
-	desiredTables []Table, currentTables []Table, rules DataRules[Table, Quoter]) ([]Instruction, error) {
+func DiffData[Table any, Quoter IdentifierQuoter](
+	ctx context.Context,
+	desiredDatabaseConnection *sql.DB,
+	currentDatabaseConnection *sql.DB,
+	desiredTables []Table,
+	currentTables []Table,
+	rules DataRules[Table, Quoter],
+) ([]Instruction, error) {
 	var instructions []Instruction
 	var removalsPerTable [][]Instruction
 
@@ -71,8 +77,14 @@ func DiffData[Table any, Quoter IdentifierQuoter](ctx context.Context, desiredDa
 	return instructions, nil
 }
 
-func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, desiredDatabaseConnection *sql.DB, currentDatabaseConnection *sql.DB,
-	desiredTable Table, currentTable Table, rules DataRules[Table, Quoter]) ([]Instruction, []Instruction, error) {
+func diffTableData[Table any, Quoter IdentifierQuoter](
+	ctx context.Context,
+	desiredDatabaseConnection *sql.DB,
+	currentDatabaseConnection *sql.DB,
+	desiredTable Table,
+	currentTable Table,
+	rules DataRules[Table, Quoter],
+) ([]Instruction, []Instruction, error) {
 	primaryKeyColumnNames, err := rules.PrimaryKey(ctx, desiredDatabaseConnection, desiredTable)
 	if err != nil {
 		return nil, nil, err
@@ -178,8 +190,12 @@ func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, desi
 	return slices.Concat(insertions, modifications), removals, nil
 }
 
-func insertRowInstruction[Table any, Quoter IdentifierQuoter](rules DataRules[Table, Quoter], table Table,
-	columnNames []string, row map[string]string) Instruction {
+func insertRowInstruction[Table any, Quoter IdentifierQuoter](
+	rules DataRules[Table, Quoter],
+	table Table,
+	columnNames []string,
+	row map[string]string,
+) Instruction {
 	values := lo.Map(columnNames, func(name string, _ int) string {
 		return row[name]
 	})
@@ -197,8 +213,12 @@ func insertRowInstruction[Table any, Quoter IdentifierQuoter](rules DataRules[Ta
 
 // The schema section creates this table with no row, so every desired row becomes an
 // INSERT statement.
-func tableDataInstructions[Table any, Quoter IdentifierQuoter](ctx context.Context, db *sql.DB, desiredTable Table,
-	rules DataRules[Table, Quoter]) ([]Instruction, error) {
+func tableDataInstructions[Table any, Quoter IdentifierQuoter](
+	ctx context.Context,
+	db *sql.DB,
+	desiredTable Table,
+	rules DataRules[Table, Quoter],
+) ([]Instruction, error) {
 	desiredColumnNames := rules.WritableColumns(desiredTable)
 	if len(desiredColumnNames) == 0 {
 		return nil, nil
@@ -230,8 +250,14 @@ func tableDataInstructions[Table any, Quoter IdentifierQuoter](ctx context.Conte
 
 // The engines give no stable order, so the ORDER BY clause keeps the output equal
 // between two runs.
-func getTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, db *sql.DB, table Table, columnNames []string,
-	primaryKeyColumnNames []string, rules DataRules[Table, Quoter]) (*tableData, error) {
+func getTableData[Table any, Quoter IdentifierQuoter](
+	ctx context.Context,
+	db *sql.DB,
+	table Table,
+	columnNames []string,
+	primaryKeyColumnNames []string,
+	rules DataRules[Table, Quoter],
+) (*tableData, error) {
 	selectExpression := rules.SelectExpression
 	if selectExpression == nil {
 		selectExpression = quoteWith[Quoter]

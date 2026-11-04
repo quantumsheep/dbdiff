@@ -18,6 +18,11 @@ func statusCommand() *cli.Command {
 	}
 }
 
-func statusAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+func statusAction(
+	ctx context.Context,
+	command *cli.Command,
+	_ *internalmigrations.Config,
+	runner *internalmigrations.Runner,
+) error {
 	return runner.Status()
 }

@@ -205,8 +205,12 @@ func (statements Statements) String() string {
 
 // Diff reads the current schema and the desired schema, and it gives the statements
 // that make the current schema equal to the desired schema.
-func (d *Driver) Diff(ctx context.Context, current DataSource, desired DataSource,
-	options ...DiffOption) (Statements, error) {
+func (d *Driver) Diff(
+	ctx context.Context,
+	current DataSource,
+	desired DataSource,
+	options ...DiffOption,
+) (Statements, error) {
 	merged := &diffOptions{}
 
 	for _, option := range options {

@@ -82,7 +82,10 @@ var requiredKeyDescriptions = map[string]string{
 	"desired":  "the desired schema",
 }
 
-func openSet(ctx context.Context, command *cli.Command) (*internalmigrations.Config, internalmigrations.Migrator, *internalmigrations.Set, error) {
+func openSet(
+	ctx context.Context,
+	command *cli.Command,
+) (*internalmigrations.Config, internalmigrations.Migrator, *internalmigrations.Set, error) {
 	config, path, err := migrationConfigFromCommand(command, "database")
 	if err != nil {
 		return nil, nil, nil, err
@@ -145,7 +148,9 @@ func databaseMigrationFlags(flags ...cli.Flag) []cli.Flag {
 	}, flags...)...)
 }
 
-func withRunner(action func(ctx context.Context, command *cli.Command, config *internalmigrations.Config, runner *internalmigrations.Runner) error) cli.ActionFunc {
+func withRunner(
+	action func(ctx context.Context, command *cli.Command, config *internalmigrations.Config, runner *internalmigrations.Runner) error,
+) cli.ActionFunc {
 	return func(ctx context.Context, command *cli.Command) error {
 		config, migrator, set, err := openSet(ctx, command)
 		if err != nil {

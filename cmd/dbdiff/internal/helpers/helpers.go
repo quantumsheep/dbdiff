@@ -31,7 +31,10 @@ func OnUsageError(ctx context.Context, command *cli.Command, err error, isSubcom
 
 // DetectDriverName names the engine of two data sources. The error of the detection
 // names no CLI flag, so this wrap names the flag that gives the driver.
-func DetectDriverName(current driversshared.DataSource, desired driversshared.DataSource) (driversshared.DriverName, error) {
+func DetectDriverName(
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+) (driversshared.DriverName, error) {
 	driverName, err := driversshared.DetectDriver(current, desired)
 
 	return driverName, nameTheDriverFlag(err)
@@ -54,7 +57,12 @@ func nameTheDriverFlag(err error) error {
 
 // CheckDriverSettings refuses a setting that the driver does not read. An empty
 // configPath names only the flag, because the diff command reads no configuration file.
-func CheckDriverSettings(driverName driversshared.DriverName, schema string, serverVersion string, configPath string) error {
+func CheckDriverSettings(
+	driverName driversshared.DriverName,
+	schema string,
+	serverVersion string,
+	configPath string,
+) error {
 	if schema != "" && driverName != driversshared.PostgresDriverName {
 		return fmt.Errorf("use %s only with the postgres driver", settingName("schema", configPath))
 	}

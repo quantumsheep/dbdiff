@@ -94,7 +94,12 @@ func (d *MySQLDriver) GetRoutines(ctx context.Context, db *sql.DB) ([]*MySQLRout
 
 // The ROUTINES catalog table gives the body without the parameter list, so the definition
 // comes from SHOW CREATE.
-func (d *MySQLDriver) GetRoutineDefinition(ctx context.Context, db *sql.DB, routineType string, name string) (string, error) {
+func (d *MySQLDriver) GetRoutineDefinition(
+	ctx context.Context,
+	db *sql.DB,
+	routineType string,
+	name string,
+) (string, error) {
 	row := db.QueryRowContext(ctx,
 		fmt.Sprintf("SHOW CREATE %s %s;", routineType, QuoteIdentifier(name)))
 

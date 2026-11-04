@@ -178,8 +178,12 @@ func (m *SQLMigrator) scanAppliedMigration(rows *sql.Rows) (AppliedMigration, er
 	return row, err
 }
 
-func (m *SQLMigrator) insertRecord(ctx context.Context, executor statementExecutor, migration *Migration,
-	dirtyLiteral string) error {
+func (m *SQLMigrator) insertRecord(
+	ctx context.Context,
+	executor statementExecutor,
+	migration *Migration,
+	dirtyLiteral string,
+) error {
 	statement := fmt.Sprintf("INSERT INTO %s (%s, %s, %s, %s, %s) VALUES (%s, %s, %s, %s, %s);",
 		m.historyTable(),
 		m.column("version"), m.column("name"), m.column("checksum"), m.column("applied_at"), m.column("dirty"),

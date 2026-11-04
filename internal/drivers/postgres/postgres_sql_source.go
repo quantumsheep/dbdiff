@@ -178,8 +178,11 @@ func DetectPostgresScratchVersion(ctx context.Context, connectionString string) 
 	return postgresScratchVersions[versionNumber/10000]
 }
 
-func (d *PostgresDriver) scratchVersionOfSources(ctx context.Context, current driversshared.DataSource,
-	desired driversshared.DataSource) embeddedpostgres.PostgresVersion {
+func (d *PostgresDriver) scratchVersionOfSources(
+	ctx context.Context,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+) embeddedpostgres.PostgresVersion {
 	currentHoldsSQL := driversshared.IsSQLSource(current)
 	desiredHoldsSQL := driversshared.IsSQLSource(desired)
 
@@ -234,7 +237,12 @@ func findFreePort() (uint32, error) {
 	return uint32(address.Port), nil
 }
 
-func (d *PostgresDriver) OpenSide(ctx context.Context, dataSource driversshared.DataSource, schema string, role string) (*sql.DB, error) {
+func (d *PostgresDriver) OpenSide(
+	ctx context.Context,
+	dataSource driversshared.DataSource,
+	schema string,
+	role string,
+) (*sql.DB, error) {
 	connectionSource, isConnectionString := dataSource.(driversshared.ConnectionStringDataSource)
 	if isConnectionString {
 		return OpenPostgresConnection(connectionSource.ConnectionString, schema)

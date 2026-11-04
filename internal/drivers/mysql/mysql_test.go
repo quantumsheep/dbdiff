@@ -136,8 +136,11 @@ func NewTestMariaDBDriverWithDesiredDirectory(tb testing.TB, directory string) *
 }
 
 // The driver materializes the desired directory as a scratch database on a temporary server.
-func newTestMySQLDriverWithDesiredDirectory(tb testing.TB, serverConnectionString string,
-	directory string) *TestingMySQLDriver {
+func newTestMySQLDriverWithDesiredDirectory(
+	tb testing.TB,
+	serverConnectionString string,
+	directory string,
+) *TestingMySQLDriver {
 	tb.Helper()
 
 	skipWithoutMySQLServer(tb)

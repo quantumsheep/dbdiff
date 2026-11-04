@@ -54,6 +54,7 @@ go test ./...
 - Never initialize a variable in the header of an `if`, `for`, `switch`, or `select`.
 - Put a blank line before and after a block. Do not put this line at the start or the end of a body. Do not put it between a block and the assignment that its condition checks.
 - In a struct literal, write each field on its own line.
+- If a function header is longer than 120 characters, write each parameter on its own line with a trailing comma. Put the closing parenthesis and the results on a new line.
 - Before you use a library, read its version in `go.mod`. Then read the documentation of that version with `go doc`.
 
 ## Comments

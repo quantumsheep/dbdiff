@@ -10,7 +10,12 @@ import (
 // schema does not hold is a rename only if exactly one current column that the desired
 // schema does not hold is equal to it except for the name. Two candidates make the
 // guess unsafe, so the caller adds the new column and removes the old columns.
-func GuessRenamedColumns[Column any](desiredColumns []Column, currentColumns []Column, name func(Column) string, equalExceptName func(Column, Column) bool) map[string]string {
+func GuessRenamedColumns[Column any](
+	desiredColumns []Column,
+	currentColumns []Column,
+	name func(Column) string,
+	equalExceptName func(Column, Column) bool,
+) map[string]string {
 	desiredNames := lo.Map(desiredColumns, func(column Column, _ int) string {
 		return name(column)
 	})

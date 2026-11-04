@@ -23,6 +23,11 @@ func upCommand() *cli.Command {
 	}
 }
 
-func upAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+func upAction(
+	ctx context.Context,
+	command *cli.Command,
+	_ *internalmigrations.Config,
+	runner *internalmigrations.Runner,
+) error {
 	return runner.Up(ctx, command.String("to"))
 }

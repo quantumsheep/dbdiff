@@ -82,8 +82,12 @@ type mysqlScratchDatabase struct {
 	name         string
 }
 
-func (d *MySQLDriver) OpenSide(ctx context.Context, dataSource driversshared.DataSource,
-	otherSource driversshared.DataSource, role string) (*sql.DB, error) {
+func (d *MySQLDriver) OpenSide(
+	ctx context.Context,
+	dataSource driversshared.DataSource,
+	otherSource driversshared.DataSource,
+	role string,
+) (*sql.DB, error) {
 	connectionSource, isConnectionString := dataSource.(driversshared.ConnectionStringDataSource)
 	if isConnectionString {
 		return OpenMySQLConnection(connectionSource.ConnectionString)
@@ -128,7 +132,10 @@ func (d *MySQLDriver) OpenSide(ctx context.Context, dataSource driversshared.Dat
 	return connection, nil
 }
 
-func (d *MySQLDriver) scratchServerConfig(ctx context.Context, otherSource driversshared.DataSource) (*mysql.Config, error) {
+func (d *MySQLDriver) scratchServerConfig(
+	ctx context.Context,
+	otherSource driversshared.DataSource,
+) (*mysql.Config, error) {
 	flavor := embeddedmysql.MySQL
 	version := d.ScratchServerVersion
 

@@ -20,7 +20,12 @@ func verifyCommand() *cli.Command {
 	}
 }
 
-func verifyAction(ctx context.Context, command *cli.Command, config *internalmigrations.Config, runner *internalmigrations.Runner) error {
+func verifyAction(
+	ctx context.Context,
+	command *cli.Command,
+	config *internalmigrations.Config,
+	runner *internalmigrations.Runner,
+) error {
 	database := driversshared.ParseDataSource(config.Database)
 
 	return runner.Verify(ctx, func(ctx context.Context, replay driversshared.DataSource) (driversshared.Instructions, error) {

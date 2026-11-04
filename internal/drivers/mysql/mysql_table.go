@@ -343,7 +343,9 @@ func (t *MySQLTable) foreignKeyChanges(other *MySQLTable) ([]driversshared.Instr
 		})
 }
 
-func (t *MySQLTable) checkConstraintChanges(other *MySQLTable) ([]driversshared.Instruction, []driversshared.Instruction) {
+func (t *MySQLTable) checkConstraintChanges(
+	other *MySQLTable,
+) ([]driversshared.Instruction, []driversshared.Instruction) {
 	return driversshared.ReplaceByKey(t.CheckConstraints, other.CheckConstraints,
 		func(check *MySQLCheckConstraint) string {
 			return check.Name

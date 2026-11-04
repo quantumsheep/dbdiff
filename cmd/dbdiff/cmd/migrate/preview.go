@@ -23,7 +23,12 @@ func previewCommand() *cli.Command {
 	}
 }
 
-func previewAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
+func previewAction(
+	ctx context.Context,
+	command *cli.Command,
+	_ *internalmigrations.Config,
+	runner *internalmigrations.Runner,
+) error {
 	err := runner.Preview()
 	if err != nil {
 		return err
