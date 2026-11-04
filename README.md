@@ -222,7 +222,7 @@ err = migrator.Up(ctx)
 - PostgreSQL: dbdiff compares one schema per run. It does not print `CREATE SCHEMA`.
 - MySQL: dbdiff compares one database per run. `--privileges` compares only the grants of the database and of the tables.
 - The `mysql` client splits the bodies of triggers and routines at each semicolon. To apply such a diff, use `dbdiff migrate up`.
-- dbdiff does not write rollback migrations.
+- dbdiff has no down migrations. This is a design choice. A rollback is a new up migration that reverses the change. To roll back, change the desired schema back, run `dbdiff migrate generate`, then run `dbdiff migrate up`.
 
 ## Development
 
