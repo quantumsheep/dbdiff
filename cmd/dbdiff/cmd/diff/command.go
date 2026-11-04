@@ -11,7 +11,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// ErrDifferencesFound reaches main, which exits with the code 1 and prints nothing.
+// ErrDifferencesFound reaches ExitCode of cmdroot, which returns the code 1 and prints nothing.
 var ErrDifferencesFound = errors.New("the schemas differ")
 
 func Command() *cli.Command {
@@ -96,7 +96,10 @@ func action(ctx context.Context, command *cli.Command) error {
 		instructions = driversshared.AnnotateInstructions(instructions)
 	}
 
-	fmt.Println(instructions.String())
+	_, err = fmt.Fprintln(command.Root().Writer, instructions.String())
+	if err != nil {
+		return err
+	}
 
 	if command.Bool("exit-code") && len(instructions) > 0 {
 		return ErrDifferencesFound

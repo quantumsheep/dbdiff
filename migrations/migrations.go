@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -183,17 +184,12 @@ func (m *Migrator) open(ctx context.Context) (internalmigrations.Migrator, *inte
 		return nil, nil, fmt.Errorf("name the migrations directory with the WithMigrationDirectory option")
 	}
 
-	migrator, err := internaldrivers.NewMigrator(ctx, m.driver, m.target, m.schema)
-	if err != nil {
+	migrator, set, err := internaldrivers.OpenMigrationSet(ctx, m.driver, m.target, m.schema, m.directory)
+
+	var openDatabaseError *internaldrivers.OpenDatabaseError
+	if errors.As(err, &openDatabaseError) {
 		return nil, nil, fmt.Errorf("failed to open the database: %w", err)
 	}
 
-	set, err := internalmigrations.LoadSet(ctx, migrator, m.directory)
-	if err != nil {
-		_ = migrator.Close()
-
-		return nil, nil, err
-	}
-
-	return migrator, set, nil
+	return migrator, set, err
 }

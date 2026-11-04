@@ -2,7 +2,6 @@ package cmdmigrate
 
 import (
 	"context"
-	"os"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
@@ -20,5 +19,5 @@ func stepCommand() *cli.Command {
 }
 
 func stepAction(ctx context.Context, command *cli.Command, _ *internalmigrations.Config, runner *internalmigrations.Runner) error {
-	return runner.Step(ctx, os.Stdin)
+	return runner.Step(ctx, command.Root().Reader)
 }

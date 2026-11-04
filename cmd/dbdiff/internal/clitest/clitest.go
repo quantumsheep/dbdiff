@@ -2,16 +2,15 @@ package clitest
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/quantumsheep/dbdiff/internal/sqltest"
+	cmdroot "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/root"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,41 +20,18 @@ type Result struct {
 	ExitCode int
 }
 
-func Build(tb testing.TB) string {
-	tb.Helper()
-
-	binaryPath := filepath.Join(tb.TempDir(), "dbdiff")
-
-	if runtime.GOOS == "windows" {
-		binaryPath += ".exe"
-	}
-
-	build := exec.Command("go", "build", "-o", binaryPath, "github.com/quantumsheep/dbdiff/cmd/dbdiff")
-
-	output, err := build.CombinedOutput()
-	require.NoError(tb, err, string(output))
-
-	return binaryPath
-}
-
-func Run(tb testing.TB, binaryPath string, args ...string) Result {
+func Run(tb testing.TB, args ...string) Result {
 	tb.Helper()
 
 	var stdout, stderr bytes.Buffer
 
-	command := exec.Command(binaryPath, args...)
-	command.Stdout = &stdout
-	command.Stderr = &stderr
+	command := cmdroot.Command()
+	command.Reader = strings.NewReader("")
+	command.Writer = &stdout
+	command.ErrWriter = &stderr
 
-	err := command.Run()
-
-	exitCode := 0
-
-	if err != nil {
-		var exitError *exec.ExitError
-		require.True(tb, errors.As(err, &exitError), err)
-		exitCode = exitError.ExitCode()
-	}
+	err := command.Run(context.Background(), append([]string{"dbdiff"}, args...))
+	exitCode := cmdroot.ExitCode(err, &stderr)
 
 	return Result{
 		Stdout:   stdout.String(),
@@ -64,8 +40,29 @@ func Run(tb testing.TB, binaryPath string, args ...string) Result {
 	}
 }
 
-func WriteSQLFile(tb testing.TB, directory string, name string, content string) string {
-	return sqltest.WriteSQLFile(tb, directory, name, content)
+type MigrationProject struct {
+	MigrationsDirectory string
+	DatabasePath        string
+	ConfigPath          string
+}
+
+func NewMigrationProject(tb testing.TB, databaseStatements string) MigrationProject {
+	tb.Helper()
+
+	directory := tb.TempDir()
+
+	migrationsDirectory := MakeMigrationsDirectory(tb, directory)
+
+	databasePath := filepath.Join(directory, "app.sqlite")
+	WriteSQLiteDatabase(tb, databasePath, databaseStatements)
+
+	configPath := WriteMigrationConfig(tb, directory, "driver: sqlite3\nsource: "+migrationsDirectory+"\n")
+
+	return MigrationProject{
+		MigrationsDirectory: migrationsDirectory,
+		DatabasePath:        databasePath,
+		ConfigPath:          configPath,
+	}
 }
 
 func WriteSQLiteDatabase(tb testing.TB, path string, sqlStatements string) {

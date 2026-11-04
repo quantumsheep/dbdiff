@@ -2,6 +2,7 @@ package cmdmigrate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -88,15 +89,14 @@ func openSet(ctx context.Context, command *cli.Command) (*internalmigrations.Con
 		driverName = detected
 	}
 
-	migrator, err := internaldrivers.NewMigrator(ctx, driverName, target, config.Schema)
-	if err != nil {
+	migrator, set, err := internaldrivers.OpenMigrationSet(ctx, driverName, target, config.Schema, config.Source)
+
+	var openDatabaseError *internaldrivers.OpenDatabaseError
+	if errors.As(err, &openDatabaseError) {
 		return nil, nil, nil, fmt.Errorf("failed to open the target database: %w", err)
 	}
 
-	set, err := internalmigrations.LoadSet(ctx, migrator, config.Source)
 	if err != nil {
-		_ = migrator.Close()
-
 		return nil, nil, nil, err
 	}
 
@@ -134,7 +134,7 @@ func withRunner(action func(ctx context.Context, command *cli.Command, config *i
 		runner := &internalmigrations.Runner{
 			Migrator: migrator,
 			Set:      set,
-			Output:   os.Stdout,
+			Output:   command.Root().Writer,
 		}
 
 		return action(ctx, command, config, runner)

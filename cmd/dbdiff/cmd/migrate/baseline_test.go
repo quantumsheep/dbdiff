@@ -1,91 +1,65 @@
 package cmdmigrate_test
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/clitest"
+	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMigrateBaselineCommand(t *testing.T) {
-	binaryPath := clitest.Build(t)
-
 	t.Run("RecordsTheFilesAndRunsNoFile", func(t *testing.T) {
-		directory := t.TempDir()
+		project := clitest.NewMigrationProject(t, "CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		migrations := clitest.MakeMigrationsDirectory(t, directory)
-
-		clitest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		databasePath := filepath.Join(directory, "app.sqlite")
-		clitest.WriteSQLiteDatabase(t, databasePath, "CREATE TABLE users (id INTEGER PRIMARY KEY);")
-
-		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\nsource: "+migrations+"\n")
-
-		baseline := clitest.Run(t, binaryPath, "migrate", "baseline", "--config", configPath, "--target", databasePath)
+		baseline := clitest.Run(t, "migrate", "baseline", "--config", project.ConfigPath, "--target", project.DatabasePath)
 		require.Equal(t, 0, baseline.ExitCode, baseline.Stderr)
 		require.Contains(t, baseline.Stdout, "Recorded 20260814101500_init.")
 
-		status := clitest.Run(t, binaryPath, "migrate", "status", "--config", configPath, "--target", databasePath)
+		status := clitest.Run(t, "migrate", "status", "--config", project.ConfigPath, "--target", project.DatabasePath)
 		require.Equal(t, 0, status.ExitCode, status.Stderr)
 		require.Contains(t, status.Stdout, "applied")
 
-		up := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath, "--target", databasePath)
+		up := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--target", project.DatabasePath)
 		require.Equal(t, 0, up.ExitCode, up.Stderr)
 		require.Contains(t, up.Stdout, "The database is up to date.")
 
-		verify := clitest.Run(t, binaryPath, "migrate", "verify", "--config", configPath, "--target", databasePath)
+		verify := clitest.Run(t, "migrate", "verify", "--config", project.ConfigPath, "--target", project.DatabasePath)
 		require.Equal(t, 0, verify.ExitCode, verify.Stderr)
 	})
 
 	t.Run("WithTheToFlag", func(t *testing.T) {
-		directory := t.TempDir()
+		project := clitest.NewMigrationProject(t, "CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		migrations := clitest.MakeMigrationsDirectory(t, directory)
-
-		clitest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
-		clitest.WriteSQLFile(t, migrations, "20260822143000_notes.sql",
+		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260822143000_notes.sql",
 			"CREATE TABLE notes (id INTEGER PRIMARY KEY);\n")
 
-		databasePath := filepath.Join(directory, "app.sqlite")
-		clitest.WriteSQLiteDatabase(t, databasePath, "CREATE TABLE users (id INTEGER PRIMARY KEY);")
-
-		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\nsource: "+migrations+"\n")
-
-		baseline := clitest.Run(t, binaryPath, "migrate", "baseline",
-			"--config", configPath, "--target", databasePath, "--to", "20260814101500")
+		baseline := clitest.Run(t, "migrate", "baseline",
+			"--config", project.ConfigPath, "--target", project.DatabasePath, "--to", "20260814101500")
 		require.Equal(t, 0, baseline.ExitCode, baseline.Stderr)
 		require.Contains(t, baseline.Stdout, "Recorded 20260814101500_init.")
 		require.NotContains(t, baseline.Stdout, "20260822143000_notes")
 
-		status := clitest.Run(t, binaryPath, "migrate", "status", "--config", configPath, "--target", databasePath)
+		status := clitest.Run(t, "migrate", "status", "--config", project.ConfigPath, "--target", project.DatabasePath)
 		require.Equal(t, 0, status.ExitCode, status.Stderr)
 		require.Contains(t, status.Stdout, "pending")
 	})
 
 	t.Run("WithNoUnrecordedFile", func(t *testing.T) {
-		directory := t.TempDir()
+		project := clitest.NewMigrationProject(t, "")
 
-		migrations := clitest.MakeMigrationsDirectory(t, directory)
-
-		clitest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
+		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		databasePath := filepath.Join(directory, "app.sqlite")
-		clitest.WriteSQLiteDatabase(t, databasePath, "")
-
-		configPath := clitest.WriteMigrationConfig(t, directory,
-			"driver: sqlite3\nsource: "+migrations+"\n")
-
-		up := clitest.Run(t, binaryPath, "migrate", "up", "--config", configPath, "--target", databasePath)
+		up := clitest.Run(t, "migrate", "up", "--config", project.ConfigPath, "--target", project.DatabasePath)
 		require.Equal(t, 0, up.ExitCode, up.Stderr)
 
-		baseline := clitest.Run(t, binaryPath, "migrate", "baseline", "--config", configPath, "--target", databasePath)
+		baseline := clitest.Run(t, "migrate", "baseline", "--config", project.ConfigPath, "--target", project.DatabasePath)
 		require.Equal(t, 0, baseline.ExitCode, baseline.Stderr)
 		require.Contains(t, baseline.Stdout, "The record holds every file.")
 	})

@@ -89,7 +89,10 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 	}
 
 	for _, path := range paths {
-		fmt.Println(path)
+		_, err = fmt.Fprintln(command.Root().Writer, path)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

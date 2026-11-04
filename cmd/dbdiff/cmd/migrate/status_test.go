@@ -8,10 +8,8 @@ import (
 )
 
 func TestMigrateStatusCommand(t *testing.T) {
-	binaryPath := clitest.Build(t)
-
 	t.Run("UnsupportedDriverPrintsOnce", func(t *testing.T) {
-		result := clitest.Run(t, binaryPath, "migrate", "status", "--driver", "oracle", "--target", "app.sqlite")
+		result := clitest.Run(t, "migrate", "status", "--driver", "oracle", "--target", "app.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
 		require.Equal(t, "dbdiff: invalid value \"oracle\" for flag -driver: unsupported driver: oracle\n", result.Stderr)
@@ -20,7 +18,7 @@ func TestMigrateStatusCommand(t *testing.T) {
 	t.Run("UndetectableTargetNamesTheDriverFlag", func(t *testing.T) {
 		source := clitest.MakeMigrationsDirectory(t, t.TempDir())
 
-		result := clitest.Run(t, binaryPath, "migrate", "status",
+		result := clitest.Run(t, "migrate", "status",
 			"--source", source, "--target", "oracle://user@localhost/app")
 
 		require.Equal(t, 1, result.ExitCode)

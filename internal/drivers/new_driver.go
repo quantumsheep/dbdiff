@@ -85,3 +85,36 @@ func NewMigrator(ctx context.Context, driverName driversshared.DriverName, targe
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)
 	}
 }
+
+// OpenDatabaseError holds an error of NewMigrator in OpenMigrationSet. Each caller gives
+// this error its own message.
+type OpenDatabaseError struct {
+	Err error
+}
+
+func (openDatabaseError *OpenDatabaseError) Error() string {
+	return openDatabaseError.Err.Error()
+}
+
+func (openDatabaseError *OpenDatabaseError) Unwrap() error {
+	return openDatabaseError.Err
+}
+
+func OpenMigrationSet(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
+	schema string, directory string) (internalmigrations.Migrator, *internalmigrations.Set, error) {
+	migrator, err := NewMigrator(ctx, driverName, target, schema)
+	if err != nil {
+		return nil, nil, &OpenDatabaseError{
+			Err: err,
+		}
+	}
+
+	set, err := internalmigrations.LoadSet(ctx, migrator, directory)
+	if err != nil {
+		_ = migrator.Close()
+
+		return nil, nil, err
+	}
+
+	return migrator, set, nil
+}
