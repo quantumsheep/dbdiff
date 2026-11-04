@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
 	cmdroot "github.com/quantumsheep/dbdiff/cmd/dbdiff/cmd/root"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 type Result struct {
@@ -68,7 +68,7 @@ func NewMigrationProject(tb testing.TB, databaseStatements string) MigrationProj
 func WriteSQLiteDatabase(tb testing.TB, path string, sqlStatements string) {
 	tb.Helper()
 
-	database, err := sql.Open("sqlite3", path)
+	database, err := sql.Open("sqlite", path)
 	require.NoError(tb, err)
 
 	defer func() {

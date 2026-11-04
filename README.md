@@ -29,7 +29,7 @@ Download a binary from the [releases](https://github.com/quantumsheep/dbdiff/rel
 go install github.com/quantumsheep/dbdiff/cmd/dbdiff@latest
 ```
 
-The SQLite driver needs `CGO_ENABLED=1`.
+dbdiff needs no C compiler. The SQLite driver supports the virtual table modules `fts5`, `rtree`, and `geopoly`. It does not support `fts3` and `fts4`.
 
 ## Usage
 

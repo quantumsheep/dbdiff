@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 func TestQueryAll(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -46,6 +46,6 @@ func TestQueryAll(t *testing.T) {
 
 	t.Run("QueryError", func(t *testing.T) {
 		_, err := QueryAll(t.Context(), db, "SELECT FROM", scanName)
-		require.EqualError(t, err, `near "FROM": syntax error`)
+		require.EqualError(t, err, `SQL logic error: near "FROM": syntax error (1)`)
 	})
 }

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 type TestingSQLiteDriver struct {
@@ -72,7 +72,7 @@ func (d *TestingSQLiteDriver) database(dataSource driversshared.DataSource, conn
 	sqlSource, err := driversshared.NewSQLSource(path)
 	require.NoError(d.tb, err)
 
-	opened, err := sql.Open("sqlite3", filepath.Join(d.tb.TempDir(), role+".sqlite"))
+	opened, err := sql.Open("sqlite", filepath.Join(d.tb.TempDir(), role+".sqlite"))
 	require.NoError(d.tb, err)
 
 	err = sqlSource.ApplyTo(d.tb.Context(), opened)
@@ -179,7 +179,7 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, desiredPath string, currentPath
 	}
 
 	if !driversshared.IsSQLSource(current) {
-		connection, err := sql.Open("sqlite3", TrimSQLitePrefix(currentPath))
+		connection, err := sql.Open("sqlite", TrimSQLitePrefix(currentPath))
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
 			require.NoError(tb, connection.Close())
@@ -189,7 +189,7 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, desiredPath string, currentPath
 	}
 
 	if !driversshared.IsSQLSource(desired) {
-		connection, err := sql.Open("sqlite3", TrimSQLitePrefix(desiredPath))
+		connection, err := sql.Open("sqlite", TrimSQLitePrefix(desiredPath))
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
 			require.NoError(tb, connection.Close())
@@ -2163,7 +2163,7 @@ func TestSQLiteDriver(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
 		driver.ExecOnDesired(`
-			CREATE VIRTUAL TABLE docs USING fts4(title, body);
+			CREATE VIRTUAL TABLE docs USING fts5(title, body);
 			CREATE TABLE plain (id INTEGER);
 		`)
 
@@ -2179,7 +2179,7 @@ func TestSQLiteDriver(t *testing.T) {
 				},
 			},
 			&SQLiteCreateVirtualTableInstruction{
-				Definition: "CREATE VIRTUAL TABLE docs USING fts4(title, body)",
+				Definition: "CREATE VIRTUAL TABLE docs USING fts5(title, body)",
 			},
 		})
 	})
@@ -2187,7 +2187,7 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("DropVirtualTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnCurrent(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+		driver.ExecOnCurrent(`CREATE VIRTUAL TABLE docs USING fts5(title, body);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropTableInstruction{Name: "docs"},
@@ -2197,12 +2197,12 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("ModifyVirtualTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnCurrent(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
-		driver.ExecOnDesired(`CREATE VIRTUAL TABLE docs USING fts4(title, body, tags);`)
+		driver.ExecOnCurrent(`CREATE VIRTUAL TABLE docs USING fts5(title, body);`)
+		driver.ExecOnDesired(`CREATE VIRTUAL TABLE docs USING fts5(title, body, tags);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropTableInstruction{Name: "docs"},
 			&SQLiteCreateVirtualTableInstruction{
-				Definition: "CREATE VIRTUAL TABLE docs USING fts4(title, body, tags)",
+				Definition: "CREATE VIRTUAL TABLE docs USING fts5(title, body, tags)",
 			},
 		})
 	})
@@ -2210,8 +2210,8 @@ func TestSQLiteDriver(t *testing.T) {
 	t.Run("EqualVirtualTables", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
-		driver.ExecOnCurrent(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
-		driver.ExecOnDesired(`CREATE VIRTUAL TABLE docs USING fts4(title, body);`)
+		driver.ExecOnCurrent(`CREATE VIRTUAL TABLE docs USING fts5(title, body);`)
+		driver.ExecOnDesired(`CREATE VIRTUAL TABLE docs USING fts5(title, body);`)
 		driver.RequireInstructions(nil)
 	})
 

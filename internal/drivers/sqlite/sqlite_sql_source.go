@@ -35,7 +35,7 @@ func (d *SQLiteDriver) OpenSide(
 			}
 		}
 
-		connection, err := sql.Open("sqlite3", filePath)
+		connection, err := sql.Open("sqlite", filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -53,7 +53,7 @@ func (d *SQLiteDriver) OpenSide(
 		return nil, err
 	}
 
-	connection, err := sql.Open("sqlite3", filepath.Join(directory, role+".sqlite"))
+	connection, err := sql.Open("sqlite", filepath.Join(directory, role+".sqlite"))
 	if err != nil {
 		return nil, err
 	}

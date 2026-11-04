@@ -36,9 +36,9 @@ type SQLiteMigrator struct {
 }
 
 func NewSQLiteMigrator(path string) (*SQLiteMigrator, error) {
-	// The name holds no _foreign_keys parameter. A recreation of a table drops one table
+	// The name holds no foreign_keys pragma. A recreation of a table drops one table
 	// and renames another table, and PRAGMA foreign_keys does nothing inside a transaction.
-	connection, err := sql.Open("sqlite3", TrimSQLitePrefix(path))
+	connection, err := sql.Open("sqlite", TrimSQLitePrefix(path))
 	if err != nil {
 		return nil, err
 	}

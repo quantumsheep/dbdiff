@@ -36,8 +36,6 @@ jobs:
           go-version-file: go.mod
 
       - name: Build
-        env:
-          CGO_ENABLED: ${{ runner.os == 'Windows' && '' || '1' }}
         run: >-
           go build -v
           -ldflags "-X github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers.version=${{ github.ref_name }}"

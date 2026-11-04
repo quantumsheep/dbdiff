@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/samber/lo"
+	_ "modernc.org/sqlite"
 )
 
 type SQLiteDriverConfig struct {

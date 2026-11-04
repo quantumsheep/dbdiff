@@ -384,7 +384,7 @@ func TestRunnerUp(t *testing.T) {
 
 		err = newRunner(migrator, set, io.Discard).Up(t.Context(), "")
 		require.EqualError(t, err, "20260814101500_init failed, and the statements before the failure stay applied. "+
-			"Repair the database, and run migrate repair: table users already exists")
+			"Repair the database, and run migrate repair: SQL logic error: table users already exists (1)")
 
 		applied, err := migrator.AppliedMigrations(t.Context())
 		require.NoError(t, err)
