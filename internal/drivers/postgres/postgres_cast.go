@@ -103,15 +103,15 @@ func (d *PostgresDriver) DiffCasts(ctx context.Context) (*SectionDiff, error) {
 		Create: func(cast *PostgresCast) []driversshared.Instruction {
 			return []driversshared.Instruction{cast.CreateInstruction()}
 		},
-		Change: func(target *PostgresCast, source *PostgresCast) []driversshared.Instruction {
-			if target.Equal(source) {
+		Change: func(desired *PostgresCast, current *PostgresCast) []driversshared.Instruction {
+			if desired.Equal(current) {
 				return nil
 			}
 
-			return []driversshared.Instruction{source.DropInstruction(), target.CreateInstruction()}
+			return []driversshared.Instruction{current.DropInstruction(), desired.CreateInstruction()}
 		},
-		Drop: func(source *PostgresCast) driversshared.Instruction {
-			return source.DropInstruction()
+		Drop: func(current *PostgresCast) driversshared.Instruction {
+			return current.DropInstruction()
 		},
 	})
 }

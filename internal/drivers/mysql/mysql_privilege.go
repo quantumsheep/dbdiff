@@ -29,12 +29,12 @@ type MySQLColumnPrivilegeSet struct {
 }
 
 func (d *MySQLDriver) DiffPrivileges(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetSets, err := d.GetPrivileges(ctx, d.TargetDatabaseConnection)
+	desiredSets, err := d.GetPrivileges(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceSets, err := d.GetPrivileges(ctx, d.SourceDatabaseConnection)
+	currentSets, err := d.GetPrivileges(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
@@ -48,85 +48,85 @@ func (d *MySQLDriver) DiffPrivileges(ctx context.Context) ([]driversshared.Instr
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
 
-	for _, targetSet := range targetSets {
-		sourceSet, found := findSet(sourceSets, targetSet.Grantee, targetSet.TableName)
+	for _, desiredSet := range desiredSets {
+		currentSet, found := findSet(currentSets, desiredSet.Grantee, desiredSet.TableName)
 		if !found {
 			additions = append(additions, &MySQLGrantInstruction{
-				Privileges:      targetSet.Privileges,
-				TableName:       targetSet.TableName,
-				Grantee:         targetSet.Grantee,
-				WithGrantOption: targetSet.Grantable,
+				Privileges:      desiredSet.Privileges,
+				TableName:       desiredSet.TableName,
+				Grantee:         desiredSet.Grantee,
+				WithGrantOption: desiredSet.Grantable,
 			})
 
 			continue
 		}
 
-		missing := lo.Filter(targetSet.Privileges, func(privilege string, _ int) bool {
-			return !lo.Contains(sourceSet.Privileges, privilege)
+		missing := lo.Filter(desiredSet.Privileges, func(privilege string, _ int) bool {
+			return !lo.Contains(currentSet.Privileges, privilege)
 		})
 
 		// A new GRANT OPTION needs a whole GRANT statement, so the statement repeats the
 		// privileges that the grantee holds already.
-		if targetSet.Grantable && !sourceSet.Grantable {
+		if desiredSet.Grantable && !currentSet.Grantable {
 			additions = append(additions, &MySQLGrantInstruction{
-				Privileges:      targetSet.Privileges,
-				TableName:       targetSet.TableName,
-				Grantee:         targetSet.Grantee,
+				Privileges:      desiredSet.Privileges,
+				TableName:       desiredSet.TableName,
+				Grantee:         desiredSet.Grantee,
 				WithGrantOption: true,
 			})
 		} else if len(missing) > 0 {
 			additions = append(additions, &MySQLGrantInstruction{
 				Privileges:      missing,
-				TableName:       targetSet.TableName,
-				Grantee:         targetSet.Grantee,
-				WithGrantOption: targetSet.Grantable,
+				TableName:       desiredSet.TableName,
+				Grantee:         desiredSet.Grantee,
+				WithGrantOption: desiredSet.Grantable,
 			})
 		}
 
-		if !targetSet.Grantable && sourceSet.Grantable {
+		if !desiredSet.Grantable && currentSet.Grantable {
 			removals = append(removals, &MySQLRevokeInstruction{
 				Privileges: []string{"GRANT OPTION"},
-				TableName:  targetSet.TableName,
-				Grantee:    targetSet.Grantee,
+				TableName:  desiredSet.TableName,
+				Grantee:    desiredSet.Grantee,
 			})
 		}
 
-		extra := lo.Filter(sourceSet.Privileges, func(privilege string, _ int) bool {
-			return !lo.Contains(targetSet.Privileges, privilege)
+		extra := lo.Filter(currentSet.Privileges, func(privilege string, _ int) bool {
+			return !lo.Contains(desiredSet.Privileges, privilege)
 		})
 		if len(extra) > 0 {
 			removals = append(removals, &MySQLRevokeInstruction{
 				Privileges: extra,
-				TableName:  targetSet.TableName,
-				Grantee:    targetSet.Grantee,
+				TableName:  desiredSet.TableName,
+				Grantee:    desiredSet.Grantee,
 			})
 		}
 	}
 
-	for _, sourceSet := range sourceSets {
-		_, found := findSet(targetSets, sourceSet.Grantee, sourceSet.TableName)
+	for _, currentSet := range currentSets {
+		_, found := findSet(desiredSets, currentSet.Grantee, currentSet.TableName)
 		if found {
 			continue
 		}
 
-		privileges := sourceSet.Privileges
-		if sourceSet.Grantable {
+		privileges := currentSet.Privileges
+		if currentSet.Grantable {
 			privileges = append(slices.Clone(privileges), "GRANT OPTION")
 		}
 
 		removals = append(removals, &MySQLRevokeInstruction{
 			Privileges: privileges,
-			TableName:  sourceSet.TableName,
-			Grantee:    sourceSet.Grantee,
+			TableName:  currentSet.TableName,
+			Grantee:    currentSet.Grantee,
 		})
 	}
 
-	targetColumnSets, err := d.GetColumnPrivileges(ctx, d.TargetDatabaseConnection)
+	desiredColumnSets, err := d.GetColumnPrivileges(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceColumnSets, err := d.GetColumnPrivileges(ctx, d.SourceDatabaseConnection)
+	currentColumnSets, err := d.GetColumnPrivileges(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
@@ -137,66 +137,66 @@ func (d *MySQLDriver) DiffPrivileges(ctx context.Context) ([]driversshared.Instr
 		})
 	}
 
-	for _, targetSet := range targetColumnSets {
-		sourceSet, found := findColumnSet(sourceColumnSets, targetSet.Grantee, targetSet.TableName, targetSet.Privilege)
+	for _, desiredSet := range desiredColumnSets {
+		currentSet, found := findColumnSet(currentColumnSets, desiredSet.Grantee, desiredSet.TableName, desiredSet.Privilege)
 		if !found {
 			additions = append(additions, &MySQLGrantInstruction{
-				Privileges:      []string{targetSet.Privilege},
-				Columns:         targetSet.Columns,
-				TableName:       targetSet.TableName,
-				Grantee:         targetSet.Grantee,
-				WithGrantOption: targetSet.Grantable,
+				Privileges:      []string{desiredSet.Privilege},
+				Columns:         desiredSet.Columns,
+				TableName:       desiredSet.TableName,
+				Grantee:         desiredSet.Grantee,
+				WithGrantOption: desiredSet.Grantable,
 			})
 
 			continue
 		}
 
-		missingColumns := lo.Filter(targetSet.Columns, func(column string, _ int) bool {
-			return !lo.Contains(sourceSet.Columns, column)
+		missingColumns := lo.Filter(desiredSet.Columns, func(column string, _ int) bool {
+			return !lo.Contains(currentSet.Columns, column)
 		})
 
-		if targetSet.Grantable && !sourceSet.Grantable {
+		if desiredSet.Grantable && !currentSet.Grantable {
 			additions = append(additions, &MySQLGrantInstruction{
-				Privileges:      []string{targetSet.Privilege},
-				Columns:         targetSet.Columns,
-				TableName:       targetSet.TableName,
-				Grantee:         targetSet.Grantee,
+				Privileges:      []string{desiredSet.Privilege},
+				Columns:         desiredSet.Columns,
+				TableName:       desiredSet.TableName,
+				Grantee:         desiredSet.Grantee,
 				WithGrantOption: true,
 			})
 		} else if len(missingColumns) > 0 {
 			additions = append(additions, &MySQLGrantInstruction{
-				Privileges:      []string{targetSet.Privilege},
+				Privileges:      []string{desiredSet.Privilege},
 				Columns:         missingColumns,
-				TableName:       targetSet.TableName,
-				Grantee:         targetSet.Grantee,
-				WithGrantOption: targetSet.Grantable,
+				TableName:       desiredSet.TableName,
+				Grantee:         desiredSet.Grantee,
+				WithGrantOption: desiredSet.Grantable,
 			})
 		}
 
-		extraColumns := lo.Filter(sourceSet.Columns, func(column string, _ int) bool {
-			return !lo.Contains(targetSet.Columns, column)
+		extraColumns := lo.Filter(currentSet.Columns, func(column string, _ int) bool {
+			return !lo.Contains(desiredSet.Columns, column)
 		})
 		if len(extraColumns) > 0 {
 			removals = append(removals, &MySQLRevokeInstruction{
-				Privileges: []string{targetSet.Privilege},
+				Privileges: []string{desiredSet.Privilege},
 				Columns:    extraColumns,
-				TableName:  targetSet.TableName,
-				Grantee:    targetSet.Grantee,
+				TableName:  desiredSet.TableName,
+				Grantee:    desiredSet.Grantee,
 			})
 		}
 	}
 
-	for _, sourceSet := range sourceColumnSets {
-		_, found := findColumnSet(targetColumnSets, sourceSet.Grantee, sourceSet.TableName, sourceSet.Privilege)
+	for _, currentSet := range currentColumnSets {
+		_, found := findColumnSet(desiredColumnSets, currentSet.Grantee, currentSet.TableName, currentSet.Privilege)
 		if found {
 			continue
 		}
 
 		removals = append(removals, &MySQLRevokeInstruction{
-			Privileges: []string{sourceSet.Privilege},
-			Columns:    sourceSet.Columns,
-			TableName:  sourceSet.TableName,
-			Grantee:    sourceSet.Grantee,
+			Privileges: []string{currentSet.Privilege},
+			Columns:    currentSet.Columns,
+			TableName:  currentSet.TableName,
+			Grantee:    currentSet.Grantee,
 		})
 	}
 

@@ -1,6 +1,6 @@
 # dbdiff - Agent Context
 
-dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the source schema equal to the target schema. dbdiff supports SQLite, PostgreSQL, MySQL, and MariaDB. Each side is a database, a `.sql` file, or a directory of `.sql` files. The CLI and the public packages call the two sides current and desired. The engine code still calls them source and target.
+dbdiff is a command line tool in Go. It reads the schema of two databases and prints the SQL statements that make the current schema equal to the desired schema. dbdiff supports SQLite, PostgreSQL, MySQL, and MariaDB. Each side is a database, a `.sql` file, or a directory of `.sql` files. The code calls the two sides current and desired. A data source is the value that names one side.
 
 This file gives the principles. The code holds the details. Before you change a part of the code, read the files near it and copy their patterns. The code comments hold the engine rules and the order constraints.
 
@@ -20,8 +20,8 @@ Keep these rules:
 ## How a diff works
 
 1. Read the objects of both sides.
-2. Walk the target objects. Create each absent object. Alter or recreate each changed object.
-3. Walk the source objects. Drop each object that the target does not hold.
+2. Walk the desired objects. Create each absent object. Alter or recreate each changed object.
+3. Walk the current objects. Drop each object that the desired schema does not hold.
 
 If a key match is sufficient, use `DiffByKey` for these steps. Print the additions and the modifications before the removals.
 
@@ -40,14 +40,14 @@ go test ./...
 
 - Put the test beside the code. Use `testify/require`.
 - Give each new behavior one `t.Run` subtest in the main test function of its package.
-- In a driver test, compare the whole instruction list. Then apply the diff to the source. This proves that the SQL runs.
+- In a driver test, compare the whole instruction list. Then apply the diff to the current database. This proves that the SQL runs.
 - If the change recreates a table or moves data, insert rows before the diff. Then compare the rows after the diff.
 - Compare the whole error message. Never use `require.Contains` on a message.
 
 ## Go conventions
 
 - After every change, run `gofmt -w .` and `golangci-lint run ./...`. Correct every finding. Never add a `nolint` comment.
-- Name variables with full words: `sourceDatabaseConnection`, not `srcConn`.
+- Name variables with full words: `currentDatabaseConnection`, not `curConn`.
 - Return errors. Never call `os.Exit` or `panic` outside `main`.
 - Close every `*sql.Rows`. After the loop, return the error of `rows.Err()`.
 - Pass the context to every query.

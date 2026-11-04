@@ -20,13 +20,13 @@ type PostgresDriverConfig struct {
 }
 
 type PostgresDriver struct {
-	TargetDatabaseConnection *sql.DB
-	SourceDatabaseConnection *sql.DB
-	TargetSchema             string
-	SourceSchema             string
-	ComparePrivileges        bool
-	IgnoreTables             []string
-	ScratchServerVersion     string
+	DesiredDatabaseConnection *sql.DB
+	CurrentDatabaseConnection *sql.DB
+	DesiredSchema             string
+	CurrentSchema             string
+	ComparePrivileges         bool
+	IgnoreTables              []string
+	ScratchServerVersion      string
 
 	ScratchVersion embeddedpostgres.PostgresVersion
 
@@ -37,8 +37,8 @@ type PostgresDriver struct {
 
 func NewPostgresDriver(config *PostgresDriverConfig) *PostgresDriver {
 	return &PostgresDriver{
-		TargetSchema:         config.Schema,
-		SourceSchema:         config.Schema,
+		DesiredSchema:        config.Schema,
+		CurrentSchema:        config.Schema,
 		ComparePrivileges:    config.ComparePrivileges,
 		IgnoreTables:         config.IgnoreTables,
 		ScratchServerVersion: config.ScratchServerVersion,
@@ -61,7 +61,7 @@ func OpenPostgresConnection(connectionString string, schema string) (*sql.DB, er
 }
 
 // PostgreSQL accepts a search path that names no schema, and each query then reads an
-// empty schema. Without this check the diff drops every object of the source.
+// empty schema. Without this check the diff drops every object of the current schema.
 func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema string, role string) error {
 	if schema == "" {
 		return nil
@@ -83,9 +83,9 @@ func (d *PostgresDriver) VerifySchema(ctx context.Context, db *sql.DB, schema st
 	return nil
 }
 
-func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
-	release, err := d.openSides(ctx, source, target)
+func (d *PostgresDriver) Diff(ctx context.Context, current driversshared.DataSource,
+	desired driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
+	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
 	}
@@ -94,12 +94,12 @@ func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSour
 
 	d.recreatedObjectNames = nil
 
-	err = d.VerifySchema(ctx, d.TargetDatabaseConnection, d.TargetSchema, "desired")
+	err = d.VerifySchema(ctx, d.DesiredDatabaseConnection, d.DesiredSchema, "desired")
 	if err != nil {
 		return nil, err
 	}
 
-	err = d.VerifySchema(ctx, d.SourceDatabaseConnection, d.SourceSchema, "current")
+	err = d.VerifySchema(ctx, d.CurrentDatabaseConnection, d.CurrentSchema, "current")
 	if err != nil {
 		return nil, err
 	}
@@ -160,33 +160,33 @@ func (d *PostgresDriver) Diff(ctx context.Context, source driversshared.DataSour
 	return instructions, nil
 }
 
-func (d *PostgresDriver) openSides(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource) (func(), error) {
-	d.ScratchVersion = d.scratchVersionOfSources(ctx, source, target)
+func (d *PostgresDriver) openSides(ctx context.Context, current driversshared.DataSource,
+	desired driversshared.DataSource) (func(), error) {
+	d.ScratchVersion = d.scratchVersionOfSources(ctx, current, desired)
 
-	targetDatabaseConnection, err := d.OpenSide(ctx, target, d.TargetSchema, "desired")
+	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, d.DesiredSchema, "desired")
 	if err != nil {
 		_ = d.StopScratchServer()
 		return nil, err
 	}
 
-	d.TargetDatabaseConnection = targetDatabaseConnection
+	d.DesiredDatabaseConnection = desiredDatabaseConnection
 
-	sourceDatabaseConnection, err := d.OpenSide(ctx, source, d.SourceSchema, "current")
+	currentDatabaseConnection, err := d.OpenSide(ctx, current, d.CurrentSchema, "current")
 	if err != nil {
-		_ = d.TargetDatabaseConnection.Close()
+		_ = d.DesiredDatabaseConnection.Close()
 		_ = d.StopScratchServer()
 
 		return nil, err
 	}
 
-	d.SourceDatabaseConnection = sourceDatabaseConnection
+	d.CurrentDatabaseConnection = currentDatabaseConnection
 
 	return func() {
-		_ = d.TargetDatabaseConnection.Close()
-		_ = d.SourceDatabaseConnection.Close()
-		d.TargetDatabaseConnection = nil
-		d.SourceDatabaseConnection = nil
+		_ = d.DesiredDatabaseConnection.Close()
+		_ = d.CurrentDatabaseConnection.Close()
+		d.DesiredDatabaseConnection = nil
+		d.CurrentDatabaseConnection = nil
 		_ = d.StopScratchServer()
 	}, nil
 }
@@ -201,20 +201,20 @@ type SectionDiff struct {
 type sectionRules[T any] struct {
 	Get    func(ctx context.Context, db *sql.DB) ([]T, error)
 	Key    func(object T) string
-	Create func(target T) []driversshared.Instruction
-	Change func(target T, source T) []driversshared.Instruction
-	Drop   func(source T) driversshared.Instruction
+	Create func(desired T) []driversshared.Instruction
+	Change func(desired T, current T) []driversshared.Instruction
+	Drop   func(current T) driversshared.Instruction
 }
 
 func diffSection[T any](ctx context.Context, driver *PostgresDriver, rules sectionRules[T]) (*SectionDiff, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, driver.TargetDatabaseConnection, driver.SourceDatabaseConnection, rules.Get, driversshared.DiffRules[T]{
+	additions, removals, err := driversshared.DiffSides(ctx, driver.DesiredDatabaseConnection, driver.CurrentDatabaseConnection, rules.Get, driversshared.DiffRules[T]{
 		Key:    rules.Key,
 		Create: rules.Create,
-		Change: func(target T, source T) ([]driversshared.Instruction, error) {
-			return rules.Change(target, source), nil
+		Change: func(desired T, current T) ([]driversshared.Instruction, error) {
+			return rules.Change(desired, current), nil
 		},
-		Drop: func(source T) []driversshared.Instruction {
-			return []driversshared.Instruction{rules.Drop(source)}
+		Drop: func(current T) []driversshared.Instruction {
+			return []driversshared.Instruction{rules.Drop(current)}
 		},
 	})
 	if err != nil {

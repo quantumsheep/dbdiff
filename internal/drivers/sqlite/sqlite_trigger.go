@@ -14,8 +14,8 @@ func diffTriggerRules() driversshared.DiffRules[*SQLiteTrigger] {
 		func(trigger *SQLiteTrigger) string {
 			return trigger.Name
 		},
-		func(target *SQLiteTrigger, source *SQLiteTrigger) bool {
-			return target.SQL == source.SQL
+		func(desired *SQLiteTrigger, current *SQLiteTrigger) bool {
+			return desired.SQL == current.SQL
 		},
 		func(trigger *SQLiteTrigger) driversshared.Instruction {
 			return &SQLiteCreateTriggerInstruction{

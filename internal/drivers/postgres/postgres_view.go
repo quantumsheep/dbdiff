@@ -240,31 +240,31 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*Se
 	var earlyRemovals []driversshared.Instruction
 	var additions []driversshared.Instruction
 
-	targetViews, err := d.GetViews(ctx, d.TargetDatabaseConnection)
+	desiredViews, err := d.GetViews(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceViews, err := d.GetViews(ctx, d.SourceDatabaseConnection)
+	currentViews, err := d.GetViews(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	targetMaterializedViews, err := d.GetMaterializedViews(ctx, d.TargetDatabaseConnection)
+	desiredMaterializedViews, err := d.GetMaterializedViews(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceMaterializedViews, err := d.GetMaterializedViews(ctx, d.SourceDatabaseConnection)
+	currentMaterializedViews, err := d.GetMaterializedViews(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	targetRelations := sortRelationsByDependency(targetViews, targetMaterializedViews)
-	sourceRelations := sortRelationsByDependency(sourceViews, sourceMaterializedViews)
+	desiredRelations := sortRelationsByDependency(desiredViews, desiredMaterializedViews)
+	currentRelations := sortRelationsByDependency(currentViews, currentMaterializedViews)
 
-	targetRelationByName := lo.KeyBy(targetRelations, (*PostgresRelation).Name)
-	sourceRelationByName := lo.KeyBy(sourceRelations, (*PostgresRelation).Name)
+	desiredRelationByName := lo.KeyBy(desiredRelations, (*PostgresRelation).Name)
+	currentRelationByName := lo.KeyBy(currentRelations, (*PostgresRelation).Name)
 
 	// PostgreSQL refuses to drop a relation while another relation reads it. CASCADE can
 	// drop objects that the diff does not see. Thus the diff also drops and creates again
@@ -272,56 +272,56 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*Se
 	// after the relations that it reads, so one pass finds every indirect reader too.
 	droppedNames := map[string]bool{}
 
-	for _, sourceRelation := range sourceRelations {
-		targetRelation, found := targetRelationByName[sourceRelation.Name()]
-		readsADroppedRelation := lo.SomeBy(sourceRelation.DependencyNames(), func(name string) bool {
+	for _, currentRelation := range currentRelations {
+		desiredRelation, found := desiredRelationByName[currentRelation.Name()]
+		readsADroppedRelation := lo.SomeBy(currentRelation.DependencyNames(), func(name string) bool {
 			return droppedNames[name]
 		})
-		if !found || readsADroppedRelation || !targetRelation.HasEqualDefinition(sourceRelation) {
-			droppedNames[sourceRelation.Name()] = true
+		if !found || readsADroppedRelation || !desiredRelation.HasEqualDefinition(currentRelation) {
+			droppedNames[currentRelation.Name()] = true
 		}
 	}
 
-	for _, targetRelation := range targetRelations {
-		sourceRelation, found := sourceRelationByName[targetRelation.Name()]
+	for _, desiredRelation := range desiredRelations {
+		currentRelation, found := currentRelationByName[desiredRelation.Name()]
 		if !found {
-			additions = append(additions, targetRelation.Instructions()...)
+			additions = append(additions, desiredRelation.Instructions()...)
 			continue
 		}
 
 		// A DROP statement of a materialized view removes every index of it, and the
 		// create instructions give back the indexes.
-		if droppedNames[targetRelation.Name()] {
-			d.markRecreated(targetRelation.Name())
-			additions = append(additions, targetRelation.Instructions()...)
+		if droppedNames[desiredRelation.Name()] {
+			d.markRecreated(desiredRelation.Name())
+			additions = append(additions, desiredRelation.Instructions()...)
 			continue
 		}
 
-		if targetRelation.View != nil {
-			if targetRelation.View.Comment != sourceRelation.View.Comment {
+		if desiredRelation.View != nil {
+			if desiredRelation.View.Comment != currentRelation.View.Comment {
 				additions = append(additions, &PostgresCommentOnViewInstruction{
-					Name: targetRelation.View.Name,
-					Text: targetRelation.View.Comment,
+					Name: desiredRelation.View.Name,
+					Text: desiredRelation.View.Comment,
 				})
 			}
 
 			continue
 		}
 
-		if targetRelation.MaterializedView.Comment != sourceRelation.MaterializedView.Comment {
+		if desiredRelation.MaterializedView.Comment != currentRelation.MaterializedView.Comment {
 			additions = append(additions, &PostgresCommentOnMaterializedViewInstruction{
-				Name: targetRelation.MaterializedView.Name,
-				Text: targetRelation.MaterializedView.Comment,
+				Name: desiredRelation.MaterializedView.Name,
+				Text: desiredRelation.MaterializedView.Comment,
 			})
 		}
 
-		additions = append(additions, diffMaterializedViewIndexes(targetRelation.MaterializedView, sourceRelation.MaterializedView)...)
+		additions = append(additions, diffMaterializedViewIndexes(desiredRelation.MaterializedView, currentRelation.MaterializedView)...)
 	}
 
 	// A backward walk drops each relation before the relations that it reads.
-	for _, sourceRelation := range slices.Backward(sourceRelations) {
-		if droppedNames[sourceRelation.Name()] {
-			earlyRemovals = append(earlyRemovals, sourceRelation.DropInstruction())
+	for _, currentRelation := range slices.Backward(currentRelations) {
+		if droppedNames[currentRelation.Name()] {
+			earlyRemovals = append(earlyRemovals, currentRelation.DropInstruction())
 		}
 	}
 

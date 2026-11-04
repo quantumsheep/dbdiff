@@ -15,5 +15,5 @@ type DiffOptions struct {
 // A driver value runs one diff at a time. Each Diff call binds the connection
 // fields of the driver on entry and clears them on exit.
 type Driver interface {
-	Diff(ctx context.Context, source DataSource, target DataSource, options DiffOptions) (Instructions, error)
+	Diff(ctx context.Context, current DataSource, desired DataSource, options DiffOptions) (Instructions, error)
 }

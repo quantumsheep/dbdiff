@@ -10,8 +10,8 @@ import (
 	"github.com/samber/lo"
 )
 
-// A role belongs to the server and not to the schema. A source server holds other role
-// names in most cases, and a GRANT statement of an absent role fails.
+// A role belongs to the server and not to the schema. The server of the current schema holds
+// other role names in most cases. A GRANT statement of an absent role fails.
 type PostgresPrivilege struct {
 	ObjectType string
 	ObjectName string
@@ -98,81 +98,81 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 
 	var additions []driversshared.Instruction
 
-	targetOwners, err := d.GetOwners(ctx, d.TargetDatabaseConnection)
+	desiredOwners, err := d.GetOwners(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceOwners, err := d.GetOwners(ctx, d.SourceDatabaseConnection)
+	currentOwners, err := d.GetOwners(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, targetOwner := range targetOwners {
-		sourceOwner, found := lo.Find(sourceOwners, func(owner *PostgresOwner) bool {
-			return owner.ObjectName == targetOwner.ObjectName
+	for _, desiredOwner := range desiredOwners {
+		currentOwner, found := lo.Find(currentOwners, func(owner *PostgresOwner) bool {
+			return owner.ObjectName == desiredOwner.ObjectName
 		})
-		if found && sourceOwner.Owner == targetOwner.Owner &&
-			!d.recreatedObjectNames[targetOwner.ObjectName] {
+		if found && currentOwner.Owner == desiredOwner.Owner &&
+			!d.recreatedObjectNames[desiredOwner.ObjectName] {
 			continue
 		}
 
-		additions = append(additions, targetOwner.SetInstruction())
+		additions = append(additions, desiredOwner.SetInstruction())
 	}
 
-	targetPrivileges, err := d.GetPrivileges(ctx, d.TargetDatabaseConnection)
+	desiredPrivileges, err := d.GetPrivileges(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourcePrivileges, err := d.GetPrivileges(ctx, d.SourceDatabaseConnection)
+	currentPrivileges, err := d.GetPrivileges(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, targetPrivilege := range targetPrivileges {
-		sourcePrivilege, found := lo.Find(sourcePrivileges, func(privilege *PostgresPrivilege) bool {
-			return privilege.Key() == targetPrivilege.Key()
+	for _, desiredPrivilege := range desiredPrivileges {
+		currentPrivilege, found := lo.Find(currentPrivileges, func(privilege *PostgresPrivilege) bool {
+			return privilege.Key() == desiredPrivilege.Key()
 		})
 
 		// The diff drops and creates the object again, and the new object holds the
-		// default privileges, so every grant of the target comes back.
-		if !found || d.recreatedObjectNames[targetPrivilege.ObjectName] {
+		// default privileges, so every grant of the desired schema comes back.
+		if !found || d.recreatedObjectNames[desiredPrivilege.ObjectName] {
 			additions = append(additions,
-				targetPrivilege.GrantInstruction(targetPrivilege.Privileges))
+				desiredPrivilege.GrantInstruction(desiredPrivilege.Privileges))
 
 			continue
 		}
 
-		granted := lo.Without(targetPrivilege.Privileges, sourcePrivilege.Privileges...)
+		granted := lo.Without(desiredPrivilege.Privileges, currentPrivilege.Privileges...)
 		if len(granted) > 0 {
-			additions = append(additions, targetPrivilege.GrantInstruction(granted))
+			additions = append(additions, desiredPrivilege.GrantInstruction(granted))
 		}
 
-		revoked := lo.Without(sourcePrivilege.Privileges, targetPrivilege.Privileges...)
+		revoked := lo.Without(currentPrivilege.Privileges, desiredPrivilege.Privileges...)
 		if len(revoked) > 0 {
-			additions = append(additions, targetPrivilege.RevokeInstruction(revoked))
+			additions = append(additions, desiredPrivilege.RevokeInstruction(revoked))
 		}
 	}
 
-	targetObjectNames := lo.Map(targetOwners, func(owner *PostgresOwner, _ int) string {
+	desiredObjectNames := lo.Map(desiredOwners, func(owner *PostgresOwner, _ int) string {
 		return owner.ObjectName
 	})
 
-	for _, sourcePrivilege := range sourcePrivileges {
-		// The diff drops an object that the target does not hold, and the drop removes
+	for _, currentPrivilege := range currentPrivileges {
+		// The diff drops an object that the desired schema does not hold, and the drop removes
 		// every privilege of the object.
-		if !slices.Contains(targetObjectNames, sourcePrivilege.ObjectName) ||
-			d.recreatedObjectNames[sourcePrivilege.ObjectName] {
+		if !slices.Contains(desiredObjectNames, currentPrivilege.ObjectName) ||
+			d.recreatedObjectNames[currentPrivilege.ObjectName] {
 			continue
 		}
 
-		_, found := lo.Find(targetPrivileges, func(privilege *PostgresPrivilege) bool {
-			return privilege.Key() == sourcePrivilege.Key()
+		_, found := lo.Find(desiredPrivileges, func(privilege *PostgresPrivilege) bool {
+			return privilege.Key() == currentPrivilege.Key()
 		})
 		if !found {
 			additions = append(additions,
-				sourcePrivilege.RevokeInstruction(sourcePrivilege.Privileges))
+				currentPrivilege.RevokeInstruction(currentPrivilege.Privileges))
 		}
 	}
 

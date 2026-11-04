@@ -18,13 +18,13 @@ func TestGenerateMigration(t *testing.T) {
 	t.Run("WriteTheFirstMigration", func(t *testing.T) {
 		directory := t.TempDir()
 
-		target := sqltest.WriteSQLFile(t, directory, "schema.sql",
+		desired := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);")
 
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		paths := driverssqlite.GenerateSQLiteMigration(t, target, migrations)
+		paths := driverssqlite.GenerateSQLiteMigration(t, desired, migrations)
 		require.Len(t, paths, 1)
 		require.Equal(t, filepath.Join(migrations, "20260822143000_add_users.sql"), paths[0])
 
@@ -53,7 +53,7 @@ func TestGenerateMigration(t *testing.T) {
 	t.Run("WriteNoFileWhenTheSchemaMatches", func(t *testing.T) {
 		directory := t.TempDir()
 
-		target := sqltest.WriteSQLFile(t, directory, "schema.sql",
+		desired := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
 		migrations := filepath.Join(directory, "migrations")
@@ -62,7 +62,7 @@ func TestGenerateMigration(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		paths := driverssqlite.GenerateSQLiteMigration(t, target, migrations)
+		paths := driverssqlite.GenerateSQLiteMigration(t, desired, migrations)
 		require.Empty(t, paths)
 
 		entries, err := os.ReadDir(migrations)
@@ -73,7 +73,7 @@ func TestGenerateMigration(t *testing.T) {
 	t.Run("TheSecondMigrationHoldsTheChangeAlone", func(t *testing.T) {
 		directory := t.TempDir()
 
-		target := sqltest.WriteSQLFile(t, directory, "schema.sql",
+		desired := sqltest.WriteSQLFile(t, directory, "schema.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);")
 
 		migrations := filepath.Join(directory, "migrations")
@@ -82,7 +82,7 @@ func TestGenerateMigration(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		paths := driverssqlite.GenerateSQLiteMigration(t, target, migrations)
+		paths := driverssqlite.GenerateSQLiteMigration(t, desired, migrations)
 		require.Len(t, paths, 1)
 
 		content, err := os.ReadFile(paths[0])

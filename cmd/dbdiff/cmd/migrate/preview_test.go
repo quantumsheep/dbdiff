@@ -11,7 +11,7 @@ import (
 )
 
 func TestMigratePreviewCommand(t *testing.T) {
-	t.Run("WithNoSource", func(t *testing.T) {
+	t.Run("WithNoMigrations", func(t *testing.T) {
 		directory := t.TempDir()
 
 		databasePath := filepath.Join(directory, "app.sqlite")

@@ -178,22 +178,22 @@ func DetectPostgresScratchVersion(ctx context.Context, connectionString string) 
 	return postgresScratchVersions[versionNumber/10000]
 }
 
-func (d *PostgresDriver) scratchVersionOfSources(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource) embeddedpostgres.PostgresVersion {
-	sourceHoldsSQL := driversshared.IsSQLSource(source)
-	targetHoldsSQL := driversshared.IsSQLSource(target)
+func (d *PostgresDriver) scratchVersionOfSources(ctx context.Context, current driversshared.DataSource,
+	desired driversshared.DataSource) embeddedpostgres.PostgresVersion {
+	currentHoldsSQL := driversshared.IsSQLSource(current)
+	desiredHoldsSQL := driversshared.IsSQLSource(desired)
 
-	if targetHoldsSQL && !sourceHoldsSQL {
-		connectionSource := source.(driversshared.ConnectionStringDataSource)
+	if desiredHoldsSQL && !currentHoldsSQL {
+		connectionSource := current.(driversshared.ConnectionStringDataSource)
 		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString)
 	}
 
-	if sourceHoldsSQL && !targetHoldsSQL {
-		connectionSource := target.(driversshared.ConnectionStringDataSource)
+	if currentHoldsSQL && !desiredHoldsSQL {
+		connectionSource := desired.(driversshared.ConnectionStringDataSource)
 		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString)
 	}
 
-	if targetHoldsSQL && sourceHoldsSQL && d.ScratchServerVersion != "" {
+	if desiredHoldsSQL && currentHoldsSQL && d.ScratchServerVersion != "" {
 		return embeddedpostgres.PostgresVersion(d.ScratchServerVersion)
 	}
 
@@ -234,13 +234,13 @@ func findFreePort() (uint32, error) {
 	return uint32(address.Port), nil
 }
 
-func (d *PostgresDriver) OpenSide(ctx context.Context, source driversshared.DataSource, schema string, role string) (*sql.DB, error) {
-	connectionSource, isConnectionString := source.(driversshared.ConnectionStringDataSource)
+func (d *PostgresDriver) OpenSide(ctx context.Context, dataSource driversshared.DataSource, schema string, role string) (*sql.DB, error) {
+	connectionSource, isConnectionString := dataSource.(driversshared.ConnectionStringDataSource)
 	if isConnectionString {
 		return OpenPostgresConnection(connectionSource.ConnectionString, schema)
 	}
 
-	path, _ := driversshared.SQLSourcePath(source)
+	path, _ := driversshared.SQLSourcePath(dataSource)
 
 	sqlSource, err := driversshared.NewSQLSource(path)
 	if err != nil {

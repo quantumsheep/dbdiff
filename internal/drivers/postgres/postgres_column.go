@@ -49,7 +49,7 @@ func (c *PostgresColumn) StorageInstructions(tableName string) []driversshared.I
 	}}
 }
 
-// A column definition accepts no statistics source, so a separate statement holds it. The
+// A column definition accepts no statistics target, so a separate statement sets it.
 func (c *PostgresColumn) StatisticsInstructions(tableName string) []driversshared.Instruction {
 	if !c.StatisticsTarget.Valid {
 		return nil
@@ -58,8 +58,8 @@ func (c *PostgresColumn) StatisticsInstructions(tableName string) []driversshare
 	return []driversshared.Instruction{&PostgresAlterTableInstruction{
 		Name: tableName,
 		Actions: []driversshared.AlterTableAction{&PostgresSetStatisticsAction{
-			ColumnName: c.Name,
-			Source:     c.StatisticsTarget.Int64,
+			ColumnName:       c.Name,
+			StatisticsTarget: c.StatisticsTarget.Int64,
 		}},
 	}}
 }
@@ -119,9 +119,9 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 	// value of every other column. The CASE expressions separate the two, because PostgreSQL
 	// refuses a DEFAULT expression that reads another column.
 	//
-	// An empty text of the identity options, of the storage mode, or of the statistics source
+	// An empty text of the identity options, of the storage mode, or of the statistics target
 	// names a column that keeps the default of its type. PostgreSQL 16 writes -1 for the
-	// default statistics source, and PostgreSQL 17 writes NULL. GetSequences excludes the
+	// default statistics target, and PostgreSQL 17 writes NULL. GetSequences excludes the
 	// sequence of a serial column, so the word of that column builds it again.
 	columns, err := driversshared.QueryAll(ctx, db, `
 			SELECT

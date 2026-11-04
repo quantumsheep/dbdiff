@@ -36,16 +36,16 @@ type TestingMySQLDriver struct {
 	tb   testing.TB
 	conn *sql.DB
 
-	source driversshared.DataSource
-	target driversshared.DataSource
+	current driversshared.DataSource
+	desired driversshared.DataSource
 
-	targetDatabase string
-	sourceDatabase string
+	desiredDatabase string
+	currentDatabase string
 
 	CompareData bool
 
-	sourceConnection *sql.DB
-	targetConnection *sql.DB
+	currentConnection *sql.DB
+	desiredConnection *sql.DB
 }
 
 func NewTestMySQLDriver(tb testing.TB) *TestingMySQLDriver {
@@ -72,71 +72,71 @@ func newTestMySQLDriverWithServer(tb testing.TB, serverConnectionString string) 
 	require.NoError(tb, err)
 
 	id := time.Now().UnixNano()
-	targetDatabase := fmt.Sprintf("target_%d", id)
-	sourceDatabase := fmt.Sprintf("source_%d", id)
+	desiredDatabase := fmt.Sprintf("desired_%d", id)
+	currentDatabase := fmt.Sprintf("current_%d", id)
 
-	_, err = conn.ExecContext(tb.Context(), "CREATE DATABASE "+QuoteIdentifier(targetDatabase))
+	_, err = conn.ExecContext(tb.Context(), "CREATE DATABASE "+QuoteIdentifier(desiredDatabase))
 	require.NoError(tb, err)
-	_, err = conn.ExecContext(tb.Context(), "CREATE DATABASE "+QuoteIdentifier(sourceDatabase))
+	_, err = conn.ExecContext(tb.Context(), "CREATE DATABASE "+QuoteIdentifier(currentDatabase))
 	require.NoError(tb, err)
 
 	// The connection stays open for this cleanup. A closed connection drops no database.
 	tb.Cleanup(func() {
-		_, err := conn.ExecContext(context.Background(), "DROP DATABASE "+QuoteIdentifier(targetDatabase))
+		_, err := conn.ExecContext(context.Background(), "DROP DATABASE "+QuoteIdentifier(desiredDatabase))
 		require.NoError(tb, err)
 
-		_, err = conn.ExecContext(context.Background(), "DROP DATABASE "+QuoteIdentifier(sourceDatabase))
+		_, err = conn.ExecContext(context.Background(), "DROP DATABASE "+QuoteIdentifier(currentDatabase))
 		require.NoError(tb, err)
 
 		require.NoError(tb, conn.Close())
 	})
 
-	targetConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, targetDatabase)
-	sourceConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, sourceDatabase)
+	desiredConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, desiredDatabase)
+	currentConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, currentDatabase)
 
 	// The harness diffs a call at a time, and the driver fields go nil between two calls, so
-	// the harness keeps its own connection of each side for ExecOnTarget and ExecOnSource.
-	targetConnection, err := OpenMySQLConnection(targetConnectionString)
+	// the harness keeps its own connection of each side for ExecOnDesired and ExecOnCurrent.
+	desiredConnection, err := OpenMySQLConnection(desiredConnectionString)
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
-		require.NoError(tb, targetConnection.Close())
+		require.NoError(tb, desiredConnection.Close())
 	})
 
-	sourceConnection, err := OpenMySQLConnection(sourceConnectionString)
+	currentConnection, err := OpenMySQLConnection(currentConnectionString)
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
-		require.NoError(tb, sourceConnection.Close())
+		require.NoError(tb, currentConnection.Close())
 	})
 
 	driver := NewMySQLDriver(&MySQLDriverConfig{})
 
 	return &TestingMySQLDriver{
-		MySQLDriver:      driver,
-		tb:               tb,
-		conn:             conn,
-		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
-		target:           driversshared.ConnectionStringDataSource{ConnectionString: targetConnectionString},
-		targetDatabase:   targetDatabase,
-		sourceDatabase:   sourceDatabase,
-		sourceConnection: sourceConnection,
-		targetConnection: targetConnection,
+		MySQLDriver:       driver,
+		tb:                tb,
+		conn:              conn,
+		current:           driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
+		desired:           driversshared.ConnectionStringDataSource{ConnectionString: desiredConnectionString},
+		desiredDatabase:   desiredDatabase,
+		currentDatabase:   currentDatabase,
+		currentConnection: currentConnection,
+		desiredConnection: desiredConnection,
 	}
 }
 
-func NewTestMySQLDriverWithTargetDirectory(tb testing.TB, directory string) *TestingMySQLDriver {
+func NewTestMySQLDriverWithDesiredDirectory(tb testing.TB, directory string) *TestingMySQLDriver {
 	tb.Helper()
 
-	return newTestMySQLDriverWithTargetDirectory(tb, mysqlTestConnectionString, directory)
+	return newTestMySQLDriverWithDesiredDirectory(tb, mysqlTestConnectionString, directory)
 }
 
-func NewTestMariaDBDriverWithTargetDirectory(tb testing.TB, directory string) *TestingMySQLDriver {
+func NewTestMariaDBDriverWithDesiredDirectory(tb testing.TB, directory string) *TestingMySQLDriver {
 	tb.Helper()
 
-	return newTestMySQLDriverWithTargetDirectory(tb, mariadbTestConnectionString, directory)
+	return newTestMySQLDriverWithDesiredDirectory(tb, mariadbTestConnectionString, directory)
 }
 
-// The driver materializes the target directory as a scratch database on a temporary server.
-func newTestMySQLDriverWithTargetDirectory(tb testing.TB, serverConnectionString string,
+// The driver materializes the desired directory as a scratch database on a temporary server.
+func newTestMySQLDriverWithDesiredDirectory(tb testing.TB, serverConnectionString string,
 	directory string) *TestingMySQLDriver {
 	tb.Helper()
 
@@ -148,36 +148,36 @@ func newTestMySQLDriverWithTargetDirectory(tb testing.TB, serverConnectionString
 	err = conn.PingContext(tb.Context())
 	require.NoError(tb, err)
 
-	sourceDatabase := fmt.Sprintf("source_%d", time.Now().UnixNano())
+	currentDatabase := fmt.Sprintf("current_%d", time.Now().UnixNano())
 
-	_, err = conn.ExecContext(tb.Context(), "CREATE DATABASE "+QuoteIdentifier(sourceDatabase))
+	_, err = conn.ExecContext(tb.Context(), "CREATE DATABASE "+QuoteIdentifier(currentDatabase))
 	require.NoError(tb, err)
 
 	tb.Cleanup(func() {
-		_, err := conn.ExecContext(context.Background(), "DROP DATABASE "+QuoteIdentifier(sourceDatabase))
+		_, err := conn.ExecContext(context.Background(), "DROP DATABASE "+QuoteIdentifier(currentDatabase))
 		require.NoError(tb, err)
 
 		require.NoError(tb, conn.Close())
 	})
 
-	sourceConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, sourceDatabase)
+	currentConnectionString := testConnectionStringWithDatabase(tb, serverConnectionString, currentDatabase)
 
-	sourceConnection, err := OpenMySQLConnection(sourceConnectionString)
+	currentConnection, err := OpenMySQLConnection(currentConnectionString)
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
-		require.NoError(tb, sourceConnection.Close())
+		require.NoError(tb, currentConnection.Close())
 	})
 
 	driver := NewMySQLDriver(&MySQLDriverConfig{})
 
 	return &TestingMySQLDriver{
-		MySQLDriver:      driver,
-		tb:               tb,
-		conn:             conn,
-		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
-		target:           driversshared.ParseDataSource(directory),
-		sourceDatabase:   sourceDatabase,
-		sourceConnection: sourceConnection,
+		MySQLDriver:       driver,
+		tb:                tb,
+		conn:              conn,
+		current:           driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
+		desired:           driversshared.ParseDataSource(directory),
+		currentDatabase:   currentDatabase,
+		currentConnection: currentConnection,
 	}
 }
 
@@ -202,24 +202,24 @@ func (d *TestingMySQLDriver) CreateTestUser(name string) {
 	require.NoError(d.tb, err)
 }
 
-func (d *TestingMySQLDriver) ExecOnTarget(sqlStatements string) {
+func (d *TestingMySQLDriver) ExecOnDesired(sqlStatements string) {
 	d.tb.Helper()
 
-	_, err := d.targetConnection.Exec(sqlStatements)
+	_, err := d.desiredConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
-func (d *TestingMySQLDriver) ExecOnSource(sqlStatements string) {
+func (d *TestingMySQLDriver) ExecOnCurrent(sqlStatements string) {
 	d.tb.Helper()
 
-	_, err := d.sourceConnection.Exec(sqlStatements)
+	_, err := d.currentConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
 func (d *TestingMySQLDriver) RequireInstructions(expected driversshared.Instructions) string {
 	d.tb.Helper()
 
-	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
+	instructions, err := d.Diff(d.tb.Context(), d.current, d.desired, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
@@ -229,17 +229,17 @@ func (d *TestingMySQLDriver) RequireInstructions(expected driversshared.Instruct
 func (d *TestingMySQLDriver) RequireDiffApplies(expected driversshared.Instructions) {
 	d.tb.Helper()
 
-	d.ExecOnSource(d.RequireInstructions(expected))
+	d.ExecOnCurrent(d.RequireInstructions(expected))
 	d.RequireInstructions(nil)
 }
 
 // The driver of MySQL gives an int64 value for an integer column and a byte slice for
 // every other column of a plain query. The rows keep the int64 values and turn the byte
 // slices into strings.
-func (d *TestingMySQLDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {
+func (d *TestingMySQLDriver) FetchAllFromCurrent(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 
-	rows, err := d.sourceConnection.Query(
+	rows, err := d.currentConnection.Query(
 		fmt.Sprintf("SELECT * FROM %s %s;", QuoteIdentifier(table), additionalRules))
 	require.NoError(d.tb, err)
 
@@ -286,8 +286,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("NoDifference", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireInstructions(nil)
 	})
@@ -295,7 +295,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (
 				id int NOT NULL AUTO_INCREMENT,
 				name varchar(100) NOT NULL,
@@ -336,7 +336,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("DropTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnSource("CREATE TABLE old_users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE old_users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLDropTableInstruction{
@@ -348,8 +348,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("AddColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));")
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -367,8 +367,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("RemoveColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -383,9 +383,9 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ModifyColumnType", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, age bigint, PRIMARY KEY (id));")
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
-		driver.ExecOnSource("INSERT INTO users (id, age) VALUES (1, 42);")
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, age bigint, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users (id, age) VALUES (1, 42);")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -401,15 +401,15 @@ func TestMySQLDriver(t *testing.T) {
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "age": int64(42)},
-		}, driver.FetchAllFromSource("users", ""))
+		}, driver.FetchAllFromCurrent("users", ""))
 	})
 
 	t.Run("RenameColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, full_name varchar(100), PRIMARY KEY (id));")
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
-		driver.ExecOnSource("INSERT INTO users (id, name) VALUES (1, 'Alice');")
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, full_name varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users (id, name) VALUES (1, 'Alice');")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -423,13 +423,13 @@ func TestMySQLDriver(t *testing.T) {
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "full_name": "Alice"},
-		}, driver.FetchAllFromSource("users", ""))
+		}, driver.FetchAllFromCurrent("users", ""))
 	})
 
 	t.Run("ExpressionDefaultAndOnUpdate", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE events (
 				id int NOT NULL,
 				updated_at timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -465,11 +465,11 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateIndex", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));
 			CREATE INDEX idx_users_name ON users (name);
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateIndexInstruction{
@@ -483,8 +483,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("DropIndex", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
-		driver.ExecOnSource(`
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));
 			CREATE INDEX idx_users_name ON users (name);
 		`)
@@ -500,11 +500,11 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangeIndexToUnique", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));
 			CREATE UNIQUE INDEX idx_users_name ON users (name);
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));
 			CREATE INDEX idx_users_name ON users (name);
 		`)
@@ -526,11 +526,11 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("IndexWithPrefixLengthAndDescendingKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE articles (id int NOT NULL, title text, score int, PRIMARY KEY (id));
 			CREATE INDEX idx_articles ON articles (title(10), score DESC);
 		`)
-		driver.ExecOnSource("CREATE TABLE articles (id int NOT NULL, title text, score int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE articles (id int NOT NULL, title text, score int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateIndexInstruction{
@@ -544,7 +544,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateTablesWithForeignKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (
 				id int NOT NULL,
@@ -601,7 +601,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("AddForeignKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (
 				id int NOT NULL,
@@ -610,7 +610,7 @@ func TestMySQLDriver(t *testing.T) {
 				CONSTRAINT fk_books_author FOREIGN KEY (author_id) REFERENCES authors (id)
 			);
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (id int NOT NULL, author_id int, PRIMARY KEY (id));
 		`)
@@ -635,13 +635,13 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("AddForeignKeyToANewTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE publishers (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (id int NOT NULL, publisher_id int, PRIMARY KEY (id));
 			ALTER TABLE books ADD CONSTRAINT fk_books_publisher
 				FOREIGN KEY (publisher_id) REFERENCES publishers (id);
 		`)
-		driver.ExecOnSource("CREATE TABLE books (id int NOT NULL, publisher_id int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE books (id int NOT NULL, publisher_id int, PRIMARY KEY (id));")
 
 		// The name order puts the change of the kept table before the creation of the
 		// referenced table, so the enforcement of the foreign keys goes off.
@@ -680,11 +680,11 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("RemoveForeignKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (id int NOT NULL, author_id int, PRIMARY KEY (id));
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (
 				id int NOT NULL,
@@ -711,8 +711,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("DropTableWithForeignKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));")
-		driver.ExecOnSource(`
+		driver.ExecOnDesired("CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (
 				id int NOT NULL,
@@ -736,7 +736,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("AddCheckConstraint", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (
 				id int NOT NULL,
 				age int,
@@ -744,7 +744,7 @@ func TestMySQLDriver(t *testing.T) {
 				CONSTRAINT chk_users_age CHECK (age > 0)
 			);
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -762,8 +762,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("RemoveCheckConstraint", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
-		driver.ExecOnSource(`
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (
 				id int NOT NULL,
 				age int,
@@ -785,8 +785,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangePrimaryKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE members (id int NOT NULL, tenant_id int NOT NULL, PRIMARY KEY (id, tenant_id));")
-		driver.ExecOnSource("CREATE TABLE members (id int NOT NULL, tenant_id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE members (id int NOT NULL, tenant_id int NOT NULL, PRIMARY KEY (id, tenant_id));")
+		driver.ExecOnCurrent("CREATE TABLE members (id int NOT NULL, tenant_id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -805,8 +805,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("RemoveAutoIncrementAndPrimaryKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE logs (id int NOT NULL, message text);")
-		driver.ExecOnSource("CREATE TABLE logs (id int NOT NULL AUTO_INCREMENT, message text, PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE logs (id int NOT NULL, message text);")
+		driver.ExecOnCurrent("CREATE TABLE logs (id int NOT NULL AUTO_INCREMENT, message text, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -829,7 +829,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("GeneratedColumns", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE prices (
 				id int NOT NULL,
 				net int,
@@ -838,7 +838,7 @@ func TestMySQLDriver(t *testing.T) {
 				PRIMARY KEY (id)
 			);
 		`)
-		driver.ExecOnSource("CREATE TABLE prices (id int NOT NULL, net int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE prices (id int NOT NULL, net int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -868,7 +868,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangeColumnToGenerated", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE prices (
 				id int NOT NULL,
 				net int,
@@ -876,7 +876,7 @@ func TestMySQLDriver(t *testing.T) {
 				PRIMARY KEY (id)
 			);
 		`)
-		driver.ExecOnSource("CREATE TABLE prices (id int NOT NULL, net int, gross int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE prices (id int NOT NULL, net int, gross int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -902,11 +902,11 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateView", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
 			CREATE VIEW adult_users AS SELECT id FROM users WHERE age >= 18;
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateViewInstruction{
@@ -919,11 +919,11 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangeView", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
 			CREATE VIEW adult_users AS SELECT id FROM users WHERE age >= 21;
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
 			CREATE VIEW adult_users AS SELECT id FROM users WHERE age >= 18;
 		`)
@@ -940,8 +940,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("DropView", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
-		driver.ExecOnSource(`
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
 			CREATE VIEW adult_users AS SELECT id FROM users WHERE age >= 18;
 		`)
@@ -956,11 +956,11 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateViewKeepsDatabaseNameInStringLiteral", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		label := "`" + driver.targetDatabase + "`.x"
+		label := "`" + driver.desiredDatabase + "`.x"
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));" +
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));" +
 			"CREATE VIEW labeled_users AS SELECT id, '" + label + "' AS label FROM users;")
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateViewInstruction{
@@ -973,7 +973,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateTableWithEngineAndCollation", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE logs (id int NOT NULL, PRIMARY KEY (id)) ENGINE = MyISAM DEFAULT COLLATE = utf8mb4_bin;")
+		driver.ExecOnDesired("CREATE TABLE logs (id int NOT NULL, PRIMARY KEY (id)) ENGINE = MyISAM DEFAULT COLLATE = utf8mb4_bin;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateTableInstruction{
@@ -995,8 +995,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangeEngine", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE logs (id int NOT NULL, PRIMARY KEY (id)) ENGINE = MyISAM;")
-		driver.ExecOnSource("CREATE TABLE logs (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE logs (id int NOT NULL, PRIMARY KEY (id)) ENGINE = MyISAM;")
+		driver.ExecOnCurrent("CREATE TABLE logs (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -1011,9 +1011,9 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangeTableCollation", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE messages (id int NOT NULL, body varchar(100), PRIMARY KEY (id)) DEFAULT COLLATE = utf8mb4_bin;")
-		driver.ExecOnSource("CREATE TABLE messages (id int NOT NULL, body varchar(100), PRIMARY KEY (id));")
-		driver.ExecOnSource("INSERT INTO messages (id, body) VALUES (1, 'hello');")
+		driver.ExecOnDesired("CREATE TABLE messages (id int NOT NULL, body varchar(100), PRIMARY KEY (id)) DEFAULT COLLATE = utf8mb4_bin;")
+		driver.ExecOnCurrent("CREATE TABLE messages (id int NOT NULL, body varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO messages (id, body) VALUES (1, 'hello');")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -1027,14 +1027,14 @@ func TestMySQLDriver(t *testing.T) {
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "body": "hello"},
-		}, driver.FetchAllFromSource("messages", ""))
+		}, driver.FetchAllFromCurrent("messages", ""))
 	})
 
 	t.Run("ChangeTableCollationWithAColumnCollation", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE messages (id int NOT NULL, body varchar(100) COLLATE utf8mb4_general_ci, PRIMARY KEY (id)) DEFAULT COLLATE = utf8mb4_bin;")
-		driver.ExecOnSource("CREATE TABLE messages (id int NOT NULL, body varchar(100) COLLATE utf8mb4_general_ci, PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE messages (id int NOT NULL, body varchar(100) COLLATE utf8mb4_general_ci, PRIMARY KEY (id)) DEFAULT COLLATE = utf8mb4_bin;")
+		driver.ExecOnCurrent("CREATE TABLE messages (id int NOT NULL, body varchar(100) COLLATE utf8mb4_general_ci, PRIMARY KEY (id));")
 
 		// The conversion rewrites the collation of the body column, so the column needs
 		// its definition again in the same run.
@@ -1062,7 +1062,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreatePartitionedTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY HASH (id) PARTITIONS 4;")
+		driver.ExecOnDesired("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY HASH (id) PARTITIONS 4;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateTableInstruction{
@@ -1083,9 +1083,9 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("AddPartitioning", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY KEY (id) PARTITIONS 2;")
-		driver.ExecOnSource("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id));")
-		driver.ExecOnSource("INSERT INTO metrics (id) VALUES (1), (2);")
+		driver.ExecOnDesired("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY KEY (id) PARTITIONS 2;")
+		driver.ExecOnCurrent("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO metrics (id) VALUES (1), (2);")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -1099,14 +1099,14 @@ func TestMySQLDriver(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"id": int64(1)},
 			{"id": int64(2)},
-		}, driver.FetchAllFromSource("metrics", "ORDER BY id"))
+		}, driver.FetchAllFromCurrent("metrics", "ORDER BY id"))
 	})
 
 	t.Run("RemovePartitioning", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id));")
-		driver.ExecOnSource("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY HASH (id) PARTITIONS 4;")
+		driver.ExecOnDesired("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY HASH (id) PARTITIONS 4;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -1119,15 +1119,15 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateTrigger", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, updated_count int DEFAULT 0, PRIMARY KEY (id));
 			CREATE TRIGGER trg_users_update BEFORE UPDATE ON users FOR EACH ROW
 			BEGIN
 				SET NEW.updated_count = OLD.updated_count + 1;
 			END;
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, updated_count int DEFAULT 0, PRIMARY KEY (id));")
-		driver.ExecOnSource("INSERT INTO users (id) VALUES (1);")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, updated_count int DEFAULT 0, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users (id) VALUES (1);")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateTriggerInstruction{
@@ -1139,21 +1139,21 @@ func TestMySQLDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnSource("UPDATE users SET id = 1 WHERE id = 1;")
+		driver.ExecOnCurrent("UPDATE users SET id = 1 WHERE id = 1;")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "updated_count": int64(1)},
-		}, driver.FetchAllFromSource("users", ""))
+		}, driver.FetchAllFromCurrent("users", ""))
 	})
 
 	t.Run("ChangeTrigger", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, note varchar(20), PRIMARY KEY (id));
 			CREATE TRIGGER trg_users_insert BEFORE INSERT ON users FOR EACH ROW SET NEW.note = 'new';
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, note varchar(20), PRIMARY KEY (id));
 			CREATE TRIGGER trg_users_insert BEFORE INSERT ON users FOR EACH ROW SET NEW.note = 'old';
 		`)
@@ -1175,8 +1175,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("DropTrigger", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
-		driver.ExecOnSource(`
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TRIGGER trg_users_delete AFTER DELETE ON users FOR EACH ROW SET @deleted = 1;
 		`)
@@ -1191,12 +1191,12 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateRoutines", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
 			CREATE PROCEDURE prune_users(IN max_age int) DELETE FROM users WHERE age > max_age;
 			CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x * 2;
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateRoutineInstruction{
@@ -1215,8 +1215,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangeFunction", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x + x;")
-		driver.ExecOnSource("CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x * 2;")
+		driver.ExecOnDesired("CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x + x;")
+		driver.ExecOnCurrent("CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x * 2;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLDropRoutineInstruction{
@@ -1234,7 +1234,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("DropProcedure", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnSource("CREATE PROCEDURE noop() SET @noop = 1;")
+		driver.ExecOnCurrent("CREATE PROCEDURE noop() SET @noop = 1;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLDropRoutineInstruction{
@@ -1247,12 +1247,12 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ViewThatCallsAFunction", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x * 2;
 			CREATE VIEW doubled_users AS SELECT double_it(id) AS doubled FROM users;
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateRoutineInstruction{
@@ -1270,8 +1270,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("CreateAndDropEvent", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
-		driver.ExecOnSource("CREATE EVENT old_nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
+		driver.ExecOnDesired("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
+		driver.ExecOnCurrent("CREATE EVENT old_nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateEventInstruction{
@@ -1287,8 +1287,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ChangeEvent", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE EVENT nightly ON SCHEDULE EVERY 2 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
-		driver.ExecOnSource("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
+		driver.ExecOnDesired("CREATE EVENT nightly ON SCHEDULE EVERY 2 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
+		driver.ExecOnCurrent("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLDropEventInstruction{
@@ -1304,8 +1304,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("EventsWithTwoStartTimesCompareAsEqual", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
-		driver.ExecOnSource("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2031-06-15 12:00:00' DO SET @cleaned = 1;")
+		driver.ExecOnDesired("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
+		driver.ExecOnCurrent("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2031-06-15 12:00:00' DO SET @cleaned = 1;")
 
 		driver.RequireInstructions(nil)
 	})
@@ -1315,11 +1315,11 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ComparePrivileges = true
 		driver.CreateTestUser("dbdiff_reader")
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			GRANT SELECT ON users TO 'dbdiff_reader'@'%';
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE posts (id int NOT NULL, PRIMARY KEY (id));
 			GRANT SELECT ON users TO 'dbdiff_reader'@'%' WITH GRANT OPTION;
@@ -1343,7 +1343,7 @@ func TestMySQLDriver(t *testing.T) {
 		})
 	})
 
-	t.Run("SQLSourceAsTarget", func(t *testing.T) {
+	t.Run("SQLSourceAsDesired", func(t *testing.T) {
 		skipWithoutMySQLServer(t)
 
 		if testing.Short() {
@@ -1358,7 +1358,7 @@ func TestMySQLDriver(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "002_add_name.down.sql",
 			"ALTER TABLE users DROP COLUMN name;")
 
-		driver := NewTestMySQLDriverWithTargetDirectory(t, directory)
+		driver := NewTestMySQLDriverWithDesiredDirectory(t, directory)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateTableInstruction{
@@ -1384,17 +1384,17 @@ func TestMySQLDriver(t *testing.T) {
 			t.Skip("the temporary mysql server needs a download on the first run")
 		}
 
-		targetPath := sqltest.WriteSQLFile(t, t.TempDir(), "target.sql",
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "desired.sql",
 			"CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
-		sourcePath := sqltest.WriteSQLFile(t, t.TempDir(), "source.sql",
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql",
 			"CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver := NewMySQLDriver(&MySQLDriverConfig{})
 
-		target := driversshared.ParseDataSource(targetPath)
-		source := driversshared.ParseDataSource(sourcePath)
+		desired := driversshared.ParseDataSource(desiredPath)
+		current := driversshared.ParseDataSource(currentPath)
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, driversshared.Instructions{
@@ -1414,11 +1414,11 @@ func TestMySQLDriver(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), age int, PRIMARY KEY (id));
 			INSERT INTO users (id, name, age) VALUES (1, 'Alice', 30), (3, 'Cara', NULL);
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), age int, PRIMARY KEY (id));
 			INSERT INTO users (id, name, age) VALUES (1, 'Alicia', 30), (2, 'Bob', 40);
 		`)
@@ -1462,14 +1462,14 @@ func TestMySQLDriver(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice", "age": int64(30)},
 			{"id": int64(3), "name": "Cara", "age": nil},
-		}, driver.FetchAllFromSource("users", "ORDER BY id"))
+		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
 	})
 
 	t.Run("DataOfANewTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE readings (
 				id int NOT NULL,
 				taken_at datetime,
@@ -1518,10 +1518,10 @@ func TestMySQLDriver(t *testing.T) {
 
 		schema := "CREATE TABLE users (id int NOT NULL, code int GENERATED ALWAYS AS (id * 10) STORED NOT NULL, name varchar(100), PRIMARY KEY (code));"
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget("INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');")
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource("INSERT INTO users (id, name) VALUES (1, 'Alicia'), (3, 'Cara');")
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired("INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');")
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent("INSERT INTO users (id, name) VALUES (1, 'Alicia'), (3, 'Cara');")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLInsertInstruction{
@@ -1562,16 +1562,16 @@ func TestMySQLDriver(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "code": int64(10), "name": "Alice"},
 			{"id": int64(2), "code": int64(20), "name": "Bob"},
-		}, driver.FetchAllFromSource("users", "ORDER BY code"))
+		}, driver.FetchAllFromCurrent("users", "ORDER BY code"))
 	})
 
 	t.Run("DataOfATableWithNoPrimaryKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true
 
-		driver.ExecOnTarget("CREATE TABLE notes (body text);")
-		driver.ExecOnSource("CREATE TABLE notes (body text);")
-		driver.ExecOnTarget("INSERT INTO notes VALUES ('hello');")
+		driver.ExecOnDesired("CREATE TABLE notes (body text);")
+		driver.ExecOnCurrent("CREATE TABLE notes (body text);")
+		driver.ExecOnDesired("INSERT INTO notes VALUES ('hello');")
 
 		driver.RequireInstructions([]driversshared.Instruction{
 			&driversshared.SQLCommentInstruction{
@@ -1585,11 +1585,11 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ComparePrivileges = true
 		driver.CreateTestUser("dbdiff_reader")
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			GRANT SELECT, UPDATE ON users TO 'dbdiff_reader'@'%';
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLGrantInstruction{
@@ -1605,12 +1605,12 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ComparePrivileges = true
 		driver.CreateTestUser("dbdiff_reader")
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE posts (id int NOT NULL, PRIMARY KEY (id));
 			GRANT SELECT ON users TO 'dbdiff_reader'@'%';
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE posts (id int NOT NULL, PRIMARY KEY (id));
 			GRANT SELECT, DELETE ON users TO 'dbdiff_reader'@'%';
@@ -1636,11 +1636,11 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ComparePrivileges = true
 		driver.CreateTestUser("dbdiff_reader")
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
 			GRANT SELECT (id, name) ON users TO 'dbdiff_reader'@'%';
 		`)
-		driver.ExecOnSource(
+		driver.ExecOnCurrent(
 			"CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
@@ -1658,11 +1658,11 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ComparePrivileges = true
 		driver.CreateTestUser("dbdiff_reader")
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
 			GRANT SELECT (id, email) ON users TO 'dbdiff_reader'@'%';
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
 			GRANT SELECT (id, name) ON users TO 'dbdiff_reader'@'%';
 		`)
@@ -1688,9 +1688,9 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ComparePrivileges = true
 		driver.CreateTestUser("dbdiff_reader")
 
-		driver.ExecOnTarget(
+		driver.ExecOnDesired(
 			"CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));")
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, name varchar(50), email varchar(50), PRIMARY KEY (id));
 			GRANT SELECT (id, name) ON users TO 'dbdiff_reader'@'%';
 		`)
@@ -1710,7 +1710,7 @@ func TestMySQLDriver(t *testing.T) {
 		driver.ComparePrivileges = true
 		driver.CreateTestUser("dbdiff_reader")
 
-		driver.ExecOnTarget("GRANT SELECT ON * TO 'dbdiff_reader'@'%' WITH GRANT OPTION;")
+		driver.ExecOnDesired("GRANT SELECT ON * TO 'dbdiff_reader'@'%' WITH GRANT OPTION;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLGrantInstruction{
@@ -1724,7 +1724,7 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("MigrationHistoryTableStaysHidden", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnSource("CREATE TABLE dbdiff_migrations (version varchar(255) NOT NULL, PRIMARY KEY (version));")
+		driver.ExecOnCurrent("CREATE TABLE dbdiff_migrations (version varchar(255) NOT NULL, PRIMARY KEY (version));")
 
 		driver.RequireInstructions(nil)
 	})
@@ -1732,8 +1732,8 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("ColumnComment", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE users (id int NOT NULL COMMENT 'the identifier', PRIMARY KEY (id));")
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL COMMENT 'the identifier', PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -1753,12 +1753,12 @@ func TestMySQLDriver(t *testing.T) {
 	t.Run("IgnoredTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));
 			CREATE TABLE ignored_created (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE ignored_changed (id int NOT NULL, name varchar(255), PRIMARY KEY (id));
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE ignored_dropped (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE ignored_changed (id int NOT NULL, description varchar(255), PRIMARY KEY (id));
@@ -1784,7 +1784,7 @@ func TestMySQLDriver(t *testing.T) {
 // the check clauses, and the view definitions with another text.
 func TestMariaDBDriver(t *testing.T) {
 	// The type "int(11)" proves that the temporary server ran MariaDB. MySQL writes "int".
-	t.Run("SQLSourceAsTarget", func(t *testing.T) {
+	t.Run("SQLSourceAsDesired", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary mariadb server needs a download on the first run")
 		}
@@ -1797,7 +1797,7 @@ func TestMariaDBDriver(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "001_users.sql",
 			"CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
 
-		driver := NewTestMariaDBDriverWithTargetDirectory(t, directory)
+		driver := NewTestMariaDBDriverWithDesiredDirectory(t, directory)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateTableInstruction{
@@ -1817,7 +1817,7 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("CreateTableWithDefaults", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (
 				id int NOT NULL AUTO_INCREMENT,
 				name varchar(100) NOT NULL DEFAULT 'anonymous',
@@ -1875,7 +1875,7 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("CheckConstraint", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (
 				id int NOT NULL,
 				age int,
@@ -1883,7 +1883,7 @@ func TestMariaDBDriver(t *testing.T) {
 				CONSTRAINT chk_users_age CHECK (age > 0)
 			);
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -1901,7 +1901,7 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("GeneratedColumn", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE prices (
 				id int NOT NULL,
 				net int,
@@ -1909,7 +1909,7 @@ func TestMariaDBDriver(t *testing.T) {
 				PRIMARY KEY (id)
 			);
 		`)
-		driver.ExecOnSource("CREATE TABLE prices (id int NOT NULL, net int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE prices (id int NOT NULL, net int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLAlterTableInstruction{
@@ -1929,7 +1929,7 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("ForeignKey", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (
 				id int NOT NULL,
@@ -1938,7 +1938,7 @@ func TestMariaDBDriver(t *testing.T) {
 				CONSTRAINT fk_books_author FOREIGN KEY (author_id) REFERENCES authors (id)
 			);
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE books (id int NOT NULL, author_id int, PRIMARY KEY (id));
 		`)
@@ -1963,8 +1963,8 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("Sequences", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget("CREATE SEQUENCE order_numbers START WITH 1000 INCREMENT BY 10;")
-		driver.ExecOnSource("CREATE SEQUENCE old_numbers;")
+		driver.ExecOnDesired("CREATE SEQUENCE order_numbers START WITH 1000 INCREMENT BY 10;")
+		driver.ExecOnCurrent("CREATE SEQUENCE old_numbers;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateSequenceInstruction{
@@ -1984,8 +1984,8 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("ChangeSequence", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget("CREATE SEQUENCE order_numbers INCREMENT BY 5;")
-		driver.ExecOnSource("CREATE SEQUENCE order_numbers INCREMENT BY 1;")
+		driver.ExecOnDesired("CREATE SEQUENCE order_numbers INCREMENT BY 5;")
+		driver.ExecOnCurrent("CREATE SEQUENCE order_numbers INCREMENT BY 1;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLDropSequenceInstruction{
@@ -2005,8 +2005,8 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("ChangeSequenceOptions", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget("CREATE SEQUENCE order_numbers MINVALUE 5 MAXVALUE 500 CACHE 20 CYCLE;")
-		driver.ExecOnSource("CREATE SEQUENCE order_numbers MINVALUE 5 MAXVALUE 500 CACHE 10 NOCYCLE;")
+		driver.ExecOnDesired("CREATE SEQUENCE order_numbers MINVALUE 5 MAXVALUE 500 CACHE 20 CYCLE;")
+		driver.ExecOnCurrent("CREATE SEQUENCE order_numbers MINVALUE 5 MAXVALUE 500 CACHE 10 NOCYCLE;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLDropSequenceInstruction{
@@ -2027,11 +2027,11 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("Trigger", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, note varchar(20), PRIMARY KEY (id));
 			CREATE TRIGGER trg_users_insert BEFORE INSERT ON users FOR EACH ROW SET NEW.note = 'new';
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, note varchar(20), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, note varchar(20), PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateTriggerInstruction{
@@ -2047,7 +2047,7 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("Function", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget("CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x * 2;")
+		driver.ExecOnDesired("CREATE FUNCTION double_it(x int) RETURNS int DETERMINISTIC RETURN x * 2;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateRoutineInstruction{
@@ -2061,7 +2061,7 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("Event", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
+		driver.ExecOnDesired("CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY STARTS '2030-01-01 00:00:00' DO SET @cleaned = 1;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateEventInstruction{
@@ -2074,7 +2074,7 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("PartitionedTable", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY HASH (id) PARTITIONS 4;")
+		driver.ExecOnDesired("CREATE TABLE metrics (id int NOT NULL, PRIMARY KEY (id)) PARTITION BY HASH (id) PARTITIONS 4;")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateTableInstruction{
@@ -2096,11 +2096,11 @@ func TestMariaDBDriver(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 		driver.CompareData = true
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));
 			INSERT INTO users (id, name) VALUES (1, 'Alice');
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));
 			INSERT INTO users (id, name) VALUES (1, 'Alicia'), (2, 'Bob');
 		`)
@@ -2140,11 +2140,11 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("View", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
 			CREATE VIEW adult_users AS SELECT id FROM users WHERE age >= 18;
 		`)
-		driver.ExecOnSource("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));")
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&MySQLCreateViewInstruction{
@@ -2157,12 +2157,12 @@ func TestMariaDBDriver(t *testing.T) {
 	t.Run("IgnoredTable", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id int NOT NULL, email varchar(255), PRIMARY KEY (id));
 			CREATE TABLE ignored_created (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE ignored_changed (id int NOT NULL, name varchar(255), PRIMARY KEY (id));
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE ignored_dropped (id int NOT NULL, PRIMARY KEY (id));
 			CREATE TABLE ignored_changed (id int NOT NULL, description varchar(255), PRIMARY KEY (id));

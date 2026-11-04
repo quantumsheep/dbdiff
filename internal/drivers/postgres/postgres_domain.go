@@ -81,45 +81,45 @@ func (d *PostgresDomain) Diff(other *PostgresDomain) []driversshared.Instruction
 		}
 	}
 
-	for _, targetConstraint := range d.Constraints {
-		sourceConstraint, found := other.ConstraintByName(targetConstraint.Name)
+	for _, desiredConstraint := range d.Constraints {
+		currentConstraint, found := other.ConstraintByName(desiredConstraint.Name)
 		if !found {
 			instructions = append(instructions, &PostgresAlterDomainInstruction{
 				Name: d.Name,
 				Action: &PostgresAddDomainConstraintAction{
-					ConstraintName: targetConstraint.Name,
-					Definition:     targetConstraint.Def,
+					ConstraintName: desiredConstraint.Name,
+					Definition:     desiredConstraint.Def,
 				},
 			})
 
 			continue
 		}
 
-		if targetConstraint.Def != sourceConstraint.Def {
+		if desiredConstraint.Def != currentConstraint.Def {
 			instructions = append(instructions,
 				&PostgresAlterDomainInstruction{
 					Name: d.Name,
 					Action: &PostgresDropDomainConstraintAction{
-						ConstraintName: sourceConstraint.Name,
+						ConstraintName: currentConstraint.Name,
 					},
 				},
 				&PostgresAlterDomainInstruction{
 					Name: d.Name,
 					Action: &PostgresAddDomainConstraintAction{
-						ConstraintName: targetConstraint.Name,
-						Definition:     targetConstraint.Def,
+						ConstraintName: desiredConstraint.Name,
+						Definition:     desiredConstraint.Def,
 					},
 				})
 		}
 	}
 
-	for _, sourceConstraint := range other.Constraints {
-		_, found := d.ConstraintByName(sourceConstraint.Name)
+	for _, currentConstraint := range other.Constraints {
+		_, found := d.ConstraintByName(currentConstraint.Name)
 		if !found {
 			instructions = append(instructions, &PostgresAlterDomainInstruction{
 				Name: d.Name,
 				Action: &PostgresDropDomainConstraintAction{
-					ConstraintName: sourceConstraint.Name,
+					ConstraintName: currentConstraint.Name,
 				},
 			})
 		}
@@ -137,11 +137,11 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 		Create: func(domain *PostgresDomain) []driversshared.Instruction {
 			return []driversshared.Instruction{domain.CreateInstruction()}
 		},
-		Change: func(target *PostgresDomain, source *PostgresDomain) []driversshared.Instruction {
-			return target.Diff(source)
+		Change: func(desired *PostgresDomain, current *PostgresDomain) []driversshared.Instruction {
+			return desired.Diff(current)
 		},
-		Drop: func(source *PostgresDomain) driversshared.Instruction {
-			return source.DropInstruction()
+		Drop: func(current *PostgresDomain) driversshared.Instruction {
+			return current.DropInstruction()
 		},
 	})
 }

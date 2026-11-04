@@ -136,11 +136,11 @@ func (d *PostgresDriver) DiffSequences(ctx context.Context) (*SectionDiff, error
 		Create: func(sequence *PostgresSequence) []driversshared.Instruction {
 			return []driversshared.Instruction{sequence.CreateInstruction()}
 		},
-		Change: func(target *PostgresSequence, source *PostgresSequence) []driversshared.Instruction {
-			return target.Diff(source)
+		Change: func(desired *PostgresSequence, current *PostgresSequence) []driversshared.Instruction {
+			return desired.Diff(current)
 		},
-		Drop: func(source *PostgresSequence) driversshared.Instruction {
-			return &PostgresDropSequenceInstruction{Name: source.Name}
+		Drop: func(current *PostgresSequence) driversshared.Instruction {
+			return &PostgresDropSequenceInstruction{Name: current.Name}
 		},
 	})
 }

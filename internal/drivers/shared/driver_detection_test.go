@@ -11,21 +11,21 @@ import (
 
 func TestDetectDriver(t *testing.T) {
 	t.Run("SQLiteConnectionURL", func(t *testing.T) {
-		name, err := DetectDriver(ParseDataSource("sqlite://target.db"), ParseDataSource("sqlite://source.db"))
+		name, err := DetectDriver(ParseDataSource("sqlite://current.db"), ParseDataSource("sqlite://desired.db"))
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("PostgresConnectionURL", func(t *testing.T) {
-		name, err := DetectDriver(ParseDataSource("postgres://user@localhost/target"), ParseDataSource("postgresql://user@localhost/source"))
+		name, err := DetectDriver(ParseDataSource("postgres://user@localhost/current"), ParseDataSource("postgresql://user@localhost/desired"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("PostgresKeywordString", func(t *testing.T) {
-		name, err := DetectDriver(ParseDataSource("host=localhost user=app dbname=target"), ParseDataSource("host=localhost user=app dbname=source"))
+		name, err := DetectDriver(ParseDataSource("host=localhost user=app dbname=current"), ParseDataSource("host=localhost user=app dbname=desired"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
@@ -53,72 +53,72 @@ func TestDetectDriver(t *testing.T) {
 	})
 
 	t.Run("DatabaseFilePath", func(t *testing.T) {
-		name, err := DetectDriver(ParseDataSource("target.db"), ParseDataSource("./source.sqlite"))
+		name, err := DetectDriver(ParseDataSource("current.db"), ParseDataSource("./desired.sqlite"))
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("SQLFileAgainstDatabase", func(t *testing.T) {
-		targetPath := writeDetectionSQLFile(t, "schema.sql")
+		currentPath := writeDetectionSQLFile(t, "schema.sql")
 
-		name, err := DetectDriver(ParseDataSource(targetPath), ParseDataSource("postgres://user@localhost/source"))
+		name, err := DetectDriver(ParseDataSource(currentPath), ParseDataSource("postgres://user@localhost/desired"))
 
 		require.NoError(t, err)
 		require.Equal(t, PostgresDriverName, name)
 	})
 
 	t.Run("DatabaseAgainstSQLFile", func(t *testing.T) {
-		sourcePath := writeDetectionSQLFile(t, "schema.sql")
+		desiredPath := writeDetectionSQLFile(t, "schema.sql")
 
-		name, err := DetectDriver(ParseDataSource("source.db"), ParseDataSource(sourcePath))
+		name, err := DetectDriver(ParseDataSource("desired.db"), ParseDataSource(desiredPath))
 
 		require.NoError(t, err)
 		require.Equal(t, SQLiteDriverName, name)
 	})
 
 	t.Run("TwoSQLFiles", func(t *testing.T) {
-		targetPath := writeDetectionSQLFile(t, "target.sql")
-		sourcePath := writeDetectionSQLFile(t, "source.sql")
+		currentPath := writeDetectionSQLFile(t, "current.sql")
+		desiredPath := writeDetectionSQLFile(t, "desired.sql")
 
-		_, err := DetectDriver(ParseDataSource(targetPath), ParseDataSource(sourcePath))
+		_, err := DetectDriver(ParseDataSource(currentPath), ParseDataSource(desiredPath))
 
-		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the current schema %q and the desired schema %q. Name the driver", targetPath, sourcePath))
+		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the current schema %q and the desired schema %q. Name the driver", currentPath, desiredPath))
 	})
 
 	t.Run("TwoDirectories", func(t *testing.T) {
-		targetDirectory := t.TempDir()
-		sourceDirectory := t.TempDir()
+		currentDirectory := t.TempDir()
+		desiredDirectory := t.TempDir()
 
-		_, err := DetectDriver(ParseDataSource(targetDirectory), ParseDataSource(sourceDirectory))
+		_, err := DetectDriver(ParseDataSource(currentDirectory), ParseDataSource(desiredDirectory))
 
-		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the current schema %q and the desired schema %q. Name the driver", targetDirectory, sourceDirectory))
+		require.EqualError(t, err, fmt.Sprintf("cannot detect the driver of the current schema %q and the desired schema %q. Name the driver", currentDirectory, desiredDirectory))
 	})
 
 	t.Run("UnknownScheme", func(t *testing.T) {
-		_, err := DetectDriver(ParseDataSource("oracle://user@localhost/target"), ParseDataSource("oracle://user@localhost/source"))
+		_, err := DetectDriver(ParseDataSource("oracle://user@localhost/current"), ParseDataSource("oracle://user@localhost/desired"))
 
-		require.EqualError(t, err, `cannot detect the driver of the current schema "oracle://user@localhost/target" and the desired schema "oracle://user@localhost/source". Name the driver`)
+		require.EqualError(t, err, `cannot detect the driver of the current schema "oracle://user@localhost/current" and the desired schema "oracle://user@localhost/desired". Name the driver`)
 	})
 
 	t.Run("MySQLScheme", func(t *testing.T) {
-		driverName, err := DetectDriver(ParseDataSource("mysql://user@localhost/target"), ParseDataSource("mysql://user@localhost/source"))
+		driverName, err := DetectDriver(ParseDataSource("mysql://user@localhost/current"), ParseDataSource("mysql://user@localhost/desired"))
 
 		require.NoError(t, err)
 		require.Equal(t, MySQLDriverName, driverName)
 	})
 
 	t.Run("MariaDBScheme", func(t *testing.T) {
-		driverName, err := DetectDriver(ParseDataSource("mariadb://user@localhost/target"), ParseDataSource(""))
+		driverName, err := DetectDriver(ParseDataSource("mariadb://user@localhost/current"), ParseDataSource(""))
 
 		require.NoError(t, err)
 		require.Equal(t, MySQLDriverName, driverName)
 	})
 
 	t.Run("TwoDifferentEngines", func(t *testing.T) {
-		_, err := DetectDriver(ParseDataSource("sqlite://target.db"), ParseDataSource("postgres://user@localhost/source"))
+		_, err := DetectDriver(ParseDataSource("sqlite://current.db"), ParseDataSource("postgres://user@localhost/desired"))
 
-		require.EqualError(t, err, `the current schema "sqlite://target.db" names the sqlite3 driver and the desired schema "postgres://user@localhost/source" names the postgres driver. Name the driver`)
+		require.EqualError(t, err, `the current schema "sqlite://current.db" names the sqlite3 driver and the desired schema "postgres://user@localhost/desired" names the postgres driver. Name the driver`)
 	})
 }
 

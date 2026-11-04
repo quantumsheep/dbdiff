@@ -53,14 +53,14 @@ func ParseDataSource(argument string) DataSource {
 	}
 }
 
-func IsSQLSource(source DataSource) bool {
-	_, ok := SQLSourcePath(source)
+func IsSQLSource(dataSource DataSource) bool {
+	_, ok := SQLSourcePath(dataSource)
 
 	return ok
 }
 
-func SQLSourcePath(source DataSource) (string, bool) {
-	switch value := source.(type) {
+func SQLSourcePath(dataSource DataSource) (string, bool) {
+	switch value := dataSource.(type) {
 	case FileDataSource:
 		return value.Path, true
 	case FolderDataSource:

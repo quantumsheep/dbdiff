@@ -141,10 +141,10 @@ func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
 
 // A SELECT * statement and an INSERT statement without column names read the order of
 // the columns, so a new order needs a recreation.
-func columnOrderChanged(target *SQLiteTable, source *SQLiteTable) bool {
+func columnOrderChanged(desired *SQLiteTable, current *SQLiteTable) bool {
 	return !slices.Equal(
-		commonColumnNamesInOrder(target, source),
-		commonColumnNamesInOrder(source, target))
+		commonColumnNamesInOrder(desired, current),
+		commonColumnNamesInOrder(current, desired))
 }
 
 func commonColumnNamesInOrder(first *SQLiteTable, second *SQLiteTable) []string {
@@ -177,55 +177,55 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		ColumnOrderChanged: columnOrderChanged(t, other),
 	}
 
-	for _, targetColumn := range t.Columns {
-		sourceColumn, found := other.ColumnByName(targetColumn.Name)
+	for _, desiredColumn := range t.Columns {
+		currentColumn, found := other.ColumnByName(desiredColumn.Name)
 		if !found {
-			_, renamed := diff.RenamedFrom[targetColumn.Name]
+			_, renamed := diff.RenamedFrom[desiredColumn.Name]
 			if renamed {
 				continue
 			}
 
-			diff.Added = append(diff.Added, targetColumn.Name)
+			diff.Added = append(diff.Added, desiredColumn.Name)
 
-			if targetColumn.IsGenerated() && targetColumn.GeneratedStored {
+			if desiredColumn.IsGenerated() && desiredColumn.GeneratedStored {
 				diff.AddsStoredGeneratedColumn = true
 			}
 
 			continue
 		}
 
-		if *targetColumn == *sourceColumn {
+		if *desiredColumn == *currentColumn {
 			continue
 		}
 
-		if targetColumn.Type != sourceColumn.Type {
-			if targetColumn.IsTypeChangeCompatible(sourceColumn) {
-				diff.Modified = append(diff.Modified, targetColumn.Name)
+		if desiredColumn.Type != currentColumn.Type {
+			if desiredColumn.IsTypeChangeCompatible(currentColumn) {
+				diff.Modified = append(diff.Modified, desiredColumn.Name)
 				continue
 			}
 
-			diff.Removed = append(diff.Removed, sourceColumn.Name)
-			diff.Added = append(diff.Added, targetColumn.Name)
+			diff.Removed = append(diff.Removed, currentColumn.Name)
+			diff.Added = append(diff.Added, desiredColumn.Name)
 			continue
 		}
 
-		diff.Modified = append(diff.Modified, targetColumn.Name)
+		diff.Modified = append(diff.Modified, desiredColumn.Name)
 	}
 
-	for _, sourceColumn := range other.Columns {
-		_, found := t.ColumnByName(sourceColumn.Name)
-		_, renamed := lo.FindKey(diff.RenamedFrom, sourceColumn.Name)
+	for _, currentColumn := range other.Columns {
+		_, found := t.ColumnByName(currentColumn.Name)
+		_, renamed := lo.FindKey(diff.RenamedFrom, currentColumn.Name)
 		if !found && !renamed {
-			diff.Removed = append(diff.Removed, sourceColumn.Name)
+			diff.Removed = append(diff.Removed, currentColumn.Name)
 		}
 	}
 
 	if len(t.ForeignKeys) != len(other.ForeignKeys) {
 		diff.ForeignKeysChanged = true
 	} else {
-		for _, targetForeignKey := range t.ForeignKeys {
+		for _, desiredForeignKey := range t.ForeignKeys {
 			found := lo.SomeBy(other.ForeignKeys, func(foreignKey *SQLiteForeignKey) bool {
-				return foreignKey.Equal(targetForeignKey)
+				return foreignKey.Equal(desiredForeignKey)
 			})
 			if !found {
 				diff.ForeignKeysChanged = true
@@ -247,8 +247,8 @@ func (t *SQLiteTable) DiffTable(other *SQLiteTable, reservedNames map[string]boo
 
 	var instructions []driversshared.Instruction
 
-	// The map gives no stable order. The loop walks the target columns instead, so the
-	// rename statements follow the shape of the target table on every run.
+	// The map gives no stable order. The loop walks the desired columns instead, so the
+	// rename statements follow the shape of the desired table on every run.
 	for _, column := range t.Columns {
 		oldName, renamed := columnsDiff.RenamedFrom[column.Name]
 		if !renamed {
@@ -344,7 +344,7 @@ func temporaryTableName(tableName string, reservedNames map[string]bool) string 
 	return name
 }
 
-func (t *SQLiteTable) recreationInstructions(source *SQLiteTable, renamedFrom map[string]string,
+func (t *SQLiteTable) recreationInstructions(current *SQLiteTable, renamedFrom map[string]string,
 	reservedNames map[string]bool) []driversshared.Instruction {
 	temporaryTable := *t
 	temporaryTable.Name = temporaryTableName(t.Name, reservedNames)
@@ -360,7 +360,7 @@ func (t *SQLiteTable) recreationInstructions(source *SQLiteTable, renamedFrom ma
 
 		insertColumns = append(insertColumns, newColumn.Name)
 
-		_, found := source.ColumnByName(newColumn.Name)
+		_, found := current.ColumnByName(newColumn.Name)
 		if found {
 			selectColumns = append(selectColumns, driversshared.QuoteIdentifier(newColumn.Name))
 			continue
@@ -385,7 +385,7 @@ func (t *SQLiteTable) recreationInstructions(source *SQLiteTable, renamedFrom ma
 			TableName:         temporaryTable.Name,
 			ColumnNames:       insertColumns,
 			SelectExpressions: selectColumns,
-			SourceTableName:   t.Name,
+			CurrentTableName:  t.Name,
 		},
 		&driversshared.SQLDropTableInstruction{
 			Name: t.Name,
@@ -399,8 +399,8 @@ func (t *SQLiteTable) recreationInstructions(source *SQLiteTable, renamedFrom ma
 	}
 
 	// The DROP TABLE statement removes each index and each trigger of the table. The
-	// recreation builds every one of them again from the target, so the index diff and
-	// the trigger diff of DiffTable compare a source that is not there.
+	// recreation builds every one of them again from the desired table, so the index diff and
+	// the trigger diff of DiffTable compare a current table that is not there.
 	recreation = append(recreation, t.IndexInstructions()...)
 	recreation = append(recreation, t.TriggerInstructions()...)
 

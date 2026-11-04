@@ -333,9 +333,9 @@ func TestRunnerUp(t *testing.T) {
 		paths := driverssqlite.GenerateSQLiteMigration(t, schema, migrations)
 		require.NotEmpty(t, paths)
 
-		sourcePath := filepath.Join(directory, "source.sqlite")
+		currentPath := filepath.Join(directory, "current.sqlite")
 
-		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
@@ -346,7 +346,7 @@ func TestRunnerUp(t *testing.T) {
 
 		driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
-		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourcePath),
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(currentPath),
 			driversshared.ParseDataSource(schema), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
@@ -817,7 +817,7 @@ func TestRunnerStep(t *testing.T) {
 }
 
 func TestRunnerVerify(t *testing.T) {
-	newAppliedSource := func(tb testing.TB) (string, string) {
+	newAppliedDatabase := func(tb testing.TB) (string, string) {
 		tb.Helper()
 
 		directory := tb.TempDir()
@@ -828,9 +828,9 @@ func TestRunnerVerify(t *testing.T) {
 		sqltest.WriteSQLFile(tb, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
 
-		sourcePath := filepath.Join(directory, "source.sqlite")
+		currentPath := filepath.Join(directory, "current.sqlite")
 
-		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath)
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
 			require.NoError(tb, migrator.Close())
@@ -840,10 +840,10 @@ func TestRunnerVerify(t *testing.T) {
 		require.NoError(tb, err)
 		require.NoError(tb, newRunner(migrator, set, io.Discard).Up(tb.Context(), ""))
 
-		return sourcePath, migrations
+		return currentPath, migrations
 	}
 
-	verify := func(t *testing.T, migrator *driverssqlite.SQLiteMigrator, sourcePath string, migrations string) (string, error) {
+	verify := func(t *testing.T, migrator *driverssqlite.SQLiteMigrator, currentPath string, migrations string) (string, error) {
 		t.Helper()
 
 		set, err := internalmigrations.LoadSet(t.Context(), migrator, migrations)
@@ -854,29 +854,29 @@ func TestRunnerVerify(t *testing.T) {
 
 		err = newRunner(migrator, set, output).Verify(t.Context(),
 			func(ctx context.Context, replay driversshared.DataSource) (driversshared.Instructions, error) {
-				return driver.Diff(ctx, driversshared.ParseDataSource(sourcePath), replay, driversshared.DiffOptions{})
+				return driver.Diff(ctx, driversshared.ParseDataSource(currentPath), replay, driversshared.DiffOptions{})
 			})
 
 		return output.String(), err
 	}
 
 	t.Run("ACleanDatabaseGivesNoInstruction", func(t *testing.T) {
-		sourcePath, migrations := newAppliedSource(t)
+		currentPath, migrations := newAppliedDatabase(t)
 
-		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
 
-		output, err := verify(t, migrator, sourcePath, migrations)
+		output, err := verify(t, migrator, currentPath, migrations)
 		require.NoError(t, err)
 		require.Equal(t, "The database holds the schema of the migrations.\n", output)
 	})
 
 	t.Run("AHandEditedDatabaseGivesTheDrift", func(t *testing.T) {
-		sourcePath, migrations := newAppliedSource(t)
+		currentPath, migrations := newAppliedDatabase(t)
 
-		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
@@ -885,28 +885,28 @@ func TestRunnerVerify(t *testing.T) {
 			`CREATE TABLE audit (id INTEGER PRIMARY KEY);`)
 		require.NoError(t, err)
 
-		output, err := verify(t, migrator, sourcePath, migrations)
+		output, err := verify(t, migrator, currentPath, migrations)
 		require.EqualError(t, err, "the database holds 1 change that no migration made")
 		require.Contains(t, output, `DROP TABLE "audit"`)
 	})
 
 	t.Run("TheHistoryTableIsNoDrift", func(t *testing.T) {
-		sourcePath, migrations := newAppliedSource(t)
+		currentPath, migrations := newAppliedDatabase(t)
 
-		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
 
-		output, err := verify(t, migrator, sourcePath, migrations)
+		output, err := verify(t, migrator, currentPath, migrations)
 		require.NoError(t, err)
 		require.NotContains(t, output, "dbdiff_migrations")
 	})
 
 	t.Run("AFileThatChangesAfterTheLoadStopsTheReplay", func(t *testing.T) {
-		sourcePath, migrations := newAppliedSource(t)
+		currentPath, migrations := newAppliedDatabase(t)
 
-		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
@@ -925,14 +925,14 @@ func TestRunnerVerify(t *testing.T) {
 	})
 
 	t.Run("ADatabaseWithNoAppliedMigration", func(t *testing.T) {
-		sourcePath := filepath.Join(t.TempDir(), "source.sqlite")
+		currentPath := filepath.Join(t.TempDir(), "current.sqlite")
 
-		migrator, err := driverssqlite.NewSQLiteMigrator(sourcePath)
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath)
 		require.NoError(t, err)
 
 		defer func() { require.NoError(t, migrator.Close()) }()
 
-		output, err := verify(t, migrator, sourcePath, t.TempDir())
+		output, err := verify(t, migrator, currentPath, t.TempDir())
 		require.NoError(t, err)
 		require.Equal(t, "The database holds the schema of the migrations.\n", output)
 	})

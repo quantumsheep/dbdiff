@@ -34,15 +34,15 @@ func (d *PostgresDriver) DiffStatistics(ctx context.Context) (*SectionDiff, erro
 		Create: func(statistics *PostgresStatistics) []driversshared.Instruction {
 			return []driversshared.Instruction{statistics.CreateInstruction()}
 		},
-		Change: func(target *PostgresStatistics, source *PostgresStatistics) []driversshared.Instruction {
-			if target.Def == source.Def {
+		Change: func(desired *PostgresStatistics, current *PostgresStatistics) []driversshared.Instruction {
+			if desired.Def == current.Def {
 				return nil
 			}
 
-			return []driversshared.Instruction{source.DropInstruction(), target.CreateInstruction()}
+			return []driversshared.Instruction{current.DropInstruction(), desired.CreateInstruction()}
 		},
-		Drop: func(source *PostgresStatistics) driversshared.Instruction {
-			return source.DropInstruction()
+		Drop: func(current *PostgresStatistics) driversshared.Instruction {
+			return current.DropInstruction()
 		},
 	})
 }

@@ -103,40 +103,40 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 		RenamedFrom: driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*MySQLColumn).HasEqualAttributes),
 	}
 
-	for _, targetColumn := range t.Columns {
-		sourceColumn, found := other.ColumnByName(targetColumn.Name)
+	for _, desiredColumn := range t.Columns {
+		currentColumn, found := other.ColumnByName(desiredColumn.Name)
 		if !found {
-			_, renamed := diff.RenamedFrom[targetColumn.Name]
+			_, renamed := diff.RenamedFrom[desiredColumn.Name]
 			if renamed {
 				continue
 			}
 
-			diff.Added = append(diff.Added, targetColumn.Name)
+			diff.Added = append(diff.Added, desiredColumn.Name)
 
 			continue
 		}
 
-		if *targetColumn == *sourceColumn {
+		if *desiredColumn == *currentColumn {
 			continue
 		}
 
 		// MySQL refuses a MODIFY COLUMN action that turns a plain column into a generated
 		// column, or that changes the storage of a generated column.
-		if generatedKindChanged(targetColumn, sourceColumn) {
-			diff.Removed = append(diff.Removed, sourceColumn.Name)
-			diff.Added = append(diff.Added, targetColumn.Name)
+		if generatedKindChanged(desiredColumn, currentColumn) {
+			diff.Removed = append(diff.Removed, currentColumn.Name)
+			diff.Added = append(diff.Added, desiredColumn.Name)
 
 			continue
 		}
 
-		diff.Modified = append(diff.Modified, targetColumn.Name)
+		diff.Modified = append(diff.Modified, desiredColumn.Name)
 	}
 
-	for _, sourceColumn := range other.Columns {
-		_, found := t.ColumnByName(sourceColumn.Name)
-		_, renamed := lo.FindKey(diff.RenamedFrom, sourceColumn.Name)
+	for _, currentColumn := range other.Columns {
+		_, found := t.ColumnByName(currentColumn.Name)
+		_, renamed := lo.FindKey(diff.RenamedFrom, currentColumn.Name)
 		if !found && !renamed {
-			diff.Removed = append(diff.Removed, sourceColumn.Name)
+			diff.Removed = append(diff.Removed, currentColumn.Name)
 		}
 	}
 
@@ -147,9 +147,9 @@ func columnName(column *MySQLColumn) string {
 	return column.Name
 }
 
-func generatedKindChanged(target *MySQLColumn, source *MySQLColumn) bool {
-	return target.IsGenerated() != source.IsGenerated() ||
-		target.GeneratedStored != source.GeneratedStored
+func generatedKindChanged(desired *MySQLColumn, current *MySQLColumn) bool {
+	return desired.IsGenerated() != current.IsGenerated() ||
+		desired.GeneratedStored != current.GeneratedStored
 }
 
 // MySQL refuses the removal of a column while a foreign key, a check constraint, or an
@@ -160,8 +160,8 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 
 	var instructions []driversshared.Instruction
 
-	// The map gives no stable order. The loop walks the target columns instead, so the
-	// rename statements follow the shape of the target table on every run.
+	// The map gives no stable order. The loop walks the desired columns instead, so the
+	// rename statements follow the shape of the desired table on every run.
 	for _, column := range t.Columns {
 		oldName, renamed := columnsDiff.RenamedFrom[column.Name]
 		if !renamed {
@@ -277,8 +277,8 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 			return nil, fmt.Errorf("internal error: modified column %s not found in table %s", columnName, t.Name)
 		}
 
-		sourceColumn, foundInSource := other.ColumnByName(columnName)
-		if !column.AutoIncrement && foundInSource && sourceColumn.AutoIncrement {
+		currentColumn, foundInCurrent := other.ColumnByName(columnName)
+		if !column.AutoIncrement && foundInCurrent && currentColumn.AutoIncrement {
 			instructions = append(instructions, &MySQLAlterTableInstruction{
 				Name:   t.Name,
 				Action: &MySQLModifyColumnAction{Column: column},
@@ -365,18 +365,18 @@ func (t *MySQLTable) checkConstraintChanges(other *MySQLTable) ([]driversshared.
 
 func (t *MySQLTable) indexChanges(other *MySQLTable) ([]driversshared.Instruction, []driversshared.Instruction) {
 	// The ADD of a foreign key builds the index of the key by itself, like the CREATE
-	// TABLE path of IndexInstructions. The source does not hold such an index, so the
-	// removal from the target list changes no drop.
-	targetIndexes := lo.Reject(t.Indexes, func(index *MySQLIndex, _ int) bool {
+	// TABLE path of IndexInstructions. The current schema does not hold such an index, so the
+	// removal from the desired list changes no drop.
+	desiredIndexes := lo.Reject(t.Indexes, func(index *MySQLIndex, _ int) bool {
 		_, ownedByForeignKey := t.ForeignKeyByName(index.Name)
-		_, foundInSource := lo.Find(other.Indexes, func(sourceIndex *MySQLIndex) bool {
-			return sourceIndex.Name == index.Name
+		_, foundInCurrent := lo.Find(other.Indexes, func(currentIndex *MySQLIndex) bool {
+			return currentIndex.Name == index.Name
 		})
 
-		return ownedByForeignKey && !foundInSource
+		return ownedByForeignKey && !foundInCurrent
 	})
 
-	return driversshared.ReplaceByKey(targetIndexes, other.Indexes,
+	return driversshared.ReplaceByKey(desiredIndexes, other.Indexes,
 		func(index *MySQLIndex) string {
 			return index.Name
 		},

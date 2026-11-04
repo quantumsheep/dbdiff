@@ -9,25 +9,25 @@ import (
 
 type DiffRules[T any] struct {
 	Key    func(object T) string
-	Create func(target T) []Instruction
-	Change func(target T, source T) ([]Instruction, error)
-	Drop   func(source T) []Instruction
+	Create func(desired T) []Instruction
+	Change func(desired T, current T) ([]Instruction, error)
+	Drop   func(current T) []Instruction
 }
 
-func DiffByKey[T any](targetObjects []T, sourceObjects []T, rules DiffRules[T]) ([]Instruction, []Instruction, error) {
+func DiffByKey[T any](desiredObjects []T, currentObjects []T, rules DiffRules[T]) ([]Instruction, []Instruction, error) {
 	var additions []Instruction
 	var removals []Instruction
 
-	for _, targetObject := range targetObjects {
-		sourceObject, found := lo.Find(sourceObjects, func(object T) bool {
-			return rules.Key(object) == rules.Key(targetObject)
+	for _, desiredObject := range desiredObjects {
+		currentObject, found := lo.Find(currentObjects, func(object T) bool {
+			return rules.Key(object) == rules.Key(desiredObject)
 		})
 		if !found {
-			additions = append(additions, rules.Create(targetObject)...)
+			additions = append(additions, rules.Create(desiredObject)...)
 			continue
 		}
 
-		changes, err := rules.Change(targetObject, sourceObject)
+		changes, err := rules.Change(desiredObject, currentObject)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -35,31 +35,31 @@ func DiffByKey[T any](targetObjects []T, sourceObjects []T, rules DiffRules[T]) 
 		additions = append(additions, changes...)
 	}
 
-	for _, sourceObject := range sourceObjects {
-		_, found := lo.Find(targetObjects, func(object T) bool {
-			return rules.Key(object) == rules.Key(sourceObject)
+	for _, currentObject := range currentObjects {
+		_, found := lo.Find(desiredObjects, func(object T) bool {
+			return rules.Key(object) == rules.Key(currentObject)
 		})
 		if !found {
-			removals = append(removals, rules.Drop(sourceObject)...)
+			removals = append(removals, rules.Drop(currentObject)...)
 		}
 	}
 
 	return additions, removals, nil
 }
 
-func DiffSides[T any](ctx context.Context, targetDatabase *sql.DB, sourceDatabase *sql.DB,
+func DiffSides[T any](ctx context.Context, desiredDatabase *sql.DB, currentDatabase *sql.DB,
 	get func(context.Context, *sql.DB) ([]T, error), rules DiffRules[T]) ([]Instruction, []Instruction, error) {
-	targetObjects, err := get(ctx, targetDatabase)
+	desiredObjects, err := get(ctx, desiredDatabase)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sourceObjects, err := get(ctx, sourceDatabase)
+	currentObjects, err := get(ctx, currentDatabase)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return DiffByKey(targetObjects, sourceObjects, rules)
+	return DiffByKey(desiredObjects, currentObjects, rules)
 }
 
 // The rules drop a changed object and create it again. The DROP statement and the CREATE
@@ -67,40 +67,40 @@ func DiffSides[T any](ctx context.Context, targetDatabase *sql.DB, sourceDatabas
 func ReplaceRules[T any](key func(T) string, equal func(T, T) bool, create func(T) Instruction, drop func(T) Instruction) DiffRules[T] {
 	return DiffRules[T]{
 		Key: key,
-		Create: func(target T) []Instruction {
-			return []Instruction{create(target)}
+		Create: func(desired T) []Instruction {
+			return []Instruction{create(desired)}
 		},
-		Change: func(target T, source T) ([]Instruction, error) {
-			if equal(target, source) {
+		Change: func(desired T, current T) ([]Instruction, error) {
+			if equal(desired, current) {
 				return nil, nil
 			}
 
-			return []Instruction{drop(source), create(target)}, nil
+			return []Instruction{drop(current), create(desired)}, nil
 		},
-		Drop: func(source T) []Instruction {
-			return []Instruction{drop(source)}
+		Drop: func(current T) []Instruction {
+			return []Instruction{drop(current)}
 		},
 	}
 }
 
 // The drop of a changed object goes into the removals, in the order of the
-// target objects and before the drops of the removed objects. The caller can then run
+// desired objects and before the drops of the removed objects. The caller can then run
 // every drop before every create.
-func ReplaceByKey[T any](targetObjects []T, sourceObjects []T, key func(T) string, equal func(T, T) bool, create func(T) Instruction, drop func(T) Instruction) ([]Instruction, []Instruction) {
+func ReplaceByKey[T any](desiredObjects []T, currentObjects []T, key func(T) string, equal func(T, T) bool, create func(T) Instruction, drop func(T) Instruction) ([]Instruction, []Instruction) {
 	var changedDrops []Instruction
 
 	rules := ReplaceRules(key, equal, create, drop)
-	rules.Change = func(target T, source T) ([]Instruction, error) {
-		if equal(target, source) {
+	rules.Change = func(desired T, current T) ([]Instruction, error) {
+		if equal(desired, current) {
 			return nil, nil
 		}
 
-		changedDrops = append(changedDrops, drop(source))
+		changedDrops = append(changedDrops, drop(current))
 
-		return []Instruction{create(target)}, nil
+		return []Instruction{create(desired)}, nil
 	}
 
-	additions, removals, _ := DiffByKey(targetObjects, sourceObjects, rules)
+	additions, removals, _ := DiffByKey(desiredObjects, currentObjects, rules)
 
 	return additions, append(changedDrops, removals...)
 }

@@ -228,7 +228,7 @@ CREATE TABLE "posts" (
 `, result.Stdout)
 	})
 
-	t.Run("SQLFileSource", func(t *testing.T) {
+	t.Run("SQLFileCurrent", func(t *testing.T) {
 		finalPath := sqltest.WriteSQLFile(t, t.TempDir(), "schema.sql", `
 			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
 		`)
@@ -243,7 +243,7 @@ CREATE TABLE "posts" (
 		require.Equal(t, "ALTER TABLE \"users\" ADD COLUMN \"name\" TEXT;\n", result.Stdout)
 	})
 
-	t.Run("MigrationsDirectorySource", func(t *testing.T) {
+	t.Run("MigrationsDirectoryAsDesired", func(t *testing.T) {
 		migrationsDirectory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, migrationsDirectory, "001_create_users.up.sql", `
@@ -266,7 +266,7 @@ CREATE TABLE "posts" (
 		require.Equal(t, "ALTER TABLE \"users\" ADD COLUMN \"name\" TEXT;\n", result.Stdout)
 	})
 
-	t.Run("EmptyDirectoryTarget", func(t *testing.T) {
+	t.Run("EmptyDirectoryDesired", func(t *testing.T) {
 		currentPath := filepath.Join(t.TempDir(), "current.sqlite")
 		clitest.WriteSQLiteDatabase(t, currentPath, "CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
@@ -310,7 +310,7 @@ CREATE TABLE "posts" (
 		require.Equal(t, "dbdiff: unknown postgres version \"8\"\n", result.Stderr)
 	})
 
-	t.Run("SQLFileSourceWithPostgresDriver", func(t *testing.T) {
+	t.Run("SQLFileCurrentWithPostgresDriver", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary postgres server needs a download on the first run")
 		}

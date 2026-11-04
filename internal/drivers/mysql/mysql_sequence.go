@@ -35,13 +35,13 @@ func (s *MySQLSequence) CreateInstruction() *MySQLCreateSequenceInstruction {
 }
 
 func (d *MySQLDriver) DiffSequences(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetSequences,
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetSequences,
 		driversshared.ReplaceRules(
 			func(sequence *MySQLSequence) string {
 				return sequence.Name
 			},
-			func(target *MySQLSequence, source *MySQLSequence) bool {
-				return target.Equal(source)
+			func(desired *MySQLSequence, current *MySQLSequence) bool {
+				return desired.Equal(current)
 			},
 			func(sequence *MySQLSequence) driversshared.Instruction {
 				return sequence.CreateInstruction()

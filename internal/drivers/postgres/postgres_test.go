@@ -37,16 +37,16 @@ type TestingPostgresDriver struct {
 	tb   testing.TB
 	conn *sql.DB
 
-	source driversshared.DataSource
-	target driversshared.DataSource
+	current driversshared.DataSource
+	desired driversshared.DataSource
 
-	targetSchema string
-	sourceSchema string
+	desiredSchema string
+	currentSchema string
 
 	CompareData bool
 
-	sourceConnection *sql.DB
-	targetConnection *sql.DB
+	currentConnection *sql.DB
+	desiredConnection *sql.DB
 }
 
 func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
@@ -60,8 +60,8 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	require.NoError(tb, err)
 
 	id := time.Now().UnixNano()
-	targetSchema := fmt.Sprintf("target_%d", id)
-	sourceSchema := fmt.Sprintf("source_%d", id)
+	desiredSchema := fmt.Sprintf("desired_%d", id)
+	currentSchema := fmt.Sprintf("current_%d", id)
 
 	// CREATE ROLE fails when the role exists already, so the DO block tests it first.
 	_, err = conn.ExecContext(tb.Context(), `
@@ -75,51 +75,51 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 	`)
 	require.NoError(tb, err)
 
-	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", targetSchema))
+	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", desiredSchema))
 	require.NoError(tb, err)
-	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", sourceSchema))
+	_, err = conn.ExecContext(tb.Context(), fmt.Sprintf("CREATE SCHEMA %s", currentSchema))
 	require.NoError(tb, err)
 
 	// The connection stays open for this cleanup. A closed connection drops no schema.
 	tb.Cleanup(func() {
-		_, err := conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", targetSchema))
+		_, err := conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", desiredSchema))
 		require.NoError(tb, err)
 
-		_, err = conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", sourceSchema))
+		_, err = conn.ExecContext(context.Background(), fmt.Sprintf("DROP SCHEMA %s CASCADE", currentSchema))
 		require.NoError(tb, err)
 
 		require.NoError(tb, conn.Close())
 	})
 
-	targetConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, targetSchema)
-	sourceConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, sourceSchema)
+	desiredConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, desiredSchema)
+	currentConnectionString := fmt.Sprintf("%s&search_path=%s", connectionString, currentSchema)
 
 	// The harness diffs a call at a time, and the driver fields go nil between two calls, so
-	// the harness keeps its own connection of each side for ExecOnTarget and ExecOnSource.
-	targetConnection, err := OpenPostgresConnection(targetConnectionString, "")
+	// the harness keeps its own connection of each side for ExecOnDesired and ExecOnCurrent.
+	desiredConnection, err := OpenPostgresConnection(desiredConnectionString, "")
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
-		require.NoError(tb, targetConnection.Close())
+		require.NoError(tb, desiredConnection.Close())
 	})
 
-	sourceConnection, err := OpenPostgresConnection(sourceConnectionString, "")
+	currentConnection, err := OpenPostgresConnection(currentConnectionString, "")
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
-		require.NoError(tb, sourceConnection.Close())
+		require.NoError(tb, currentConnection.Close())
 	})
 
 	driver := NewPostgresDriver(&PostgresDriverConfig{})
 
 	return &TestingPostgresDriver{
-		PostgresDriver:   driver,
-		tb:               tb,
-		conn:             conn,
-		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
-		target:           driversshared.ConnectionStringDataSource{ConnectionString: targetConnectionString},
-		targetSchema:     targetSchema,
-		sourceSchema:     sourceSchema,
-		sourceConnection: sourceConnection,
-		targetConnection: targetConnection,
+		PostgresDriver:    driver,
+		tb:                tb,
+		conn:              conn,
+		current:           driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
+		desired:           driversshared.ConnectionStringDataSource{ConnectionString: desiredConnectionString},
+		desiredSchema:     desiredSchema,
+		currentSchema:     currentSchema,
+		currentConnection: currentConnection,
+		desiredConnection: desiredConnection,
 	}
 }
 
@@ -137,53 +137,53 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 
 	// A CREATE DATABASE statement needs a connection outside a transaction.
 	id := time.Now().UnixNano()
-	targetDatabase := fmt.Sprintf("dbdiff_target_%d", id)
-	sourceDatabase := fmt.Sprintf("dbdiff_source_%d", id)
+	desiredDatabase := fmt.Sprintf("dbdiff_desired_%d", id)
+	currentDatabase := fmt.Sprintf("dbdiff_current_%d", id)
 
-	_, err = adminConn.ExecContext(tb.Context(), fmt.Sprintf("CREATE DATABASE %s", targetDatabase))
+	_, err = adminConn.ExecContext(tb.Context(), fmt.Sprintf("CREATE DATABASE %s", desiredDatabase))
 	require.NoError(tb, err)
-	_, err = adminConn.ExecContext(tb.Context(), fmt.Sprintf("CREATE DATABASE %s", sourceDatabase))
+	_, err = adminConn.ExecContext(tb.Context(), fmt.Sprintf("CREATE DATABASE %s", currentDatabase))
 	require.NoError(tb, err)
 
 	// The admin connection stays open for this cleanup.
 	tb.Cleanup(func() {
-		_, err := adminConn.ExecContext(context.Background(), fmt.Sprintf("DROP DATABASE %s", targetDatabase))
+		_, err := adminConn.ExecContext(context.Background(), fmt.Sprintf("DROP DATABASE %s", desiredDatabase))
 		require.NoError(tb, err)
 
-		_, err = adminConn.ExecContext(context.Background(), fmt.Sprintf("DROP DATABASE %s", sourceDatabase))
+		_, err = adminConn.ExecContext(context.Background(), fmt.Sprintf("DROP DATABASE %s", currentDatabase))
 		require.NoError(tb, err)
 
 		require.NoError(tb, adminConn.Close())
 	})
 
-	targetConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", targetDatabase)
-	sourceConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", sourceDatabase)
+	desiredConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", desiredDatabase)
+	currentConnectionString := fmt.Sprintf("postgres://user:password@localhost:5432/%s?sslmode=disable", currentDatabase)
 
-	targetConnection, err := OpenPostgresConnection(targetConnectionString, "")
+	desiredConnection, err := OpenPostgresConnection(desiredConnectionString, "")
 	require.NoError(tb, err)
 
-	sourceConnection, err := OpenPostgresConnection(sourceConnectionString, "")
+	currentConnection, err := OpenPostgresConnection(currentConnectionString, "")
 	require.NoError(tb, err)
 
 	// Go calls a cleanup in the reverse order of its registration, so this one closes every
 	// connection before the database drop above. A drop fails while a connection uses it.
 	tb.Cleanup(func() {
-		require.NoError(tb, targetConnection.Close())
-		require.NoError(tb, sourceConnection.Close())
+		require.NoError(tb, desiredConnection.Close())
+		require.NoError(tb, currentConnection.Close())
 	})
 
 	driver := NewPostgresDriver(&PostgresDriverConfig{})
 
 	return &TestingPostgresDriver{
-		PostgresDriver:   driver,
-		tb:               tb,
-		conn:             adminConn,
-		source:           driversshared.ConnectionStringDataSource{ConnectionString: sourceConnectionString},
-		target:           driversshared.ConnectionStringDataSource{ConnectionString: targetConnectionString},
-		targetSchema:     "public",
-		sourceSchema:     "public",
-		sourceConnection: sourceConnection,
-		targetConnection: targetConnection,
+		PostgresDriver:    driver,
+		tb:                tb,
+		conn:              adminConn,
+		current:           driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
+		desired:           driversshared.ConnectionStringDataSource{ConnectionString: desiredConnectionString},
+		desiredSchema:     "public",
+		currentSchema:     "public",
+		currentConnection: currentConnection,
+		desiredConnection: desiredConnection,
 	}
 }
 
@@ -196,22 +196,22 @@ func NewTestPostgresDriverWithPrivileges(tb testing.TB) *TestingPostgresDriver {
 	return driver
 }
 
-func (d *TestingPostgresDriver) ExecOnTarget(sqlStatements string) {
+func (d *TestingPostgresDriver) ExecOnDesired(sqlStatements string) {
 	d.tb.Helper()
-	_, err := d.targetConnection.Exec(sqlStatements)
+	_, err := d.desiredConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
-func (d *TestingPostgresDriver) ExecOnSource(sqlStatements string) {
+func (d *TestingPostgresDriver) ExecOnCurrent(sqlStatements string) {
 	d.tb.Helper()
-	_, err := d.sourceConnection.Exec(sqlStatements)
+	_, err := d.currentConnection.Exec(sqlStatements)
 	require.NoError(d.tb, err)
 }
 
 func (d *TestingPostgresDriver) RequireInstructions(expected driversshared.Instructions) string {
 	d.tb.Helper()
 
-	instructions, err := d.Diff(d.tb.Context(), d.source, d.target, driversshared.DiffOptions{CompareData: d.CompareData})
+	instructions, err := d.Diff(d.tb.Context(), d.current, d.desired, driversshared.DiffOptions{CompareData: d.CompareData})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
@@ -221,14 +221,14 @@ func (d *TestingPostgresDriver) RequireInstructions(expected driversshared.Instr
 func (d *TestingPostgresDriver) RequireDiffApplies(expected driversshared.Instructions) {
 	d.tb.Helper()
 
-	d.ExecOnSource(d.RequireInstructions(expected))
+	d.ExecOnCurrent(d.RequireInstructions(expected))
 	d.RequireInstructions(nil)
 }
 
-func (d *TestingPostgresDriver) FetchAllFromSource(table string, additionalRules string) []map[string]any {
+func (d *TestingPostgresDriver) FetchAllFromCurrent(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 
-	rows, err := d.sourceConnection.Query(fmt.Sprintf("SELECT * FROM %s %s;", driversshared.QuoteIdentifier(table), additionalRules))
+	rows, err := d.currentConnection.Query(fmt.Sprintf("SELECT * FROM %s %s;", driversshared.QuoteIdentifier(table), additionalRules))
 	require.NoError(d.tb, err)
 
 	defer func() { require.NoError(d.tb, rows.Close()) }()
@@ -309,7 +309,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE simple (id INT, name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE simple (id INT, name TEXT);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -331,7 +331,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropTableInstruction{Name: "users"},
@@ -341,8 +341,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, name TEXT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -361,8 +361,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -376,8 +376,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, name VARCHAR(50));`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, name VARCHAR(50));`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, name TEXT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -394,9 +394,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnTypeWithAutomaticCast", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, score INT);`)
-		driver.ExecOnSource(`INSERT INTO users (id, score) VALUES (1, 42);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, score BIGINT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, score INT);`)
+		driver.ExecOnCurrent(`INSERT INTO users (id, score) VALUES (1, 42);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, score BIGINT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -409,7 +409,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "score": int64(42)},
@@ -419,9 +419,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnTypeWithoutAutomaticCast", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, score TEXT);`)
-		driver.ExecOnSource(`INSERT INTO users (id, score) VALUES (1, '42');`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, score INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, score TEXT);`)
+		driver.ExecOnCurrent(`INSERT INTO users (id, score) VALUES (1, '42');`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, score INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -435,7 +435,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "score": int64(42)},
@@ -445,7 +445,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithArrayColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE tags (id INT, labels TEXT[]);`)
+		driver.ExecOnDesired(`CREATE TABLE tags (id INT, labels TEXT[]);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -467,7 +467,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithEnumColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TYPE mood AS ENUM ('sad', 'ok');
 			CREATE TABLE users (id INT, mood mood);
 		`)
@@ -496,9 +496,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnTypeToArray", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, tags INT[]);`)
-		driver.ExecOnSource(`INSERT INTO users (id, tags) VALUES (1, ARRAY[5, 6]);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, tags BIGINT[]);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, tags INT[]);`)
+		driver.ExecOnCurrent(`INSERT INTO users (id, tags) VALUES (1, ARRAY[5, 6]);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, tags BIGINT[]);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -512,7 +512,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "tags": "{5,6}"},
@@ -522,7 +522,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithIdentityColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY, name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY, name TEXT);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -546,7 +546,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithSeveralConstraints", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE items (
 				id INT PRIMARY KEY,
 				code TEXT,
@@ -598,7 +598,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateAPartitionWithItsOwnObjects", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE measurements (id INT PRIMARY KEY) PARTITION BY RANGE (id);
 			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
 			COMMENT ON TABLE measurements_low IS 'low range';
@@ -646,7 +646,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreatePartitionedTableWithAForeignKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE zoo (id INT PRIMARY KEY);
 			CREATE TABLE animal (id INT, zoo_id INT REFERENCES zoo(id)) PARTITION BY RANGE (id);
 			CREATE TABLE animal_low PARTITION OF animal FOR VALUES FROM (0) TO (100);
@@ -707,7 +707,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTablesWithAForeignKeyCycle", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT PRIMARY KEY, org_id INT);
 			CREATE TABLE orgs (id INT PRIMARY KEY, owner_id INT REFERENCES users(id));
 			ALTER TABLE users ADD CONSTRAINT users_org_id_fkey FOREIGN KEY (org_id) REFERENCES orgs(id);
@@ -786,7 +786,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTablesInForeignKeyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE zoo (id INT PRIMARY KEY);
 			CREATE TABLE animal (id INT PRIMARY KEY, zoo_id INT REFERENCES zoo(id));
 		`)
@@ -848,7 +848,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropTablesInForeignKeyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE animal (id INT PRIMARY KEY);
 			CREATE TABLE zoo (id INT PRIMARY KEY, animal_id INT REFERENCES animal(id));
 		`)
@@ -862,8 +862,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddForeignKeyToANewTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE animal (id INT PRIMARY KEY, zoo_id INT);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnCurrent(`CREATE TABLE animal (id INT PRIMARY KEY, zoo_id INT);`)
+		driver.ExecOnDesired(`
 			CREATE TABLE zoo (id INT PRIMARY KEY);
 			CREATE TABLE animal (id INT PRIMARY KEY, zoo_id INT REFERENCES zoo(id));
 		`)
@@ -903,7 +903,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithSerialColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -931,9 +931,9 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		driver.ExecOnSource(`INSERT INTO users (name) VALUES ('alice');`)
+		driver.ExecOnCurrent(`INSERT INTO users (name) VALUES ('alice');`)
 
-		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "alice"},
@@ -943,8 +943,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddSerialColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (name TEXT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (name TEXT, id BIGSERIAL);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (name TEXT, id BIGSERIAL);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -966,15 +966,15 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("EqualSerialColumns", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id SERIAL PRIMARY KEY);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id SERIAL PRIMARY KEY);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id SERIAL PRIMARY KEY);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id SERIAL PRIMARY KEY);`)
 		driver.RequireInstructions(nil)
 	})
 
 	t.Run("CreateTableWithGeneratedColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -997,8 +997,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddIdentityToColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT GENERATED BY DEFAULT AS IDENTITY);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT GENERATED BY DEFAULT AS IDENTITY);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -1021,8 +1021,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ChangeIdentityGeneration", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT GENERATED BY DEFAULT AS IDENTITY);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT GENERATED BY DEFAULT AS IDENTITY);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -1039,8 +1039,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropIdentityFromColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -1060,9 +1060,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyGeneratedExpression", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);`)
-		driver.ExecOnSource(`INSERT INTO measures (value) VALUES (5);`)
-		driver.ExecOnTarget(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 3) STORED);`)
+		driver.ExecOnCurrent(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);`)
+		driver.ExecOnCurrent(`INSERT INTO measures (value) VALUES (5);`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 3) STORED);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "measures",
@@ -1079,7 +1079,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		rows := driver.FetchAllFromSource("measures", "")
+		rows := driver.FetchAllFromCurrent("measures", "")
 		require.Equal(t, []map[string]any{
 			{
 				"value":   int64(5),
@@ -1091,7 +1091,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreatePartitionedTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE events (id BIGINT, created DATE NOT NULL, label TEXT)
 				PARTITION BY RANGE (created);
 			CREATE TABLE events_2024 PARTITION OF events
@@ -1139,7 +1139,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropPartitionedTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE events (id BIGINT, created DATE NOT NULL)
 				PARTITION BY RANGE (created);
 			CREATE TABLE events_2024 PARTITION OF events
@@ -1154,14 +1154,14 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddPartitionToExistingTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE events (id BIGINT, created DATE NOT NULL)
 				PARTITION BY RANGE (created);
 			CREATE TABLE events_2024 PARTITION OF events
 				FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE events (id BIGINT, created DATE NOT NULL)
 				PARTITION BY RANGE (created);
 			CREATE TABLE events_2024 PARTITION OF events
@@ -1181,9 +1181,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateMaterializedView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, active BOOLEAN);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, active BOOLEAN);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT, active BOOLEAN);
 			CREATE MATERIALIZED VIEW active_users AS SELECT id FROM users WHERE active;
 		`)
@@ -1198,11 +1198,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropMaterializedView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropMaterializedViewInstruction{Name: "all_users"},
 		})
@@ -1211,12 +1211,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyMaterializedView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT, active BOOLEAN);
 			CREATE MATERIALIZED VIEW selected_users AS SELECT id FROM users;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT, active BOOLEAN);
 			CREATE MATERIALIZED VIEW selected_users AS SELECT id FROM users WHERE active;
 		`)
@@ -1232,9 +1232,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateMaterializedViewsInDependencyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE MATERIALIZED VIEW first_view AS SELECT id FROM users;
 			CREATE MATERIALIZED VIEW second_view AS SELECT id FROM first_view;
@@ -1254,9 +1254,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateViewOfAMaterializedView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
 			CREATE VIEW user_identifiers AS SELECT id FROM all_users;
@@ -1276,12 +1276,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropViewOfAMaterializedView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
 			CREATE VIEW user_identifiers AS SELECT id FROM all_users;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropViewInstruction{Name: "user_identifiers"},
 			&PostgresDropMaterializedViewInstruction{Name: "all_users"},
@@ -1291,9 +1291,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateMaterializedViewWithIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
 			CREATE UNIQUE INDEX all_users_id ON all_users (id);
@@ -1312,7 +1312,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithColumnCollation", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE people (name TEXT COLLATE "C", other TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE people (name TEXT COLLATE "C", other TEXT);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -1335,8 +1335,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnCollation", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE people (name TEXT);`)
-		driver.ExecOnTarget(`CREATE TABLE people (name TEXT COLLATE "C");`)
+		driver.ExecOnCurrent(`CREATE TABLE people (name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE people (name TEXT COLLATE "C");`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "people",
@@ -1354,7 +1354,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithComments", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			COMMENT ON TABLE users IS 'the people';
 			COMMENT ON COLUMN users.id IS 'the key';
@@ -1386,14 +1386,14 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyComments", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT, name TEXT);
 			COMMENT ON TABLE users IS 'the old comment';
 			COMMENT ON COLUMN users.id IS 'the old key';
 			COMMENT ON COLUMN users.name IS 'this one goes away';
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT, name TEXT);
 			COMMENT ON TABLE users IS 'the new comment';
 			COMMENT ON COLUMN users.id IS 'the new key';
@@ -1422,11 +1422,11 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT);
 			CREATE VIEW all_users AS SELECT id FROM users;
 		`
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`COMMENT ON VIEW all_users IS 'the old comment';`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`COMMENT ON VIEW all_users IS 'the old comment';`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`COMMENT ON VIEW all_users IS 'the new comment';`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`COMMENT ON VIEW all_users IS 'the new comment';`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCommentOnViewInstruction{
 				Name: "all_users",
@@ -1438,9 +1438,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateViewWithComment", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW all_users AS SELECT id FROM users;
 			COMMENT ON VIEW all_users IS 'every person';
@@ -1464,10 +1464,10 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT);
 			CREATE MATERIALIZED VIEW all_users AS SELECT id FROM users;
 		`
-		driver.ExecOnSource(schema)
+		driver.ExecOnCurrent(schema)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`COMMENT ON MATERIALIZED VIEW all_users IS 'every person';`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`COMMENT ON MATERIALIZED VIEW all_users IS 'every person';`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCommentOnMaterializedViewInstruction{
 				Name: "all_users",
@@ -1483,10 +1483,10 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (id INT, email TEXT);
 			CREATE INDEX users_email ON users (email);
 		`
-		driver.ExecOnSource(schema)
+		driver.ExecOnCurrent(schema)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`COMMENT ON INDEX users_email IS 'the lookup key';`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`COMMENT ON INDEX users_email IS 'the lookup key';`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCommentOnIndexInstruction{
 				Name: "users_email",
@@ -1499,10 +1499,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		schema := `CREATE FUNCTION add_one(integer) RETURNS integer AS $$ SELECT $1 + 1; $$ LANGUAGE sql;`
-		driver.ExecOnSource(schema)
+		driver.ExecOnCurrent(schema)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`COMMENT ON FUNCTION add_one(integer) IS 'the next value';`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`COMMENT ON FUNCTION add_one(integer) IS 'the next value';`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCommentOnRoutineInstruction{
 				Name:      "add_one",
@@ -1516,10 +1516,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		schema := `CREATE TYPE mood AS ENUM ('sad', 'happy');`
-		driver.ExecOnSource(schema)
+		driver.ExecOnCurrent(schema)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`COMMENT ON TYPE mood IS 'the state of a person';`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`COMMENT ON TYPE mood IS 'the state of a person';`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCommentOnTypeInstruction{
 				Name: "mood",
@@ -1531,7 +1531,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithRowLevelSecurity", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (id INT, secret BOOLEAN);
 			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
 			ALTER TABLE docs FORCE ROW LEVEL SECURITY;
@@ -1578,11 +1578,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DisableRowLevelSecurity", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE docs (id INT);
 			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE docs (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE docs (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "docs",
@@ -1596,14 +1596,14 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyPolicy", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE docs (id INT, secret BOOLEAN);
 			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
 			CREATE POLICY docs_read ON docs FOR SELECT USING (secret);
 			CREATE POLICY docs_old ON docs FOR DELETE USING (true);
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (id INT, secret BOOLEAN);
 			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
 			CREATE POLICY docs_read ON docs FOR SELECT USING (NOT secret);
@@ -1631,7 +1631,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreatePartitionThatSortsBeforeItsParent", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE zebra (id BIGINT, created DATE NOT NULL)
 				PARTITION BY RANGE (created);
 			CREATE TABLE alpha PARTITION OF zebra
@@ -1665,7 +1665,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableThatInheritsAnotherTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE zparent (a INT);
 			CREATE TABLE achild (b INT) INHERITS (zparent);
 		`)
@@ -1700,7 +1700,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithIdentityOptions", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (
 				id INT GENERATED ALWAYS AS IDENTITY (START WITH 100 INCREMENT BY 5)
 			);
@@ -1725,11 +1725,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterTwoIdentityOptions", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY (START WITH 100 INCREMENT BY 5));
 		`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
@@ -1748,8 +1748,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("MakeAColumnSerial", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id integer);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id serial);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id integer);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id serial);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -1777,8 +1777,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("MakeASerialColumnPlain", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id serial);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id integer);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id serial);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id integer);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -1799,11 +1799,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ResetIdentityOptions", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY (START WITH 100 INCREMENT BY 5));
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);
 		`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
@@ -1822,11 +1822,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterIdentityOptions", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY);
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT GENERATED ALWAYS AS IDENTITY (INCREMENT BY 5));
 		`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
@@ -1845,7 +1845,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateUnloggedTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE UNLOGGED TABLE cache (id INT);`)
+		driver.ExecOnDesired(`CREATE UNLOGGED TABLE cache (id INT);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -1864,8 +1864,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterTablePersistence", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE cache (id INT);`)
-		driver.ExecOnTarget(`CREATE UNLOGGED TABLE cache (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE cache (id INT);`)
+		driver.ExecOnDesired(`CREATE UNLOGGED TABLE cache (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "cache",
@@ -1879,7 +1879,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithAReplicaIdentity", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE events (id INT);
 			ALTER TABLE events REPLICA IDENTITY FULL;
 		`)
@@ -1906,8 +1906,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterReplicaIdentity", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE events (id INT);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnCurrent(`CREATE TABLE events (id INT);`)
+		driver.ExecOnDesired(`
 			CREATE TABLE events (id INT);
 			ALTER TABLE events REPLICA IDENTITY NOTHING;
 		`)
@@ -1924,8 +1924,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ReplicaIdentityUsingAnIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnCurrent(`CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);`)
+		driver.ExecOnDesired(`
 			CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);
 			CREATE UNIQUE INDEX events_code_key ON events (code);
 			ALTER TABLE events REPLICA IDENTITY USING INDEX events_code_key;
@@ -1949,12 +1949,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ReplicaIdentityBeforeAnIndexRemoval", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);
 			CREATE UNIQUE INDEX events_code_key ON events (code);
 			ALTER TABLE events REPLICA IDENTITY USING INDEX events_code_key;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);`)
+		driver.ExecOnDesired(`CREATE TABLE events (id INT NOT NULL, code TEXT NOT NULL);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "events",
@@ -1969,7 +1969,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithStorageParameters", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
+		driver.ExecOnDesired(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -1988,8 +1988,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterStorageParameters", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
-		driver.ExecOnTarget(`CREATE TABLE tuned (id INT) WITH (fillfactor = 90);`)
+		driver.ExecOnCurrent(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
+		driver.ExecOnDesired(`CREATE TABLE tuned (id INT) WITH (fillfactor = 90);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "tuned",
@@ -2005,8 +2005,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ResetStorageParameters", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
-		driver.ExecOnTarget(`CREATE TABLE tuned (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE tuned (id INT) WITH (fillfactor = 70);`)
+		driver.ExecOnDesired(`CREATE TABLE tuned (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "tuned",
@@ -2022,9 +2022,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateViewWithACheckOption", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE base (a INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE base (a INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE base (a INT);
 			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0 WITH CASCADED CHECK OPTION;
 		`)
@@ -2040,12 +2040,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyViewCheckOption", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE base (a INT);
 			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE base (a INT);
 			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0 WITH LOCAL CHECK OPTION;
 		`)
@@ -2064,7 +2064,7 @@ func TestPostgresDriver(t *testing.T) {
 
 		// information_schema.views gives no definition of a view that the connecting role
 		// does not own, so the diff connects as a role that owns no view.
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			DO $$
 			BEGIN
 				IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dbdiff_view_owner') THEN
@@ -2077,7 +2077,7 @@ func TestPostgresDriver(t *testing.T) {
 			$$;
 		`)
 
-		for _, schema := range []string{driver.sourceSchema, driver.targetSchema} {
+		for _, schema := range []string{driver.currentSchema, driver.desiredSchema} {
 			_, err := driver.conn.ExecContext(t.Context(), fmt.Sprintf(`
 				GRANT USAGE ON SCHEMA %[1]s TO dbdiff_view_reader;
 				CREATE TABLE %[1]s.base (a integer);
@@ -2086,13 +2086,13 @@ func TestPostgresDriver(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE VIEW positive AS SELECT a FROM base WHERE a > 0;
 			ALTER VIEW positive OWNER TO dbdiff_view_owner;
 			GRANT SELECT ON positive TO dbdiff_view_reader;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE VIEW positive AS SELECT a FROM base WHERE a > 1 WITH LOCAL CHECK OPTION;
 			ALTER VIEW positive OWNER TO dbdiff_view_owner;
 			GRANT SELECT ON positive TO dbdiff_view_reader;
@@ -2100,11 +2100,11 @@ func TestPostgresDriver(t *testing.T) {
 
 		readerConnectionString := strings.Replace(postgresTestConnectionString,
 			"user:password", "dbdiff_view_reader:password", 1)
-		driver.source = driversshared.ConnectionStringDataSource{
-			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.sourceSchema),
+		driver.current = driversshared.ConnectionStringDataSource{
+			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.currentSchema),
 		}
-		driver.target = driversshared.ConnectionStringDataSource{
-			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.targetSchema),
+		driver.desired = driversshared.ConnectionStringDataSource{
+			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.desiredSchema),
 		}
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
@@ -2120,9 +2120,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateRule", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE base (a INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE base (a INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE base (a INT);
 			CREATE RULE no_delete AS ON DELETE TO base DO INSTEAD NOTHING;
 		`)
@@ -2136,11 +2136,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropRule", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE base (a INT);
 			CREATE RULE no_delete AS ON DELETE TO base DO INSTEAD NOTHING;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE base (a INT);`)
+		driver.ExecOnDesired(`CREATE TABLE base (a INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropRuleInstruction{
 				Name:      "no_delete",
@@ -2152,12 +2152,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyRule", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE base (a INT);
 			CREATE RULE guard AS ON UPDATE TO base DO INSTEAD NOTHING;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE base (a INT);
 			CREATE RULE guard AS ON DELETE TO base DO INSTEAD NOTHING;
 		`)
@@ -2175,12 +2175,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ViewRuleIsIgnored", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE base (a INT);
 			CREATE VIEW v AS SELECT a FROM base;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE base (a INT);
 			CREATE VIEW v AS SELECT a FROM base;
 		`)
@@ -2190,7 +2190,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateRuleThatNamesASecondTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE base (a INT);
 			CREATE TABLE zlog (a INT);
 			CREATE RULE log_insert AS ON INSERT TO base DO ALSO INSERT INTO zlog VALUES (NEW.a);
@@ -2224,9 +2224,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateStatistics", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE t (a INT, b INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE t (a INT, b INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE t (a INT, b INT);
 			CREATE STATISTICS st_ab ON a, b FROM t;
 		`)
@@ -2240,11 +2240,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropStatistics", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE t (a INT, b INT);
 			CREATE STATISTICS st_ab ON a, b FROM t;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE t (a INT, b INT);`)
+		driver.ExecOnDesired(`CREATE TABLE t (a INT, b INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropStatisticsInstruction{Name: "st_ab"},
 		})
@@ -2253,12 +2253,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyStatistics", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE t (a INT, b INT, c INT);
 			CREATE STATISTICS st_ab ON a, b FROM t;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE t (a INT, b INT, c INT);
 			CREATE STATISTICS st_ab ON a, c FROM t;
 		`)
@@ -2273,9 +2273,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ComparePrivilegesIsOffByDefault", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			GRANT SELECT ON users TO dbdiff_reader;
 		`)
@@ -2285,9 +2285,9 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ComparePrivileges", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			GRANT SELECT, INSERT ON users TO dbdiff_reader;
 		`)
@@ -2304,12 +2304,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RevokePrivileges", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			GRANT SELECT, INSERT ON users TO dbdiff_reader;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			GRANT SELECT ON users TO dbdiff_reader;
 		`)
@@ -2326,12 +2326,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ARecreatedViewKeepsItsGrants", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE VIEW numbers AS SELECT 1 AS value;
 			GRANT SELECT ON numbers TO dbdiff_reader;
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE VIEW numbers AS SELECT 2 AS value;
 			GRANT SELECT ON numbers TO dbdiff_reader;
 		`)
@@ -2359,7 +2359,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("NoRevokeForADroppedView", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE VIEW numbers AS SELECT 1 AS value;
 			GRANT SELECT ON numbers TO dbdiff_reader;
 		`)
@@ -2372,13 +2372,13 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddAndRemoveAnInheritsParent", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE old_parents (note text);
 			CREATE TABLE new_parents (note text);
 			CREATE TABLE children (id integer) INHERITS (old_parents);
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE old_parents (note text);
 			CREATE TABLE new_parents (note text);
 			CREATE TABLE children (id integer) INHERITS (new_parents);
@@ -2402,8 +2402,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnNotNull", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT NOT NULL);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, name TEXT NOT NULL);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2417,8 +2417,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnDefault", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, name TEXT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT DEFAULT 'anon');`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, name TEXT DEFAULT 'anon');`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2435,7 +2435,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithAColumnStorage", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
 		`)
@@ -2466,11 +2466,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnStorage", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STORAGE EXTERNAL;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
 		`)
@@ -2490,11 +2490,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ResetColumnStorage", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE docs (body TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE docs (body TEXT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "docs",
@@ -2511,11 +2511,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ColumnStorageAfterATypeChange", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE docs (body VARCHAR(200));
 			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STORAGE MAIN;
 		`)
@@ -2544,7 +2544,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateTableWithAStatisticsTarget", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 500;
 		`)
@@ -2564,8 +2564,8 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "docs",
 				Actions: []driversshared.AlterTableAction{
 					&PostgresSetStatisticsAction{
-						ColumnName: "body",
-						Source:     500,
+						ColumnName:       "body",
+						StatisticsTarget: 500,
 					},
 				},
 			},
@@ -2575,11 +2575,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterColumnStatisticsTarget", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 100;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 500;
 		`)
@@ -2588,8 +2588,8 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "docs",
 				Actions: []driversshared.AlterTableAction{
 					&PostgresSetStatisticsAction{
-						ColumnName: "body",
-						Source:     500,
+						ColumnName:       "body",
+						StatisticsTarget: 500,
 					},
 				},
 			},
@@ -2599,18 +2599,18 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ResetColumnStatisticsTarget", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE docs (body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 500;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE docs (body TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE docs (body TEXT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "docs",
 				Actions: []driversshared.AlterTableAction{
 					&PostgresSetStatisticsAction{
-						ColumnName: "body",
-						Source:     -1,
+						ColumnName:       "body",
+						StatisticsTarget: -1,
 					},
 				},
 			},
@@ -2620,8 +2620,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddColumnWithAStorageAndAStatisticsTarget", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE docs (id INT);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnCurrent(`CREATE TABLE docs (id INT);`)
+		driver.ExecOnDesired(`
 			CREATE TABLE docs (id INT, body TEXT);
 			ALTER TABLE docs ALTER COLUMN body SET STORAGE EXTERNAL;
 			ALTER TABLE docs ALTER COLUMN body SET STATISTICS 250;
@@ -2653,8 +2653,8 @@ func TestPostgresDriver(t *testing.T) {
 				Name: "docs",
 				Actions: []driversshared.AlterTableAction{
 					&PostgresSetStatisticsAction{
-						ColumnName: "body",
-						Source:     250,
+						ColumnName:       "body",
+						StatisticsTarget: 250,
 					},
 				},
 			},
@@ -2664,10 +2664,10 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ConstraintsPrimaryKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT PRIMARY KEY);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT PRIMARY KEY);`)
 
-		driver.ExecOnTarget(`DROP TABLE users; CREATE TABLE users (id INT, CONSTRAINT pk_users PRIMARY KEY (id));`)
+		driver.ExecOnDesired(`DROP TABLE users; CREATE TABLE users (id INT, CONSTRAINT pk_users PRIMARY KEY (id));`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2693,8 +2693,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ConstraintsUnique", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (email TEXT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
+		driver.ExecOnCurrent(`CREATE TABLE users (email TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2714,11 +2714,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ConstraintsForeignKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE roles (id INT PRIMARY KEY);
 			CREATE TABLE users (role_id INT);
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE roles (id INT PRIMARY KEY);
 			CREATE TABLE users (role_id INT, CONSTRAINT fk_role FOREIGN KEY (role_id) REFERENCES roles(id));
 		`)
@@ -2741,14 +2741,14 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ConstraintsCheck", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE items (
 				price INT,
 				CONSTRAINT positive_price CHECK (price > 0),
 				CONSTRAINT small_price CHECK (price < 10)
 			);
 		`)
-		driver.ExecOnTarget(`CREATE TABLE items (price INT, CONSTRAINT positive_price CHECK (price >= 0));`)
+		driver.ExecOnDesired(`CREATE TABLE items (price INT, CONSTRAINT positive_price CHECK (price >= 0));`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "items",
@@ -2780,8 +2780,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropColumnWithPrimaryKey", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, code INT, CONSTRAINT pk_users PRIMARY KEY (code));`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, code INT, CONSTRAINT pk_users PRIMARY KEY (code));`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2801,8 +2801,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropColumnWithUniqueConstraint", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_email UNIQUE (email));`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2822,7 +2822,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropColumnKeepsOtherConstraint", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (
 				id INT NOT NULL,
 				email TEXT,
@@ -2830,7 +2830,7 @@ func TestPostgresDriver(t *testing.T) {
 				CONSTRAINT uq_email UNIQUE (email)
 			);
 		`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT NOT NULL, CONSTRAINT pk_users PRIMARY KEY (id));`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT NOT NULL, CONSTRAINT pk_users PRIMARY KEY (id));`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2850,8 +2850,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropColumnOfCompositeConstraint", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_users UNIQUE (id, email));`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, CONSTRAINT uq_users UNIQUE (id));`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, email TEXT, CONSTRAINT uq_users UNIQUE (id, email));`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, CONSTRAINT uq_users UNIQUE (id));`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -2883,8 +2883,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("Indexes", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (name TEXT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (name TEXT); CREATE INDEX idx_name ON users(name);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (name TEXT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (name TEXT); CREATE INDEX idx_name ON users(name);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateIndexInstruction{Definition: "CREATE INDEX idx_name ON users USING btree (name)"},
 		})
@@ -2893,8 +2893,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("IndexesAndTriggersKeepTheNameOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (name TEXT, email TEXT);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnCurrent(`CREATE TABLE users (name TEXT, email TEXT);`)
+		driver.ExecOnDesired(`
 			CREATE TABLE users (name TEXT, email TEXT);
 			CREATE INDEX idx_b_name ON users(name);
 			CREATE INDEX idx_a_email ON users(email);
@@ -2917,16 +2917,16 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		schema := `CREATE TABLE users (name TEXT); CREATE INDEX idx_name ON users(name);`
-		driver.ExecOnSource(schema)
-		driver.ExecOnTarget(schema)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnDesired(schema)
 		driver.RequireInstructions(nil)
 	})
 
 	t.Run("DropColumnDropsItsIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, email TEXT); CREATE INDEX idx_email ON users(email);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, email TEXT); CREATE INDEX idx_email ON users(email);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropIndexInstruction{Name: "idx_email"},
 			&PostgresAlterTableInstruction{
@@ -2941,8 +2941,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropColumnKeepsAnotherIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT); CREATE INDEX idx_name ON users(name);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, name TEXT); CREATE INDEX idx_name ON users(name);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateIndexInstruction{Definition: "CREATE INDEX idx_name ON users USING btree (name)"},
 			&driversshared.SQLDropIndexInstruction{Name: "idx_email"},
@@ -2958,8 +2958,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropColumnAndModifyAnotherIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email); CREATE INDEX idx_name ON users(name);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT, name TEXT); CREATE UNIQUE INDEX idx_name ON users(name);`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, email TEXT, name TEXT); CREATE INDEX idx_email ON users(email); CREATE INDEX idx_name ON users(name);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, name TEXT); CREATE UNIQUE INDEX idx_name ON users(name);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropIndexInstruction{Name: "idx_name"},
 			&PostgresCreateIndexInstruction{Definition: "CREATE UNIQUE INDEX idx_name ON users USING btree (name)"},
@@ -2984,11 +2984,11 @@ func TestPostgresDriver(t *testing.T) {
 			END;
 			$$ LANGUAGE plpgsql;
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE TABLE users (updated_at TIMESTAMP);`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE TABLE users (updated_at TIMESTAMP);`)
 
-		driver.ExecOnTarget(setup)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`
 			CREATE TABLE users (updated_at TIMESTAMP);
 			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 		`)
@@ -3010,11 +3010,11 @@ func TestPostgresDriver(t *testing.T) {
 			END;
 			$$ LANGUAGE plpgsql;
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE TABLE users (updated_at TIMESTAMP);`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE TABLE users (updated_at TIMESTAMP);`)
 
-		driver.ExecOnTarget(setup)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`
 			CREATE TABLE users (updated_at TIMESTAMP);
 			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 			ALTER TABLE users DISABLE TRIGGER set_timestamp;
@@ -3049,11 +3049,11 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (updated_at TIMESTAMP);
 			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 		`
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`ALTER TABLE users DISABLE TRIGGER set_timestamp;`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`ALTER TABLE users DISABLE TRIGGER set_timestamp;`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`ALTER TABLE users ENABLE ALWAYS TRIGGER set_timestamp;`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`ALTER TABLE users ENABLE ALWAYS TRIGGER set_timestamp;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "users",
@@ -3080,13 +3080,13 @@ func TestPostgresDriver(t *testing.T) {
 
 			CREATE TABLE users (updated_at TIMESTAMP);
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`
 			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 		`)
 
-		driver.ExecOnTarget(setup)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`
 			CREATE TRIGGER set_timestamp BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 			ALTER TABLE users ENABLE REPLICA TRIGGER set_timestamp;
 		`)
@@ -3124,16 +3124,16 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE users (updated_at TIMESTAMP);
 			CREATE TRIGGER set_timestamp BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 		`
-		driver.ExecOnSource(schema)
-		driver.ExecOnTarget(schema)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnDesired(schema)
 		driver.RequireInstructions(nil)
 	})
 
 	t.Run("Views", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT); CREATE VIEW user_ids AS SELECT id FROM users;`)
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT); CREATE VIEW user_ids AS SELECT id FROM users;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateViewInstruction{
 				Name:  "user_ids",
@@ -3145,7 +3145,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateSequence", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE SEQUENCE counter;`)
+		driver.ExecOnDesired(`CREATE SEQUENCE counter;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateSequenceInstruction{
@@ -3163,7 +3163,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropSequence", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
+		driver.ExecOnCurrent(`CREATE SEQUENCE counter;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropSequenceInstruction{Name: "counter"},
@@ -3173,8 +3173,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterSequenceCache", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
-		driver.ExecOnTarget(`CREATE SEQUENCE counter CACHE 20;`)
+		driver.ExecOnCurrent(`CREATE SEQUENCE counter;`)
+		driver.ExecOnDesired(`CREATE SEQUENCE counter CACHE 20;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterSequenceInstruction{
 				Name: "counter",
@@ -3189,8 +3189,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterSequence", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
-		driver.ExecOnTarget(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
+		driver.ExecOnCurrent(`CREATE SEQUENCE counter;`)
+		driver.ExecOnDesired(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterSequenceInstruction{
 				Name: "counter",
@@ -3213,10 +3213,10 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("SequenceRestartOnHigherMinimum", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
-		driver.ExecOnSource(`SELECT nextval('counter');`)
+		driver.ExecOnCurrent(`CREATE SEQUENCE counter;`)
+		driver.ExecOnCurrent(`SELECT nextval('counter');`)
 
-		driver.ExecOnTarget(`CREATE SEQUENCE counter MINVALUE 100 START WITH 100;`)
+		driver.ExecOnDesired(`CREATE SEQUENCE counter MINVALUE 100 START WITH 100;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterSequenceInstruction{
 				Name: "counter",
@@ -3239,10 +3239,10 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("SequenceRestartOnLowerMaximum", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
-		driver.ExecOnSource(`SELECT nextval('counter') FROM generate_series(1, 10);`)
+		driver.ExecOnCurrent(`CREATE SEQUENCE counter;`)
+		driver.ExecOnCurrent(`SELECT nextval('counter') FROM generate_series(1, 10);`)
 
-		driver.ExecOnTarget(`CREATE SEQUENCE counter MAXVALUE 5;`)
+		driver.ExecOnDesired(`CREATE SEQUENCE counter MAXVALUE 5;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterSequenceInstruction{
 				Name: "counter",
@@ -3261,10 +3261,10 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("SequenceNoRestartWithinRange", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE SEQUENCE counter;`)
-		driver.ExecOnSource(`SELECT nextval('counter');`)
+		driver.ExecOnCurrent(`CREATE SEQUENCE counter;`)
+		driver.ExecOnCurrent(`SELECT nextval('counter');`)
 
-		driver.ExecOnTarget(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
+		driver.ExecOnDesired(`CREATE SEQUENCE counter INCREMENT BY 2 MAXVALUE 100 CYCLE;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterSequenceInstruction{
 				Name: "counter",
@@ -3287,7 +3287,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("SequenceOfSerialColumnIsIgnored", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE users (id SERIAL);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id SERIAL);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -3308,7 +3308,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateEnumType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
+		driver.ExecOnDesired(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateEnumTypeInstruction{
@@ -3321,8 +3321,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AddEnumValue", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
-		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');`)
+		driver.ExecOnCurrent(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
+		driver.ExecOnDesired(`CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTypeAddValueInstruction{
 				Name:  "mood",
@@ -3334,11 +3334,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("InsertEnumValueBeforeAndBetweenExistingValues", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TYPE mood AS ENUM ('sad', 'happy');
 			CREATE TABLE people (current_mood mood);
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TYPE mood AS ENUM ('angry', 'sad', 'ok', 'fine', 'happy', 'joyful');
 			CREATE TABLE people (current_mood mood);
 		`)
@@ -3368,8 +3368,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RemoveEnumValue", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
-		driver.ExecOnTarget(`CREATE TYPE mood AS ENUM ('sad');`)
+		driver.ExecOnCurrent(`CREATE TYPE mood AS ENUM ('sad', 'ok');`)
+		driver.ExecOnDesired(`CREATE TYPE mood AS ENUM ('sad');`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropTypeInstruction{Name: "mood"},
 			&PostgresCreateEnumTypeInstruction{
@@ -3382,7 +3382,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropEnumType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TYPE mood AS ENUM ('sad');`)
+		driver.ExecOnCurrent(`CREATE TYPE mood AS ENUM ('sad');`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropTypeInstruction{Name: "mood"},
@@ -3392,7 +3392,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateDomain", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE DOMAIN positive_int AS integer NOT NULL DEFAULT 1 CHECK (VALUE > 0);`)
+		driver.ExecOnDesired(`CREATE DOMAIN positive_int AS integer NOT NULL DEFAULT 1 CHECK (VALUE > 0);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateDomainInstruction{
@@ -3416,8 +3416,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("AlterDomain", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE DOMAIN positive_int AS integer DEFAULT 1;`)
-		driver.ExecOnTarget(`CREATE DOMAIN positive_int AS integer NOT NULL DEFAULT 2 CHECK (VALUE > 0);`)
+		driver.ExecOnCurrent(`CREATE DOMAIN positive_int AS integer DEFAULT 1;`)
+		driver.ExecOnDesired(`CREATE DOMAIN positive_int AS integer NOT NULL DEFAULT 2 CHECK (VALUE > 0);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterDomainInstruction{
 				Name:   "positive_int",
@@ -3440,8 +3440,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RecreateDomainOnNewBaseType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE DOMAIN short_text AS integer;`)
-		driver.ExecOnTarget(`CREATE DOMAIN short_text AS varchar(10);`)
+		driver.ExecOnCurrent(`CREATE DOMAIN short_text AS integer;`)
+		driver.ExecOnDesired(`CREATE DOMAIN short_text AS varchar(10);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropDomainInstruction{Name: "short_text"},
 			&PostgresCreateDomainInstruction{
@@ -3454,7 +3454,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropDomain", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE DOMAIN positive_int AS integer CHECK (VALUE > 0);`)
+		driver.ExecOnCurrent(`CREATE DOMAIN positive_int AS integer CHECK (VALUE > 0);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropDomainInstruction{Name: "positive_int"},
@@ -3464,7 +3464,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateCompositeType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TYPE address AS (street TEXT, city VARCHAR(10));`)
+		driver.ExecOnDesired(`CREATE TYPE address AS (street TEXT, city VARCHAR(10));`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateCompositeTypeInstruction{
@@ -3486,8 +3486,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ModifyCompositeType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TYPE address AS (street TEXT);`)
-		driver.ExecOnTarget(`CREATE TYPE address AS (street TEXT, city TEXT);`)
+		driver.ExecOnCurrent(`CREATE TYPE address AS (street TEXT);`)
+		driver.ExecOnDesired(`CREATE TYPE address AS (street TEXT, city TEXT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropTypeInstruction{Name: "address"},
 			&PostgresCreateCompositeTypeInstruction{
@@ -3509,7 +3509,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropCompositeType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TYPE address AS (street TEXT);`)
+		driver.ExecOnCurrent(`CREATE TYPE address AS (street TEXT);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropTypeInstruction{Name: "address"},
@@ -3520,10 +3520,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
-		driver.ExecOnSource(setup)
-		driver.ExecOnTarget(setup)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnDesired(setup)
 
-		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
+		driver.ExecOnDesired(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateAggregateInstruction{
 				Name:               "total",
@@ -3542,11 +3542,11 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer);`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer);`)
 
-		driver.ExecOnTarget(setup)
-		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, COMBINEFUNC = int_add, PARALLEL = SAFE);`)
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, COMBINEFUNC = int_add, PARALLEL = SAFE);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropAggregateInstruction{
 				Name:      "total",
@@ -3570,11 +3570,11 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '10');`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '10');`)
 
-		driver.ExecOnTarget(setup)
-		driver.ExecOnTarget(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropAggregateInstruction{
 				Name:      "total",
@@ -3597,10 +3597,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 
-		driver.ExecOnTarget(setup)
+		driver.ExecOnDesired(setup)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropAggregateInstruction{
 				Name:      "total",
@@ -3612,8 +3612,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropAggregateBeforeFunction", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`)
-		driver.ExecOnSource(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
+		driver.ExecOnCurrent(`CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`)
+		driver.ExecOnCurrent(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropAggregateInstruction{
@@ -3630,8 +3630,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropOperatorBeforeFunction", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`)
-		driver.ExecOnSource(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
+		driver.ExecOnCurrent(`CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`)
+		driver.ExecOnCurrent(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropOperatorInstruction{
@@ -3656,10 +3656,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
-		driver.ExecOnSource(setup)
-		driver.ExecOnTarget(setup)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnDesired(setup)
 
-		driver.ExecOnTarget(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
+		driver.ExecOnDesired(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateOperatorInstruction{
 				Name:     "===",
@@ -3684,17 +3684,17 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE FUNCTION int_ne(integer, integer) RETURNS boolean AS $$ SELECT $1 <> $2; $$ LANGUAGE sql IMMUTABLE;
 			CREATE OPERATOR !== (FUNCTION = int_ne, LEFTARG = integer, RIGHTARG = integer);
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE OPERATOR === (FUNCTION = int_eq, LEFTARG = integer, RIGHTARG = integer);`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE OPERATOR === (FUNCTION = int_eq, LEFTARG = integer, RIGHTARG = integer);`)
 
-		driver.ExecOnTarget(setup)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`
 			CREATE OPERATOR === (
 				FUNCTION = int_eq, LEFTARG = integer, RIGHTARG = integer,
 				COMMUTATOR = ===, NEGATOR = !==, RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES
 			);
 		`)
-		// The NEGATOR clause of the target writes the reverse link into the other
+		// The NEGATOR clause of the desired schema writes the reverse link into the other
 		// operator too, so the diff recreates both operators.
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropOperatorInstruction{
@@ -3775,11 +3775,11 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;
 			CREATE FUNCTION int_sub(integer, integer) RETURNS integer AS $$ SELECT $1 - $2; $$ LANGUAGE sql IMMUTABLE;
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE OPERATOR === (FUNCTION = int_sub, LEFTARG = integer, RIGHTARG = integer);`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE OPERATOR === (FUNCTION = int_sub, LEFTARG = integer, RIGHTARG = integer);`)
 
-		driver.ExecOnTarget(setup)
-		driver.ExecOnTarget(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropOperatorInstruction{
 				Name: "===",
@@ -3811,10 +3811,10 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
-		driver.ExecOnSource(setup)
-		driver.ExecOnSource(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE OPERATOR === (FUNCTION = int_add, LEFTARG = integer, RIGHTARG = integer);`)
 
-		driver.ExecOnTarget(setup)
+		driver.ExecOnDesired(setup)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropOperatorInstruction{
 				Name: "===",
@@ -3833,7 +3833,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateFunction", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE FUNCTION increment(a integer) RETURNS integer AS $$
 			BEGIN
 				RETURN a + 1;
@@ -3851,8 +3851,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ReplaceFunction", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
-		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 2; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnCurrent(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnDesired(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 2; END; $$ LANGUAGE plpgsql;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateFunctionInstruction{
 				Definition: "CREATE OR REPLACE FUNCTION increment(a integer)\n RETURNS integer\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN a + 2; END; $function$",
@@ -3863,8 +3863,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ReplaceFunctionBodyOnly", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
-		driver.ExecOnTarget(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 3; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnCurrent(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnDesired(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 3; END; $$ LANGUAGE plpgsql;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateFunctionInstruction{
 				Definition: "CREATE OR REPLACE FUNCTION increment(a integer)\n RETURNS integer\n LANGUAGE plpgsql\nAS $function$ BEGIN RETURN a + 3; END; $function$",
@@ -3875,8 +3875,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ReplaceFunctionReturnType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE FUNCTION calculate(a integer) RETURNS integer AS $$ BEGIN RETURN a; END; $$ LANGUAGE plpgsql;`)
-		driver.ExecOnTarget(`CREATE FUNCTION calculate(a integer) RETURNS text AS $$ BEGIN RETURN a::text; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnCurrent(`CREATE FUNCTION calculate(a integer) RETURNS integer AS $$ BEGIN RETURN a; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnDesired(`CREATE FUNCTION calculate(a integer) RETURNS text AS $$ BEGIN RETURN a::text; END; $$ LANGUAGE plpgsql;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropFunctionInstruction{
 				Name:      "calculate",
@@ -3891,8 +3891,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RenameAFunctionParameter", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
-		driver.ExecOnTarget(`CREATE FUNCTION increment(b integer) RETURNS integer AS $$ BEGIN RETURN b + 1; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnCurrent(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnDesired(`CREATE FUNCTION increment(b integer) RETURNS integer AS $$ BEGIN RETURN b + 1; END; $$ LANGUAGE plpgsql;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropFunctionInstruction{
 				Name:      "increment",
@@ -3907,7 +3907,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropFunction", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
+		driver.ExecOnCurrent(`CREATE FUNCTION increment(a integer) RETURNS integer AS $$ BEGIN RETURN a + 1; END; $$ LANGUAGE plpgsql;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropFunctionInstruction{
@@ -3926,10 +3926,10 @@ func TestPostgresDriver(t *testing.T) {
 				SELECT '(' || ($1).x::text || ',' || ($1).y::text || ')';
 			$$ LANGUAGE sql IMMUTABLE;
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnTarget(setup)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnDesired(setup)
 
-		driver.ExecOnTarget(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`)
+		driver.ExecOnDesired(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateCastInstruction{
@@ -3951,10 +3951,10 @@ func TestPostgresDriver(t *testing.T) {
 				SELECT '(' || ($1).x::text || ',' || ($1).y::text || ')';
 			$$ LANGUAGE sql IMMUTABLE;
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnTarget(setup)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnDesired(setup)
 
-		driver.ExecOnSource(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`)
+		driver.ExecOnCurrent(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropCastInstruction{
@@ -3973,11 +3973,11 @@ func TestPostgresDriver(t *testing.T) {
 				SELECT '(' || ($1).x::text || ',' || ($1).y::text || ')';
 			$$ LANGUAGE sql IMMUTABLE;
 		`
-		driver.ExecOnSource(setup)
-		driver.ExecOnTarget(setup)
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnDesired(setup)
 
-		driver.ExecOnSource(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d);`)
-		driver.ExecOnTarget(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS IMPLICIT;`)
+		driver.ExecOnCurrent(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d);`)
+		driver.ExecOnDesired(`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS IMPLICIT;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropCastInstruction{
@@ -3997,11 +3997,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("Procedures", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE PROCEDURE record_run() LANGUAGE sql AS $$ SELECT 1 $$;`)
-		driver.ExecOnSource(`CREATE PROCEDURE outdated() LANGUAGE sql AS $$ SELECT 1 $$;`)
-		driver.ExecOnSource(`CREATE PROCEDURE untouched() LANGUAGE sql AS $$ SELECT 1 $$;`)
-		driver.ExecOnTarget(`CREATE PROCEDURE record_run() LANGUAGE sql AS $$ SELECT 2 $$;`)
-		driver.ExecOnTarget(`CREATE PROCEDURE untouched() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		driver.ExecOnCurrent(`CREATE PROCEDURE record_run() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		driver.ExecOnCurrent(`CREATE PROCEDURE outdated() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		driver.ExecOnCurrent(`CREATE PROCEDURE untouched() LANGUAGE sql AS $$ SELECT 1 $$;`)
+		driver.ExecOnDesired(`CREATE PROCEDURE record_run() LANGUAGE sql AS $$ SELECT 2 $$;`)
+		driver.ExecOnDesired(`CREATE PROCEDURE untouched() LANGUAGE sql AS $$ SELECT 1 $$;`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateProcedureInstruction{
 				Definition: "CREATE OR REPLACE PROCEDURE record_run()\n LANGUAGE sql\nAS $procedure$ SELECT 2 $procedure$",
@@ -4016,7 +4016,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateExtension", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithTwoDatabases(t)
 
-		driver.ExecOnTarget(`CREATE EXTENSION pg_trgm;`)
+		driver.ExecOnDesired(`CREATE EXTENSION pg_trgm;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateExtensionInstruction{Name: "pg_trgm"},
@@ -4026,7 +4026,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropExtension", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE EXTENSION pg_trgm;`)
+		driver.ExecOnCurrent(`CREATE EXTENSION pg_trgm;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropExtensionInstruction{Name: "pg_trgm"},
@@ -4036,7 +4036,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropExtensionThatOwnsAView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE EXTENSION pg_buffercache;`)
+		driver.ExecOnCurrent(`CREATE EXTENSION pg_buffercache;`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresDropExtensionInstruction{Name: "pg_buffercache"},
@@ -4046,7 +4046,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropTableBeforeType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TYPE mood AS ENUM ('sad');
 			CREATE TABLE events (id INT, feeling mood);
 		`)
@@ -4060,7 +4060,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropViewBeforeTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW user_ids AS SELECT id FROM users;
 		`)
@@ -4074,11 +4074,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropViewBeforeColumn", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT, label TEXT);
 			CREATE VIEW user_labels AS SELECT label FROM users;
 		`)
-		driver.ExecOnTarget(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDropViewInstruction{Name: "user_labels"},
 			&PostgresAlterTableInstruction{
@@ -4093,11 +4093,11 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RecreateViewOnColumnTypeChange", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT, label TEXT);
 			CREATE VIEW user_labels AS SELECT label FROM users;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT, label VARCHAR);
 			CREATE VIEW user_labels AS SELECT label FROM users;
 		`)
@@ -4122,8 +4122,8 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("CreateViewsInDependencyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`CREATE TABLE users (id INT);`)
-		driver.ExecOnTarget(`
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users;
 			CREATE VIEW view_a AS SELECT id FROM view_b;
@@ -4143,7 +4143,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("DropViewsInDependencyOrder", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users;
 			CREATE VIEW view_a AS SELECT id FROM view_b;
@@ -4159,12 +4159,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RecreateTheViewsThatReadARecreatedView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users;
 			CREATE VIEW view_a AS SELECT id FROM view_b;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users WHERE id > 0;
 			CREATE VIEW view_a AS SELECT id FROM view_b;
@@ -4186,12 +4186,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RecreateAViewThatCountsTheRowsOfARecreatedView", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users;
 			CREATE VIEW view_a AS SELECT count(*) AS total FROM view_b;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users WHERE id > 0;
 			CREATE VIEW view_a AS SELECT count(*) AS total FROM view_b;
@@ -4213,13 +4213,13 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("RecreateAChainOfViewsAndMaterializedViews", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users;
 			CREATE MATERIALIZED VIEW view_a AS SELECT id FROM view_b;
 			CREATE VIEW view_c AS SELECT id FROM view_a;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT);
 			CREATE VIEW view_b AS SELECT id FROM users WHERE id > 0;
 			CREATE MATERIALIZED VIEW view_a AS SELECT id FROM view_b;
@@ -4247,12 +4247,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ARecreatedDependentViewKeepsItsGrants", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE VIEW view_b AS SELECT 1 AS value;
 			CREATE VIEW view_a AS SELECT value FROM view_b;
 			GRANT SELECT ON view_a TO dbdiff_reader;
 		`)
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE VIEW view_b AS SELECT 2 AS value;
 			CREATE VIEW view_a AS SELECT value FROM view_b;
 			GRANT SELECT ON view_a TO dbdiff_reader;
@@ -4293,11 +4293,11 @@ func TestPostgresDriver(t *testing.T) {
 
 		schema := `CREATE TABLE users (id INT PRIMARY KEY, name TEXT);`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Robert'), (3, 'Carol');`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Robert'), (3, 'Carol');`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLInsertInstruction{
 				TableName:   "users",
@@ -4334,7 +4334,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice"},
@@ -4349,10 +4349,10 @@ func TestPostgresDriver(t *testing.T) {
 
 		schema := `CREATE TABLE users (id INT NOT NULL, code INT GENERATED ALWAYS AS (id * 10) STORED, name TEXT, PRIMARY KEY (code));`
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');`)
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (1, 'Alicia'), (3, 'Cara');`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO users (id, name) VALUES (1, 'Alicia'), (3, 'Cara');`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLInsertInstruction{
@@ -4393,14 +4393,14 @@ func TestPostgresDriver(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "code": int64(10), "name": "Alice"},
 			{"id": int64(2), "code": int64(20), "name": "Bob"},
-		}, driver.FetchAllFromSource("users", "ORDER BY code"))
+		}, driver.FetchAllFromCurrent("users", "ORDER BY code"))
 	})
 
 	t.Run("CompareRowsOfANewTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT PRIMARY KEY, name TEXT);
 			INSERT INTO users (id, name) VALUES (2, 'Bob'), (1, 'Alice');
 		`)
@@ -4439,7 +4439,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "name": "Alice"},
@@ -4459,11 +4459,11 @@ func TestPostgresDriver(t *testing.T) {
 			);
 		`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO items (id, price) OVERRIDING SYSTEM VALUE VALUES (1, 10), (2, 20);`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO items (id, price) OVERRIDING SYSTEM VALUE VALUES (1, 10), (2, 20);`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO items (id, price) OVERRIDING SYSTEM VALUE VALUES (1, 15), (3, 30);`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO items (id, price) OVERRIDING SYSTEM VALUE VALUES (1, 15), (3, 30);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresInsertOverridingInstruction{
 				TableName:   "items",
@@ -4504,12 +4504,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ChangeAPartitionBound", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
 			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
 			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (200);
 		`)
@@ -4535,11 +4535,11 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE FUNCTION touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
 		`
 
-		driver.ExecOnSource(schema + `
+		driver.ExecOnCurrent(schema + `
 			CREATE INDEX measurements_low_old ON measurements_low (id, value);
 		`)
 
-		driver.ExecOnTarget(schema + `
+		driver.ExecOnDesired(schema + `
 			CREATE INDEX measurements_value ON measurements (value);
 			CREATE TRIGGER parent_trigger BEFORE INSERT ON measurements
 				FOR EACH ROW EXECUTE FUNCTION touch();
@@ -4594,11 +4594,11 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
 		`
 
-		driver.ExecOnSource(schema + `
+		driver.ExecOnCurrent(schema + `
 			CREATE INDEX measurements_low_value ON measurements_low (value);
 		`)
 
-		driver.ExecOnTarget(schema + `
+		driver.ExecOnDesired(schema + `
 			CREATE INDEX measurements_value ON measurements (value);
 		`)
 
@@ -4613,17 +4613,17 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ChangeATableToAPartition", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
 			CREATE TABLE measurements_low (id integer PRIMARY KEY);
 		`)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE measurements (id integer PRIMARY KEY) PARTITION BY RANGE (id);
 			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
 		`)
 
-		_, err := driver.Diff(t.Context(), driver.source, driver.target, driversshared.DiffOptions{})
+		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
 		require.EqualError(t, err,
 			`the table "measurements_low" changes from a table to a partition, and dbdiff cannot diff this change`)
 	})
@@ -4640,11 +4640,11 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
 		`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO measurements (id, value) VALUES (1, 5);`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO measurements (id, value) VALUES (1, 5);`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO measurements (id, value) VALUES (1, 5), (2, 7);`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO measurements (id, value) VALUES (1, 5), (2, 7);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLInsertInstruction{
 				TableName:   "measurements",
@@ -4666,11 +4666,11 @@ func TestPostgresDriver(t *testing.T) {
 			);
 		`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO documents (id, body, raw) VALUES (1, '{"a": 1}', '\x01');`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO documents (id, body, raw) VALUES (1, '{"a": 1}', '\x01');`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO documents (id, body, raw) VALUES (1, '{"a": 2}', '\x02'), (2, '{"b": 3}', NULL);`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO documents (id, body, raw) VALUES (1, '{"a": 2}', '\x02'), (2, '{"b": 3}', NULL);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLInsertInstruction{
 				TableName:   "documents",
@@ -4713,13 +4713,13 @@ func TestPostgresDriver(t *testing.T) {
 			);
 		`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`
 			INSERT INTO parents (id) VALUES (1);
 			INSERT INTO children (id, parent) VALUES (10, 1);
 		`)
 
-		driver.ExecOnTarget(schema)
+		driver.ExecOnDesired(schema)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLDeleteInstruction{
 				TableName: "children",
@@ -4752,20 +4752,20 @@ func TestPostgresDriver(t *testing.T) {
 
 		schema := `CREATE TABLE logs (message TEXT);`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO logs (message) VALUES ('stop');`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO logs (message) VALUES ('stop');`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO logs (message) VALUES ('start');`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO logs (message) VALUES ('start');`)
 		diff := driver.RequireInstructions([]driversshared.Instruction{
 			&driversshared.SQLCommentInstruction{
 				Text: `The table "logs" holds no primary key, so dbdiff compares no row of it.`,
 			},
 		})
 
-		driver.ExecOnSource(diff)
+		driver.ExecOnCurrent(diff)
 
-		rows := driver.FetchAllFromSource("logs", "")
+		rows := driver.FetchAllFromCurrent("logs", "")
 
 		require.Equal(t, []map[string]any{
 			{"message": "stop"},
@@ -4778,11 +4778,11 @@ func TestPostgresDriver(t *testing.T) {
 
 		schema := `CREATE TABLE notes (id INT PRIMARY KEY, body TEXT);`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO notes (id, body) VALUES (1, 'plain'), (2, 'not empty');`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO notes (id, body) VALUES (1, 'plain'), (2, 'not empty');`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO notes (id, body) VALUES (1, 'it''s a note'), (2, NULL), (3, NULL);`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO notes (id, body) VALUES (1, 'it''s a note'), (2, NULL), (3, NULL);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLInsertInstruction{
 				TableName:   "notes",
@@ -4825,7 +4825,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 
-		rows := driver.FetchAllFromSource("notes", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("notes", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "body": "it's a note"},
@@ -4840,10 +4840,10 @@ func TestPostgresDriver(t *testing.T) {
 
 		schema := `CREATE TABLE events (id integer PRIMARY KEY, at timestamptz);`
 
-		driver.ExecOnSource(schema)
+		driver.ExecOnCurrent(schema)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO events (id, at) VALUES (1, '2024-01-01T05:00:00+02:00');`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO events (id, at) VALUES (1, '2024-01-01T05:00:00+02:00');`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLInsertInstruction{
 				TableName:   "events",
@@ -4859,10 +4859,10 @@ func TestPostgresDriver(t *testing.T) {
 
 		schema := `CREATE TABLE readings (id integer PRIMARY KEY, value double precision);`
 
-		driver.ExecOnSource(schema)
+		driver.ExecOnCurrent(schema)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO readings (id, value) VALUES (1, 'NaN'), (2, 'Infinity'), (3, '-Infinity'), (4, 1.5);`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO readings (id, value) VALUES (1, 'NaN'), (2, 'Infinity'), (3, '-Infinity'), (4, 1.5);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&driversshared.SQLInsertInstruction{
 				TableName:   "readings",
@@ -4891,11 +4891,11 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true
 
-		driver.ExecOnSource(`CREATE TABLE items (a integer PRIMARY KEY, b integer);`)
-		driver.ExecOnSource(`INSERT INTO items (a, b) VALUES (1, 2);`)
+		driver.ExecOnCurrent(`CREATE TABLE items (a integer PRIMARY KEY, b integer);`)
+		driver.ExecOnCurrent(`INSERT INTO items (a, b) VALUES (1, 2);`)
 
-		driver.ExecOnTarget(`CREATE TABLE items (a integer, b integer PRIMARY KEY);`)
-		driver.ExecOnTarget(`INSERT INTO items (a, b) VALUES (1, 2);`)
+		driver.ExecOnDesired(`CREATE TABLE items (a integer, b integer PRIMARY KEY);`)
+		driver.ExecOnDesired(`INSERT INTO items (a, b) VALUES (1, 2);`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
 				Name: "items",
@@ -4928,7 +4928,7 @@ func TestPostgresDriver(t *testing.T) {
 				},
 			},
 			&driversshared.SQLCommentInstruction{
-				Text: `The table "items" holds another primary key in the source, so dbdiff compares no row of it.`,
+				Text: `The table "items" holds another primary key in the current schema, so dbdiff compares no row of it.`,
 			},
 		})
 	})
@@ -4937,11 +4937,11 @@ func TestPostgresDriver(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 		driver.CompareData = true
 
-		// A new NOT NULL column needs an empty table, so the source holds no row here.
-		driver.ExecOnSource(`CREATE TABLE items (label TEXT);`)
+		// A new NOT NULL column needs an empty table, so the current table holds no row here.
+		driver.ExecOnCurrent(`CREATE TABLE items (label TEXT);`)
 
-		driver.ExecOnTarget(`CREATE TABLE items (code INT PRIMARY KEY, label TEXT);`)
-		driver.ExecOnTarget(`INSERT INTO items (code, label) VALUES (1, 'first');`)
+		driver.ExecOnDesired(`CREATE TABLE items (code INT PRIMARY KEY, label TEXT);`)
+		driver.ExecOnDesired(`INSERT INTO items (code, label) VALUES (1, 'first');`)
 
 		diff := driver.RequireInstructions([]driversshared.Instruction{
 			&PostgresAlterTableInstruction{
@@ -4969,13 +4969,13 @@ func TestPostgresDriver(t *testing.T) {
 				},
 			},
 			&driversshared.SQLCommentInstruction{
-				Text: `The table "items" holds another primary key in the source, so dbdiff compares no row of it.`,
+				Text: `The table "items" holds another primary key in the current schema, so dbdiff compares no row of it.`,
 			},
 		})
 
-		driver.ExecOnSource(diff)
+		driver.ExecOnCurrent(diff)
 
-		rows := driver.FetchAllFromSource("items", "ORDER BY code")
+		rows := driver.FetchAllFromCurrent("items", "ORDER BY code")
 
 		require.Equal(t, []map[string]any(nil), rows)
 	})
@@ -4985,14 +4985,14 @@ func TestPostgresDriver(t *testing.T) {
 
 		schema := `CREATE TABLE users (id INT PRIMARY KEY, name TEXT);`
 
-		driver.ExecOnSource(schema)
-		driver.ExecOnSource(`INSERT INTO users (id, name) VALUES (2, 'Bob');`)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnCurrent(`INSERT INTO users (id, name) VALUES (2, 'Bob');`)
 
-		driver.ExecOnTarget(schema)
-		driver.ExecOnTarget(`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
+		driver.ExecOnDesired(schema)
+		driver.ExecOnDesired(`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
 		driver.RequireDiffApplies(nil)
 
-		rows := driver.FetchAllFromSource("users", "ORDER BY id")
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(2), "name": "Bob"},
@@ -5002,7 +5002,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("TableNameThatNeedsQuotes", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`CREATE TABLE "order ""list""" (id INT NOT NULL);`)
+		driver.ExecOnDesired(`CREATE TABLE "order ""list""" (id INT NOT NULL);`)
 
 		driver.RequireDiffApplies([]driversshared.Instruction{
 			&PostgresCreateTableInstruction{
@@ -5021,18 +5021,18 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("ExplicitSchema", func(t *testing.T) {
 		harness := NewTestPostgresDriver(t)
 
-		harness.ExecOnTarget(`CREATE TABLE users (id INT NOT NULL);`)
+		harness.ExecOnDesired(`CREATE TABLE users (id INT NOT NULL);`)
 
 		// The two connection strings hold no search path, so the schema fields of the
 		// driver select it.
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
-		driver.TargetSchema = harness.targetSchema
-		driver.SourceSchema = harness.sourceSchema
+		driver.DesiredSchema = harness.desiredSchema
+		driver.CurrentSchema = harness.currentSchema
 
-		source := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
-		target := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		current := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		desired := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		diff := instructions.String()
@@ -5040,7 +5040,7 @@ func TestPostgresDriver(t *testing.T) {
 	"id" integer NOT NULL
 );`, diff)
 
-		harness.ExecOnSource(diff)
+		harness.ExecOnCurrent(diff)
 	})
 
 	t.Run("UnknownSchema", func(t *testing.T) {
@@ -5048,14 +5048,14 @@ func TestPostgresDriver(t *testing.T) {
 			Schema: "schema_that_does_not_exist",
 		})
 
-		source := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
-		target := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		current := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		desired := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
 
-		_, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		_, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.EqualError(t, err, `the desired database has no schema with the name "schema_that_does_not_exist"`)
 	})
 
-	t.Run("SQLFileTarget", func(t *testing.T) {
+	t.Run("SQLFileDesired", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary postgres server needs a download on the first run")
 		}
@@ -5072,16 +5072,16 @@ func TestPostgresDriver(t *testing.T) {
 			ALTER TABLE users DROP COLUMN email;
 		`)
 
-		sourcePath := sqltest.WriteSQLFile(t, t.TempDir(), "source.sql", `
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql", `
 			CREATE TABLE users (id INT NOT NULL);
 		`)
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		source := driversshared.ParseDataSource(sourcePath)
-		target := driversshared.ParseDataSource(migrationsDirectory)
+		current := driversshared.ParseDataSource(currentPath)
+		desired := driversshared.ParseDataSource(migrationsDirectory)
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, driversshared.Instructions{
@@ -5098,26 +5098,26 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, sourcePath)
+		verifyConnection := openVerificationConnection(t, currentPath)
 		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
 
-	t.Run("EmptyDirectoryTarget", func(t *testing.T) {
+	t.Run("EmptyDirectoryDesired", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary postgres server needs a download on the first run")
 		}
 
-		sourcePath := sqltest.WriteSQLFile(t, t.TempDir(), "source.sql", `
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql", `
 			CREATE TABLE users (id INT NOT NULL);
 		`)
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		source := driversshared.ParseDataSource(sourcePath)
-		target := driversshared.ParseDataSource(t.TempDir())
+		current := driversshared.ParseDataSource(currentPath)
+		desired := driversshared.ParseDataSource(t.TempDir())
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, driversshared.Instructions{
@@ -5126,7 +5126,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, sourcePath)
+		verifyConnection := openVerificationConnection(t, currentPath)
 		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
@@ -5148,16 +5148,16 @@ func TestPostgresDriver(t *testing.T) {
 			CREATE INDEX CONCURRENTLY "ix_users_email" ON users (email);
 		`)
 
-		sourcePath := sqltest.WriteSQLFile(t, t.TempDir(), "source.sql", `
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql", `
 			CREATE TABLE users (id INT NOT NULL, email TEXT, username TEXT NOT NULL);
 		`)
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		source := driversshared.ParseDataSource(sourcePath)
-		target := driversshared.ParseDataSource(migrationsDirectory)
+		current := driversshared.ParseDataSource(currentPath)
+		desired := driversshared.ParseDataSource(migrationsDirectory)
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, driversshared.Instructions{
@@ -5166,7 +5166,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, sourcePath)
+		verifyConnection := openVerificationConnection(t, currentPath)
 		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
@@ -5176,21 +5176,21 @@ func TestPostgresDriver(t *testing.T) {
 			t.Skip("the temporary postgres server needs a download on the first run")
 		}
 
-		targetPath := sqltest.WriteSQLFile(t, t.TempDir(), "target.sql", `
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "desired.sql", `
 			CREATE TABLE mfa (id INT, login_mfa_id INT NOT NULL);
 		`)
 
-		sourcePath := sqltest.WriteSQLFile(t, t.TempDir(), "source.sql", `
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql", `
 			CREATE TABLE mfa (id INT, login_id INT NOT NULL);
 			ALTER TABLE mfa RENAME COLUMN login_id TO login_mfa_id;
 		`)
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		source := driversshared.ParseDataSource(sourcePath)
-		target := driversshared.ParseDataSource(targetPath)
+		current := driversshared.ParseDataSource(currentPath)
+		desired := driversshared.ParseDataSource(desiredPath)
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})
@@ -5200,20 +5200,20 @@ func TestPostgresDriver(t *testing.T) {
 			t.Skip("the temporary postgres server needs a download on the first run")
 		}
 
-		targetPath := sqltest.WriteSQLFile(t, t.TempDir(), "target.sql", `
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "desired.sql", `
 			CREATE TABLE mfa (id INT NOT NULL, label TEXT);
 		`)
 
-		sourcePath := sqltest.WriteSQLFile(t, t.TempDir(), "source.sql", `
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql", `
 			CREATE TABLE mfa (id INT, label TEXT NOT NULL);
 		`)
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		source := driversshared.ParseDataSource(sourcePath)
-		target := driversshared.ParseDataSource(targetPath)
+		current := driversshared.ParseDataSource(currentPath)
+		desired := driversshared.ParseDataSource(desiredPath)
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, driversshared.Instructions{
@@ -5235,7 +5235,7 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, sourcePath)
+		verifyConnection := openVerificationConnection(t, currentPath)
 		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
 		require.NoError(t, err)
 	})
@@ -5305,27 +5305,27 @@ func TestPostgresDriver(t *testing.T) {
 		require.EqualError(t, ValidateScratchServerVersion("5.2"), `unknown postgres version "5.2"`)
 	})
 
-	t.Run("SQLFileTargetAgainstDatabase", func(t *testing.T) {
+	t.Run("SQLFileDesiredAgainstDatabase", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary postgres server needs a download on the first run")
 		}
 
 		harness := NewTestPostgresDriver(t)
-		harness.ExecOnSource(`CREATE TABLE users (id INT NOT NULL);`)
+		harness.ExecOnCurrent(`CREATE TABLE users (id INT NOT NULL);`)
 
-		targetPath := sqltest.WriteSQLFile(t, t.TempDir(), "schema.sql", `
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "schema.sql", `
 			CREATE TABLE users (id INT NOT NULL, name TEXT);
 		`)
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		source := harness.source
-		target := driversshared.ParseDataSource(targetPath)
+		current := harness.current
+		desired := driversshared.ParseDataSource(desiredPath)
 
-		version := driver.scratchVersionOfSources(t.Context(), source, target)
+		version := driver.scratchVersionOfSources(t.Context(), current, desired)
 		require.Equal(t, DetectPostgresScratchVersion(t.Context(), postgresTestConnectionString), version)
 
-		instructions, err := driver.Diff(t.Context(), source, target, driversshared.DiffOptions{})
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 
 		require.Equal(t, driversshared.Instructions{
@@ -5342,13 +5342,13 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		}, instructions)
 
-		harness.ExecOnSource(instructions.String())
+		harness.ExecOnCurrent(instructions.String())
 	})
 
 	t.Run("HistoryTableStaysOutOfTheDiff", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE dbdiff_migrations (
 				version text NOT NULL PRIMARY KEY,
 				name text NOT NULL,
@@ -5363,7 +5363,7 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("HistoryTableStaysOutOfThePrivilegesDiff", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE dbdiff_migrations (
 				version text NOT NULL PRIMARY KEY,
 				name text NOT NULL,
@@ -5379,12 +5379,12 @@ func TestPostgresDriver(t *testing.T) {
 	t.Run("IgnoredTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnTarget(`
+		driver.ExecOnDesired(`
 			CREATE TABLE users (id INT, name TEXT);
 			CREATE TABLE ignored_created (id INT);
 			CREATE TABLE ignored_changed (id INT, name TEXT);
 		`)
-		driver.ExecOnSource(`
+		driver.ExecOnCurrent(`
 			CREATE TABLE users (id INT);
 			CREATE TABLE ignored_dropped (id INT);
 			CREATE TABLE ignored_changed (id INT, email TEXT);

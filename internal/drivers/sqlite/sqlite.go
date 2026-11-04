@@ -20,9 +20,9 @@ type SQLiteDriverConfig struct {
 }
 
 type SQLiteDriver struct {
-	TargetDatabaseConnection *sql.DB
-	SourceDatabaseConnection *sql.DB
-	IgnoreTables             []string
+	DesiredDatabaseConnection *sql.DB
+	CurrentDatabaseConnection *sql.DB
+	IgnoreTables              []string
 
 	temporaryDirectory string
 }
@@ -37,9 +37,9 @@ func TrimSQLitePrefix(path string) string {
 	return strings.TrimPrefix(path, "sqlite://")
 }
 
-func (d *SQLiteDriver) Diff(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
-	release, err := d.openSides(ctx, source, target)
+func (d *SQLiteDriver) Diff(ctx context.Context, current driversshared.DataSource,
+	desired driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
+	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
 	}
@@ -77,32 +77,32 @@ func (d *SQLiteDriver) Diff(ctx context.Context, source driversshared.DataSource
 	return instructions, nil
 }
 
-func (d *SQLiteDriver) openSides(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource) (func(), error) {
-	targetDatabaseConnection, err := d.OpenSide(ctx, target, "desired")
+func (d *SQLiteDriver) openSides(ctx context.Context, current driversshared.DataSource,
+	desired driversshared.DataSource) (func(), error) {
+	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, "desired")
 	if err != nil {
 		_ = d.RemoveTemporaryDirectory()
 
 		return nil, err
 	}
 
-	d.TargetDatabaseConnection = targetDatabaseConnection
+	d.DesiredDatabaseConnection = desiredDatabaseConnection
 
-	sourceDatabaseConnection, err := d.OpenSide(ctx, source, "current")
+	currentDatabaseConnection, err := d.OpenSide(ctx, current, "current")
 	if err != nil {
-		_ = d.TargetDatabaseConnection.Close()
+		_ = d.DesiredDatabaseConnection.Close()
 		_ = d.RemoveTemporaryDirectory()
 
 		return nil, err
 	}
 
-	d.SourceDatabaseConnection = sourceDatabaseConnection
+	d.CurrentDatabaseConnection = currentDatabaseConnection
 
 	return func() {
-		_ = d.SourceDatabaseConnection.Close()
-		_ = d.TargetDatabaseConnection.Close()
-		d.SourceDatabaseConnection = nil
-		d.TargetDatabaseConnection = nil
+		_ = d.CurrentDatabaseConnection.Close()
+		_ = d.DesiredDatabaseConnection.Close()
+		d.CurrentDatabaseConnection = nil
+		d.DesiredDatabaseConnection = nil
 		_ = d.RemoveTemporaryDirectory()
 	}, nil
 }
@@ -116,12 +116,12 @@ func holdsTableRecreation(instructions []driversshared.Instruction) bool {
 }
 
 func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
+	desiredTables, err := d.GetTables(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
+	currentTables, err := d.GetTables(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
@@ -131,15 +131,15 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 		return nil, err
 	}
 
-	additions, removals, err := driversshared.DiffByKey(targetTables, sourceTables, driversshared.DiffRules[*SQLiteTable]{
+	additions, removals, err := driversshared.DiffByKey(desiredTables, currentTables, driversshared.DiffRules[*SQLiteTable]{
 		Key: func(table *SQLiteTable) string {
 			return table.Name
 		},
 		Create: func(table *SQLiteTable) []driversshared.Instruction {
 			return table.Instructions()
 		},
-		Change: func(target *SQLiteTable, source *SQLiteTable) ([]driversshared.Instruction, error) {
-			return target.DiffTable(source, reservedNames)
+		Change: func(desired *SQLiteTable, current *SQLiteTable) ([]driversshared.Instruction, error) {
+			return desired.DiffTable(current, reservedNames)
 		},
 		Drop: func(table *SQLiteTable) []driversshared.Instruction {
 			return []driversshared.Instruction{&driversshared.SQLDropTableInstruction{
@@ -163,7 +163,7 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 func (d *SQLiteDriver) getReservedNames(ctx context.Context) (map[string]bool, error) {
 	reservedNames := make(map[string]bool)
 
-	for _, db := range []*sql.DB{d.SourceDatabaseConnection, d.TargetDatabaseConnection} {
+	for _, db := range []*sql.DB{d.CurrentDatabaseConnection, d.DesiredDatabaseConnection} {
 		names, err := driversshared.QueryAll(ctx, db, "SELECT name FROM sqlite_master ORDER BY name;", func(rows *sql.Rows) (string, error) {
 			var name string
 
@@ -184,15 +184,15 @@ func (d *SQLiteDriver) getReservedNames(ctx context.Context) (map[string]bool, e
 }
 
 func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetViews, driversshared.DiffRules[*SQLiteView]{
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetViews, driversshared.DiffRules[*SQLiteView]{
 		Key: func(view *SQLiteView) string {
 			return view.Name
 		},
 		Create: func(view *SQLiteView) []driversshared.Instruction {
 			return view.Instructions()
 		},
-		Change: func(target *SQLiteView, source *SQLiteView) ([]driversshared.Instruction, error) {
-			return target.Diff(source)
+		Change: func(desired *SQLiteView, current *SQLiteView) ([]driversshared.Instruction, error) {
+			return desired.Diff(current)
 		},
 		Drop: func(view *SQLiteView) []driversshared.Instruction {
 			return []driversshared.Instruction{&driversshared.SQLDropViewInstruction{

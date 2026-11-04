@@ -127,7 +127,7 @@ func TestAnnotateInstructions(t *testing.T) {
 				TableName:         "_users_temp",
 				ColumnNames:       []string{"id"},
 				SelectExpressions: []string{`"id"`},
-				SourceTableName:   "users",
+				CurrentTableName:  "users",
 			},
 			TableName: "users",
 		}

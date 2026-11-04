@@ -15,18 +15,18 @@ import (
 
 // The schema section already creates or drops the other tables.
 func (d *PostgresDriver) DiffData(ctx context.Context) ([]driversshared.Instruction, error) {
-	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
+	desiredTables, err := d.GetTables(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
+	currentTables, err := d.GetTables(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	return driversshared.DiffData(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection,
-		targetTables, sourceTables, driversshared.DataRules[*PostgresTable, driversshared.DoubleQuote]{
+	return driversshared.DiffData(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection,
+		desiredTables, currentTables, driversshared.DataRules[*PostgresTable, driversshared.DoubleQuote]{
 			TableName: func(table *PostgresTable) string {
 				return table.Name
 			},

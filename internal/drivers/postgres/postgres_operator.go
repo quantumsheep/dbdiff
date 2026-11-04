@@ -79,11 +79,11 @@ func (d *PostgresDriver) DiffOperators(ctx context.Context) (*SectionDiff, error
 		Create: func(operator *PostgresOperator) []driversshared.Instruction {
 			return []driversshared.Instruction{operator.CreateInstruction()}
 		},
-		Change: func(target *PostgresOperator, source *PostgresOperator) []driversshared.Instruction {
-			return target.Diff(source)
+		Change: func(desired *PostgresOperator, current *PostgresOperator) []driversshared.Instruction {
+			return desired.Diff(current)
 		},
-		Drop: func(source *PostgresOperator) driversshared.Instruction {
-			return source.DropInstruction()
+		Drop: func(current *PostgresOperator) driversshared.Instruction {
+			return current.DropInstruction()
 		},
 	})
 }

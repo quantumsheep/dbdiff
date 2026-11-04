@@ -36,15 +36,15 @@ func (d *PostgresDriver) DiffExtensions(ctx context.Context) (*SectionDiff, erro
 		Create: func(extension *PostgresExtension) []driversshared.Instruction {
 			return []driversshared.Instruction{extension.CreateInstruction()}
 		},
-		Change: func(target *PostgresExtension, source *PostgresExtension) []driversshared.Instruction {
-			if target.Version == source.Version {
+		Change: func(desired *PostgresExtension, current *PostgresExtension) []driversshared.Instruction {
+			if desired.Version == current.Version {
 				return nil
 			}
 
-			return []driversshared.Instruction{target.UpdateInstruction()}
+			return []driversshared.Instruction{desired.UpdateInstruction()}
 		},
-		Drop: func(source *PostgresExtension) driversshared.Instruction {
-			return source.DropInstruction()
+		Drop: func(current *PostgresExtension) driversshared.Instruction {
+			return current.DropInstruction()
 		},
 	})
 }

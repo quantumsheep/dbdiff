@@ -59,11 +59,11 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 		Create: func(compositeType *PostgresCompositeType) []driversshared.Instruction {
 			return []driversshared.Instruction{compositeType.CreateInstruction()}
 		},
-		Change: func(target *PostgresCompositeType, source *PostgresCompositeType) []driversshared.Instruction {
-			return target.Diff(source)
+		Change: func(desired *PostgresCompositeType, current *PostgresCompositeType) []driversshared.Instruction {
+			return desired.Diff(current)
 		},
-		Drop: func(source *PostgresCompositeType) driversshared.Instruction {
-			return source.DropInstruction()
+		Drop: func(current *PostgresCompositeType) driversshared.Instruction {
+			return current.DropInstruction()
 		},
 	})
 }

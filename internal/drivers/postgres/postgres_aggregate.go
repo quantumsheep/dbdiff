@@ -101,11 +101,11 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 		Create: func(aggregate *PostgresAggregate) []driversshared.Instruction {
 			return []driversshared.Instruction{aggregate.CreateInstruction()}
 		},
-		Change: func(target *PostgresAggregate, source *PostgresAggregate) []driversshared.Instruction {
-			return target.Diff(source)
+		Change: func(desired *PostgresAggregate, current *PostgresAggregate) []driversshared.Instruction {
+			return desired.Diff(current)
 		},
-		Drop: func(source *PostgresAggregate) driversshared.Instruction {
-			return source.DropInstruction()
+		Drop: func(current *PostgresAggregate) driversshared.Instruction {
+			return current.DropInstruction()
 		},
 	})
 }

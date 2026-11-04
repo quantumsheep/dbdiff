@@ -44,12 +44,12 @@ func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQL
 }
 
 func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetVirtualTables, driversshared.ReplaceRules(
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetVirtualTables, driversshared.ReplaceRules(
 		func(table *SQLiteVirtualTable) string {
 			return table.Name
 		},
-		func(target *SQLiteVirtualTable, source *SQLiteVirtualTable) bool {
-			return target.SQL == source.SQL
+		func(desired *SQLiteVirtualTable, current *SQLiteVirtualTable) bool {
+			return desired.SQL == current.SQL
 		},
 		func(table *SQLiteVirtualTable) driversshared.Instruction {
 			return table.CreateInstruction()

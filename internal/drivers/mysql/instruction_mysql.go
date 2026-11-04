@@ -432,9 +432,9 @@ type MySQLGrantInstruction struct {
 }
 
 func (i *MySQLGrantInstruction) String() string {
-	target := "*"
+	privilegeObject := "*"
 	if i.TableName != "" {
-		target = QuoteIdentifier(i.TableName)
+		privilegeObject = QuoteIdentifier(i.TableName)
 	}
 
 	privilegeClause := strings.Join(i.Privileges, ", ")
@@ -442,7 +442,7 @@ func (i *MySQLGrantInstruction) String() string {
 		privilegeClause = i.Privileges[0] + " (" + strings.Join(QuoteIdentifiers(i.Columns), ", ") + ")"
 	}
 
-	statement := fmt.Sprintf("GRANT %s ON %s TO %s", privilegeClause, target, i.Grantee)
+	statement := fmt.Sprintf("GRANT %s ON %s TO %s", privilegeClause, privilegeObject, i.Grantee)
 
 	if i.WithGrantOption {
 		statement += " WITH GRANT OPTION"
@@ -470,9 +470,9 @@ type MySQLRevokeInstruction struct {
 }
 
 func (i *MySQLRevokeInstruction) String() string {
-	target := "*"
+	privilegeObject := "*"
 	if i.TableName != "" {
-		target = QuoteIdentifier(i.TableName)
+		privilegeObject = QuoteIdentifier(i.TableName)
 	}
 
 	privilegeClause := strings.Join(i.Privileges, ", ")
@@ -480,7 +480,7 @@ func (i *MySQLRevokeInstruction) String() string {
 		privilegeClause = i.Privileges[0] + " (" + strings.Join(QuoteIdentifiers(i.Columns), ", ") + ")"
 	}
 
-	return fmt.Sprintf("REVOKE %s ON %s FROM %s;", privilegeClause, target, i.Grantee)
+	return fmt.Sprintf("REVOKE %s ON %s FROM %s;", privilegeClause, privilegeObject, i.Grantee)
 }
 
 func (i *MySQLRevokeInstruction) Comment() string {

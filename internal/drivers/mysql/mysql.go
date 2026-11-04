@@ -20,11 +20,11 @@ type MySQLDriverConfig struct {
 }
 
 type MySQLDriver struct {
-	TargetDatabaseConnection *sql.DB
-	SourceDatabaseConnection *sql.DB
-	ComparePrivileges        bool
-	ScratchServerVersion     string
-	IgnoreTables             []string
+	DesiredDatabaseConnection *sql.DB
+	CurrentDatabaseConnection *sql.DB
+	ComparePrivileges         bool
+	ScratchServerVersion      string
+	IgnoreTables              []string
 
 	scratchServer       *embeddedmysql.EmbeddedMySQL
 	scratchDatabases    []*mysqlScratchDatabase
@@ -79,50 +79,50 @@ func (d *MySQLDriver) registerConnection(ctx context.Context, db *sql.DB) error 
 	return nil
 }
 
-func (d *MySQLDriver) openSides(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource) (func(), error) {
+func (d *MySQLDriver) openSides(ctx context.Context, current driversshared.DataSource,
+	desired driversshared.DataSource) (func(), error) {
 	d.detailsByConnection = make(map[*sql.DB]*mysqlConnectionDetails)
 
-	targetDatabaseConnection, err := d.OpenSide(ctx, target, source, "desired")
+	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, current, "desired")
 	if err != nil {
 		_ = d.releaseScratchResources(ctx)
 		return nil, err
 	}
 
-	d.TargetDatabaseConnection = targetDatabaseConnection
+	d.DesiredDatabaseConnection = desiredDatabaseConnection
 
-	err = d.registerConnection(ctx, targetDatabaseConnection)
+	err = d.registerConnection(ctx, desiredDatabaseConnection)
 	if err != nil {
-		_ = d.TargetDatabaseConnection.Close()
+		_ = d.DesiredDatabaseConnection.Close()
 		_ = d.releaseScratchResources(ctx)
 
 		return nil, err
 	}
 
-	sourceDatabaseConnection, err := d.OpenSide(ctx, source, target, "current")
+	currentDatabaseConnection, err := d.OpenSide(ctx, current, desired, "current")
 	if err != nil {
-		_ = d.TargetDatabaseConnection.Close()
+		_ = d.DesiredDatabaseConnection.Close()
 		_ = d.releaseScratchResources(ctx)
 
 		return nil, err
 	}
 
-	d.SourceDatabaseConnection = sourceDatabaseConnection
+	d.CurrentDatabaseConnection = currentDatabaseConnection
 
-	err = d.registerConnection(ctx, sourceDatabaseConnection)
+	err = d.registerConnection(ctx, currentDatabaseConnection)
 	if err != nil {
-		_ = d.TargetDatabaseConnection.Close()
-		_ = d.SourceDatabaseConnection.Close()
+		_ = d.DesiredDatabaseConnection.Close()
+		_ = d.CurrentDatabaseConnection.Close()
 		_ = d.releaseScratchResources(ctx)
 
 		return nil, err
 	}
 
 	return func() {
-		_ = d.TargetDatabaseConnection.Close()
-		_ = d.SourceDatabaseConnection.Close()
-		d.TargetDatabaseConnection = nil
-		d.SourceDatabaseConnection = nil
+		_ = d.DesiredDatabaseConnection.Close()
+		_ = d.CurrentDatabaseConnection.Close()
+		d.DesiredDatabaseConnection = nil
+		d.CurrentDatabaseConnection = nil
 		_ = d.releaseScratchResources(ctx)
 	}, nil
 }
@@ -152,21 +152,21 @@ func (d *MySQLDriver) releaseScratchResources(ctx context.Context) error {
 	return firstError
 }
 
-func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
-	target driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
-	release, err := d.openSides(ctx, source, target)
+func (d *MySQLDriver) Diff(ctx context.Context, current driversshared.DataSource,
+	desired driversshared.DataSource, options driversshared.DiffOptions) (driversshared.Instructions, error) {
+	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
 	}
 
 	defer release()
 
-	targetTables, err := d.GetTables(ctx, d.TargetDatabaseConnection)
+	desiredTables, err := d.GetTables(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceTables, err := d.GetTables(ctx, d.SourceDatabaseConnection)
+	currentTables, err := d.GetTables(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
 		// A column default can read a sequence, so the sequences come before the tables.
 		d.DiffSequences,
 		func(context.Context) ([]driversshared.Instruction, error) {
-			return d.DiffTables(targetTables, sourceTables)
+			return d.DiffTables(desiredTables, currentTables)
 		},
 		// A view can call a function, and MySQL checks the call at the creation of the view,
 		// so the routines come before the views.
@@ -190,7 +190,7 @@ func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
 
 	if options.CompareData {
 		steps = append(steps, func(ctx context.Context) ([]driversshared.Instruction, error) {
-			return d.DiffData(ctx, targetTables, sourceTables)
+			return d.DiffData(ctx, desiredTables, currentTables)
 		})
 	}
 
@@ -205,7 +205,7 @@ func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
 		instructions = append(instructions, stepInstructions...)
 	}
 
-	if needsForeignKeyChecksOff(targetTables, sourceTables) {
+	if needsForeignKeyChecksOff(desiredTables, currentTables) {
 		instructions = append([]driversshared.Instruction{&MySQLSetForeignKeyChecksInstruction{}}, instructions...)
 		instructions = append(instructions, &MySQLSetForeignKeyChecksInstruction{Enabled: true})
 	}
@@ -213,16 +213,16 @@ func (d *MySQLDriver) Diff(ctx context.Context, source driversshared.DataSource,
 	return instructions, nil
 }
 
-func (d *MySQLDriver) DiffTables(targetTables []*MySQLTable, sourceTables []*MySQLTable) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffByKey(targetTables, sourceTables, driversshared.DiffRules[*MySQLTable]{
+func (d *MySQLDriver) DiffTables(desiredTables []*MySQLTable, currentTables []*MySQLTable) ([]driversshared.Instruction, error) {
+	additions, removals, err := driversshared.DiffByKey(desiredTables, currentTables, driversshared.DiffRules[*MySQLTable]{
 		Key: func(table *MySQLTable) string {
 			return table.Name
 		},
 		Create: func(table *MySQLTable) []driversshared.Instruction {
 			return table.Instructions()
 		},
-		Change: func(target *MySQLTable, source *MySQLTable) ([]driversshared.Instruction, error) {
-			return target.DiffTable(source)
+		Change: func(desired *MySQLTable, current *MySQLTable) ([]driversshared.Instruction, error) {
+			return desired.DiffTable(current)
 		},
 		Drop: func(table *MySQLTable) []driversshared.Instruction {
 			return []driversshared.Instruction{&MySQLDropTableInstruction{
@@ -239,41 +239,41 @@ func (d *MySQLDriver) DiffTables(targetTables []*MySQLTable, sourceTables []*MyS
 
 // The creation order and the removal order of the tables read no dependency, so a foreign
 // key of a created table or of a dropped table needs the enforcement off.
-func needsForeignKeyChecksOff(targetTables []*MySQLTable, sourceTables []*MySQLTable) bool {
+func needsForeignKeyChecksOff(desiredTables []*MySQLTable, currentTables []*MySQLTable) bool {
 	tableByName := func(tables []*MySQLTable, name string) (*MySQLTable, bool) {
 		return lo.Find(tables, func(table *MySQLTable) bool {
 			return table.Name == name
 		})
 	}
 
-	for _, targetTable := range targetTables {
-		_, found := tableByName(sourceTables, targetTable.Name)
-		if !found && len(targetTable.ForeignKeys) > 0 {
+	for _, desiredTable := range desiredTables {
+		_, found := tableByName(currentTables, desiredTable.Name)
+		if !found && len(desiredTable.ForeignKeys) > 0 {
 			return true
 		}
 
 		// A kept table can gain a key to a table that another instruction creates later.
-		for _, foreignKey := range targetTable.ForeignKeys {
-			_, referencedExists := tableByName(sourceTables, foreignKey.ReferencedTable)
+		for _, foreignKey := range desiredTable.ForeignKeys {
+			_, referencedExists := tableByName(currentTables, foreignKey.ReferencedTable)
 			if !referencedExists {
 				return true
 			}
 		}
 	}
 
-	for _, sourceTable := range sourceTables {
-		_, found := tableByName(targetTables, sourceTable.Name)
+	for _, currentTable := range currentTables {
+		_, found := tableByName(desiredTables, currentTable.Name)
 		if found {
 			continue
 		}
 
-		if len(sourceTable.ForeignKeys) > 0 {
+		if len(currentTable.ForeignKeys) > 0 {
 			return true
 		}
 
-		referenced := lo.SomeBy(sourceTables, func(table *MySQLTable) bool {
+		referenced := lo.SomeBy(currentTables, func(table *MySQLTable) bool {
 			return lo.SomeBy(table.ForeignKeys, func(foreignKey *MySQLForeignKey) bool {
-				return foreignKey.ReferencedTable == sourceTable.Name
+				return foreignKey.ReferencedTable == currentTable.Name
 			})
 		})
 		if referenced {
@@ -743,15 +743,15 @@ func (d *MySQLDriver) GetTableCheckConstraints(ctx context.Context, db *sql.DB, 
 }
 
 func (d *MySQLDriver) DiffViews(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetViews, driversshared.DiffRules[*MySQLView]{
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetViews, driversshared.DiffRules[*MySQLView]{
 		Key: func(view *MySQLView) string {
 			return view.Name
 		},
 		Create: func(view *MySQLView) []driversshared.Instruction {
 			return view.Instructions()
 		},
-		Change: func(target *MySQLView, source *MySQLView) ([]driversshared.Instruction, error) {
-			return target.Diff(source)
+		Change: func(desired *MySQLView, current *MySQLView) ([]driversshared.Instruction, error) {
+			return desired.Diff(current)
 		},
 		Drop: func(view *MySQLView) []driversshared.Instruction {
 			return []driversshared.Instruction{&MySQLDropViewInstruction{

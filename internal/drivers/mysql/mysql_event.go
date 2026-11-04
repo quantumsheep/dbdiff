@@ -24,13 +24,13 @@ func (e *MySQLEvent) CreateInstruction() *MySQLCreateEventInstruction {
 }
 
 func (d *MySQLDriver) DiffEvents(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetEvents,
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetEvents,
 		driversshared.ReplaceRules(
 			func(event *MySQLEvent) string {
 				return event.Name
 			},
-			func(target *MySQLEvent, source *MySQLEvent) bool {
-				return stripStartsClause(target.Definition) == stripStartsClause(source.Definition)
+			func(desired *MySQLEvent, current *MySQLEvent) bool {
+				return stripStartsClause(desired.Definition) == stripStartsClause(current.Definition)
 			},
 			func(event *MySQLEvent) driversshared.Instruction {
 				return event.CreateInstruction()

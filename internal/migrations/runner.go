@@ -122,7 +122,7 @@ func (r *Runner) PreviewInTransaction(ctx context.Context) error {
 	}
 
 	if !r.Migrator.SupportsTransactionalDDL() {
-		return fmt.Errorf("the target engine commits every DDL statement at once, so preview cannot roll the pending files back")
+		return fmt.Errorf("the database engine commits every DDL statement at once, so preview cannot roll the pending files back")
 	}
 
 	transaction, err := r.Migrator.Begin(ctx)
@@ -530,8 +530,8 @@ func (r *Runner) applyOneWithoutTransaction(ctx context.Context, entry *Entry, c
 }
 
 // Verify compares the database against a replay of the applied files. The diff function
-// reads the replay directory as its target, and it returns the instructions that make the
-// database equal to the replay.
+// reads the replay directory as the desired schema. It returns the instructions that
+// make the database equal to the replay.
 func (r *Runner) Verify(ctx context.Context,
 	diff func(ctx context.Context, replay driversshared.DataSource) (driversshared.Instructions, error)) error {
 	err := r.Set.RecordError()

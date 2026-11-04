@@ -82,14 +82,14 @@ type mysqlScratchDatabase struct {
 	name         string
 }
 
-func (d *MySQLDriver) OpenSide(ctx context.Context, source driversshared.DataSource,
+func (d *MySQLDriver) OpenSide(ctx context.Context, dataSource driversshared.DataSource,
 	otherSource driversshared.DataSource, role string) (*sql.DB, error) {
-	connectionSource, isConnectionString := source.(driversshared.ConnectionStringDataSource)
+	connectionSource, isConnectionString := dataSource.(driversshared.ConnectionStringDataSource)
 	if isConnectionString {
 		return OpenMySQLConnection(connectionSource.ConnectionString)
 	}
 
-	path, _ := driversshared.SQLSourcePath(source)
+	path, _ := driversshared.SQLSourcePath(dataSource)
 
 	sqlSource, err := driversshared.NewSQLSource(path)
 	if err != nil {

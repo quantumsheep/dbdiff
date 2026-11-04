@@ -17,8 +17,8 @@ func TestInstructionComments(t *testing.T) {
 
 	t.Run("InsertSelect", func(t *testing.T) {
 		instruction := &SQLInsertSelectInstruction{
-			TableName:       "_users_temp",
-			SourceTableName: "users",
+			TableName:        "_users_temp",
+			CurrentTableName: "users",
 		}
 
 		require.Equal(t, `Change the rows of the table "_users_temp"`, instruction.Comment())

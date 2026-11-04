@@ -63,10 +63,10 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 	}
 }
 
-func NewMigrator(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
+func NewMigrator(ctx context.Context, driverName driversshared.DriverName, desired driversshared.ConnectionStringDataSource,
 	schema string) (internalmigrations.Migrator, error) {
 	if driverName == "" {
-		detected, err := driversshared.DetectDriverOfDatabase(target)
+		detected, err := driversshared.DetectDriverOfDatabase(desired)
 		if err != nil {
 			return nil, err
 		}
@@ -76,11 +76,11 @@ func NewMigrator(ctx context.Context, driverName driversshared.DriverName, targe
 
 	switch driverName {
 	case driversshared.SQLiteDriverName:
-		return driverssqlite.NewSQLiteMigrator(target.ConnectionString)
+		return driverssqlite.NewSQLiteMigrator(desired.ConnectionString)
 	case driversshared.PostgresDriverName:
-		return driverspostgres.NewPostgresMigrator(ctx, target.ConnectionString, schema)
+		return driverspostgres.NewPostgresMigrator(ctx, desired.ConnectionString, schema)
 	case driversshared.MySQLDriverName:
-		return driversmysql.NewMySQLMigrator(ctx, target.ConnectionString)
+		return driversmysql.NewMySQLMigrator(ctx, desired.ConnectionString)
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)
 	}
@@ -100,9 +100,9 @@ func (openDatabaseError *OpenDatabaseError) Unwrap() error {
 	return openDatabaseError.Err
 }
 
-func OpenMigrationSet(ctx context.Context, driverName driversshared.DriverName, target driversshared.ConnectionStringDataSource,
+func OpenMigrationSet(ctx context.Context, driverName driversshared.DriverName, desired driversshared.ConnectionStringDataSource,
 	schema string, directory string) (internalmigrations.Migrator, *internalmigrations.Set, error) {
-	migrator, err := NewMigrator(ctx, driverName, target, schema)
+	migrator, err := NewMigrator(ctx, driverName, desired, schema)
 	if err != nil {
 		return nil, nil, &OpenDatabaseError{
 			Err: err,

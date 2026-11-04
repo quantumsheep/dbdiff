@@ -51,8 +51,8 @@ func DetectDriverOfDatabase(database DataSource) (DriverName, error) {
 
 // dataSourceArgument names the value that the user gave for a data source, so the
 // detection error can name what defeated it.
-func dataSourceArgument(source DataSource) string {
-	switch value := source.(type) {
+func dataSourceArgument(dataSource DataSource) string {
+	switch value := dataSource.(type) {
 	case FileDataSource:
 		return value.Path
 	case FolderDataSource:
@@ -64,8 +64,8 @@ func dataSourceArgument(source DataSource) string {
 	}
 }
 
-func detectDriverOfDataSource(source DataSource) DriverName {
-	connection, ok := source.(ConnectionStringDataSource)
+func detectDriverOfDataSource(dataSource DataSource) DriverName {
+	connection, ok := dataSource.(ConnectionStringDataSource)
 	if !ok {
 		return ""
 	}

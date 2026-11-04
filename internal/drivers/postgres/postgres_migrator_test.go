@@ -355,11 +355,11 @@ func TestPostgresMigrator(t *testing.T) {
 
 		require.NoError(t, runner.Up(t.Context(), ""))
 
-		sourceConnectionString := fmt.Sprintf("%s&search_path=%s", postgresTestConnectionString, migrator.schema)
+		currentConnectionString := fmt.Sprintf("%s&search_path=%s", postgresTestConnectionString, migrator.schema)
 
 		driver := NewPostgresDriver(&PostgresDriverConfig{})
 
-		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(sourceConnectionString),
+		instructions, err := driver.Diff(t.Context(), driversshared.ParseDataSource(currentConnectionString),
 			driversshared.ParseDataSource(schemaFile), driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)

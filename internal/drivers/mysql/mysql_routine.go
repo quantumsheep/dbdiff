@@ -27,13 +27,13 @@ func (r *MySQLRoutine) CreateInstruction() *MySQLCreateRoutineInstruction {
 }
 
 func (d *MySQLDriver) DiffRoutines(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetRoutines,
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetRoutines,
 		driversshared.ReplaceRules(
 			func(routine *MySQLRoutine) string {
 				return routine.Type + " " + routine.Name
 			},
-			func(target *MySQLRoutine, source *MySQLRoutine) bool {
-				return target.Definition == source.Definition
+			func(desired *MySQLRoutine, current *MySQLRoutine) bool {
+				return desired.Definition == current.Definition
 			},
 			func(routine *MySQLRoutine) driversshared.Instruction {
 				return routine.CreateInstruction()

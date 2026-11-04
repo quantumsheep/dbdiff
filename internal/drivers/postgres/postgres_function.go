@@ -62,12 +62,12 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
 
-	targetFunctions, err := d.GetFunctions(ctx, d.TargetDatabaseConnection)
+	desiredFunctions, err := d.GetFunctions(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceFunctions, err := d.GetFunctions(ctx, d.SourceDatabaseConnection)
+	currentFunctions, err := d.GetFunctions(ctx, d.CurrentDatabaseConnection)
 	if err != nil {
 		return nil, err
 	}
@@ -76,15 +76,15 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	// parameter stays one function. CREATE OR REPLACE FUNCTION covers a new function and
 	// a modified function. PostgreSQL refuses that statement when the return type or the
 	// name of a parameter changes.
-	for _, targetFunction := range targetFunctions {
-		sourceFunction, found := lo.Find(sourceFunctions, func(function *PostgresFunction) bool {
-			return function.MatchKey() == targetFunction.MatchKey()
+	for _, desiredFunction := range desiredFunctions {
+		currentFunction, found := lo.Find(currentFunctions, func(function *PostgresFunction) bool {
+			return function.MatchKey() == desiredFunction.MatchKey()
 		})
 		if !found {
-			additions = append(additions, targetFunction.CreateInstruction())
+			additions = append(additions, desiredFunction.CreateInstruction())
 
-			if targetFunction.Comment != "" {
-				additions = append(additions, targetFunction.CommentInstruction())
+			if desiredFunction.Comment != "" {
+				additions = append(additions, desiredFunction.CommentInstruction())
 			}
 
 			continue
@@ -93,28 +93,28 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 		// CREATE OR REPLACE keeps the comment, and only a DROP statement removes it.
 		dropped := false
 
-		if targetFunction.Def != sourceFunction.Def {
-			if targetFunction.ReturnType != sourceFunction.ReturnType ||
-				targetFunction.Arguments != sourceFunction.Arguments {
-				additions = append(additions, sourceFunction.DropInstruction())
+		if desiredFunction.Def != currentFunction.Def {
+			if desiredFunction.ReturnType != currentFunction.ReturnType ||
+				desiredFunction.Arguments != currentFunction.Arguments {
+				additions = append(additions, currentFunction.DropInstruction())
 				dropped = true
 			}
 
-			additions = append(additions, targetFunction.CreateInstruction())
+			additions = append(additions, desiredFunction.CreateInstruction())
 		}
 
-		if targetFunction.Comment != sourceFunction.Comment ||
-			(dropped && targetFunction.Comment != "") {
-			additions = append(additions, targetFunction.CommentInstruction())
+		if desiredFunction.Comment != currentFunction.Comment ||
+			(dropped && desiredFunction.Comment != "") {
+			additions = append(additions, desiredFunction.CommentInstruction())
 		}
 	}
 
-	for _, sourceFunction := range sourceFunctions {
-		_, found := lo.Find(targetFunctions, func(function *PostgresFunction) bool {
-			return function.MatchKey() == sourceFunction.MatchKey()
+	for _, currentFunction := range currentFunctions {
+		_, found := lo.Find(desiredFunctions, func(function *PostgresFunction) bool {
+			return function.MatchKey() == currentFunction.MatchKey()
 		})
 		if !found {
-			removals = append(removals, sourceFunction.DropInstruction())
+			removals = append(removals, currentFunction.DropInstruction())
 		}
 	}
 
@@ -125,8 +125,8 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 }
 
 func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*PostgresFunction, error) {
-	// The regexp_replace call removes the schema prefix of the header. The target schema
-	// and the source schema hold a different name, and the diff compares the two texts.
+	// The regexp_replace call removes the schema prefix of the header. The desired schema
+	// and the current schema hold a different name, and the diff compares the two texts.
 	// pg_get_function_result gives NULL for a procedure.
 	return driversshared.QueryAll(ctx, db, `
 		SELECT

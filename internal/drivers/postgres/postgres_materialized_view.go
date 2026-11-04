@@ -138,34 +138,34 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(ctx context.Context, db *sql
 	}, viewName)
 }
 
-func diffMaterializedViewIndexes(targetView *PostgresMaterializedView, sourceView *PostgresMaterializedView) []driversshared.Instruction {
+func diffMaterializedViewIndexes(desiredView *PostgresMaterializedView, currentView *PostgresMaterializedView) []driversshared.Instruction {
 	var instructions []driversshared.Instruction
 
-	for _, targetIndex := range targetView.Indexes {
-		sourceIndex, found := sourceView.IndexByName(targetIndex.Name)
+	for _, desiredIndex := range desiredView.Indexes {
+		currentIndex, found := currentView.IndexByName(desiredIndex.Name)
 		if !found {
-			instructions = append(instructions, targetIndex.Instructions()...)
+			instructions = append(instructions, desiredIndex.Instructions()...)
 			continue
 		}
 
-		if targetIndex.Def != sourceIndex.Def {
-			instructions = append(instructions, &driversshared.SQLDropIndexInstruction{Name: sourceIndex.Name})
-			instructions = append(instructions, targetIndex.Instructions()...)
+		if desiredIndex.Def != currentIndex.Def {
+			instructions = append(instructions, &driversshared.SQLDropIndexInstruction{Name: currentIndex.Name})
+			instructions = append(instructions, desiredIndex.Instructions()...)
 			continue
 		}
 
-		if targetIndex.Comment != sourceIndex.Comment {
+		if desiredIndex.Comment != currentIndex.Comment {
 			instructions = append(instructions, &PostgresCommentOnIndexInstruction{
-				Name: targetIndex.Name,
-				Text: targetIndex.Comment,
+				Name: desiredIndex.Name,
+				Text: desiredIndex.Comment,
 			})
 		}
 	}
 
-	for _, sourceIndex := range sourceView.Indexes {
-		_, found := targetView.IndexByName(sourceIndex.Name)
+	for _, currentIndex := range currentView.Indexes {
+		_, found := desiredView.IndexByName(currentIndex.Name)
 		if !found {
-			instructions = append(instructions, &driversshared.SQLDropIndexInstruction{Name: sourceIndex.Name})
+			instructions = append(instructions, &driversshared.SQLDropIndexInstruction{Name: currentIndex.Name})
 		}
 	}
 

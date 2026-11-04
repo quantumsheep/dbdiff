@@ -67,13 +67,13 @@ func (a *PostgresSetStorageAction) TableActionClause() string {
 }
 
 type PostgresSetStatisticsAction struct {
-	ColumnName string
-	Source     int64
+	ColumnName       string
+	StatisticsTarget int64
 }
 
 func (a *PostgresSetStatisticsAction) TableActionClause() string {
 	return fmt.Sprintf("ALTER COLUMN %s SET STATISTICS %d",
-		driversshared.QuoteIdentifier(a.ColumnName), a.Source)
+		driversshared.QuoteIdentifier(a.ColumnName), a.StatisticsTarget)
 }
 
 type PostgresSetNotNullAction struct {

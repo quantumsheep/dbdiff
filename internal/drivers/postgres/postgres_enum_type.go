@@ -56,8 +56,8 @@ func (t *PostgresEnumType) Diff(other *PostgresEnumType) []driversshared.Instruc
 		return append(instructions, t.Instructions()...)
 	}
 
-	lastSourceValue, _ := lo.Last(other.Values)
-	lastSourceIndex := slices.Index(t.Values, lastSourceValue)
+	lastCurrentValue, _ := lo.Last(other.Values)
+	lastCurrentIndex := slices.Index(t.Values, lastCurrentValue)
 
 	var instructions []driversshared.Instruction
 
@@ -71,8 +71,8 @@ func (t *PostgresEnumType) Diff(other *PostgresEnumType) []driversshared.Instruc
 			Value: value,
 		}
 
-		// A value after the last source value takes no position, so PostgreSQL adds it at the end.
-		if index < lastSourceIndex {
+		// A value after the last value of the current type takes no position, so PostgreSQL adds it at the end.
+		if index < lastCurrentIndex {
 			if index == 0 {
 				instruction.Before = other.Values[0]
 			} else {
@@ -102,11 +102,11 @@ func (d *PostgresDriver) DiffEnumTypes(ctx context.Context) (*SectionDiff, error
 		Create: func(enumType *PostgresEnumType) []driversshared.Instruction {
 			return enumType.Instructions()
 		},
-		Change: func(target *PostgresEnumType, source *PostgresEnumType) []driversshared.Instruction {
-			return target.Diff(source)
+		Change: func(desired *PostgresEnumType, current *PostgresEnumType) []driversshared.Instruction {
+			return desired.Diff(current)
 		},
-		Drop: func(source *PostgresEnumType) driversshared.Instruction {
-			return &PostgresDropTypeInstruction{Name: source.Name}
+		Drop: func(current *PostgresEnumType) driversshared.Instruction {
+			return &PostgresDropTypeInstruction{Name: current.Name}
 		},
 	})
 }

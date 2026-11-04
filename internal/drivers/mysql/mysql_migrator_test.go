@@ -266,7 +266,7 @@ func TestMySQLMigrator(t *testing.T) {
 
 		err := runner.PreviewInTransaction(t.Context())
 		require.EqualError(t, err,
-			"the target engine commits every DDL statement at once, so preview cannot roll the pending files back")
+			"the database engine commits every DDL statement at once, so preview cannot roll the pending files back")
 	})
 
 	t.Run("PreviewWithNoPendingFileReportsNoError", func(t *testing.T) {

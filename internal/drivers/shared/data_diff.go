@@ -29,21 +29,21 @@ type DataRules[Table any, Quoter IdentifierQuoter] struct {
 }
 
 // The schema section already creates or drops the other tables.
-func DiffData[Table any, Quoter IdentifierQuoter](ctx context.Context, targetDatabaseConnection *sql.DB, sourceDatabaseConnection *sql.DB,
-	targetTables []Table, sourceTables []Table, rules DataRules[Table, Quoter]) ([]Instruction, error) {
+func DiffData[Table any, Quoter IdentifierQuoter](ctx context.Context, desiredDatabaseConnection *sql.DB, currentDatabaseConnection *sql.DB,
+	desiredTables []Table, currentTables []Table, rules DataRules[Table, Quoter]) ([]Instruction, error) {
 	var instructions []Instruction
 	var removalsPerTable [][]Instruction
 
-	for _, targetTable := range targetTables {
-		if rules.SkipTable != nil && rules.SkipTable(targetTable) {
+	for _, desiredTable := range desiredTables {
+		if rules.SkipTable != nil && rules.SkipTable(desiredTable) {
 			continue
 		}
 
-		sourceTable, found := lo.Find(sourceTables, func(table Table) bool {
-			return rules.TableName(table) == rules.TableName(targetTable)
+		currentTable, found := lo.Find(currentTables, func(table Table) bool {
+			return rules.TableName(table) == rules.TableName(desiredTable)
 		})
 		if !found {
-			additions, err := tableDataInstructions(ctx, targetDatabaseConnection, targetTable, rules)
+			additions, err := tableDataInstructions(ctx, desiredDatabaseConnection, desiredTable, rules)
 			if err != nil {
 				return nil, err
 			}
@@ -53,8 +53,8 @@ func DiffData[Table any, Quoter IdentifierQuoter](ctx context.Context, targetDat
 			continue
 		}
 
-		additions, removals, err := diffTableData(ctx, targetDatabaseConnection, sourceDatabaseConnection,
-			targetTable, sourceTable, rules)
+		additions, removals, err := diffTableData(ctx, desiredDatabaseConnection, currentDatabaseConnection,
+			desiredTable, currentTable, rules)
 		if err != nil {
 			return nil, err
 		}
@@ -71,9 +71,9 @@ func DiffData[Table any, Quoter IdentifierQuoter](ctx context.Context, targetDat
 	return instructions, nil
 }
 
-func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, targetDatabaseConnection *sql.DB, sourceDatabaseConnection *sql.DB,
-	targetTable Table, sourceTable Table, rules DataRules[Table, Quoter]) ([]Instruction, []Instruction, error) {
-	primaryKeyColumnNames, err := rules.PrimaryKey(ctx, targetDatabaseConnection, targetTable)
+func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, desiredDatabaseConnection *sql.DB, currentDatabaseConnection *sql.DB,
+	desiredTable Table, currentTable Table, rules DataRules[Table, Quoter]) ([]Instruction, []Instruction, error) {
+	primaryKeyColumnNames, err := rules.PrimaryKey(ctx, desiredDatabaseConnection, desiredTable)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -81,42 +81,42 @@ func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, targ
 	if len(primaryKeyColumnNames) == 0 {
 		comment := &SQLCommentInstruction{
 			Text: fmt.Sprintf("The table %s holds no primary key, so dbdiff compares no row of it.",
-				QuoteIdentifier(rules.TableName(targetTable))),
+				QuoteIdentifier(rules.TableName(desiredTable))),
 		}
 
 		return []Instruction{comment}, nil, nil
 	}
 
-	targetColumnNames := rules.WritableColumns(targetTable)
-	sourceColumnNames := rules.WritableColumns(sourceTable)
+	desiredColumnNames := rules.WritableColumns(desiredTable)
+	currentColumnNames := rules.WritableColumns(currentTable)
 
-	sourceKeyColumnNames, err := rules.PrimaryKey(ctx, sourceDatabaseConnection, sourceTable)
+	currentKeyColumnNames, err := rules.PrimaryKey(ctx, currentDatabaseConnection, currentTable)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// A key of other columns matches zero source rows or several source rows, so the
+	// A key of other columns matches zero current rows or several current rows, so the
 	// comparison needs the same key on both sides.
-	holdsSameKey := slices.Equal(primaryKeyColumnNames, sourceKeyColumnNames)
+	holdsSameKey := slices.Equal(primaryKeyColumnNames, currentKeyColumnNames)
 	if !holdsSameKey {
 		comment := &SQLCommentInstruction{
-			Text: fmt.Sprintf("The table %s holds another primary key in the source, so dbdiff compares no row of it.",
-				QuoteIdentifier(rules.TableName(targetTable))),
+			Text: fmt.Sprintf("The table %s holds another primary key in the current schema, so dbdiff compares no row of it.",
+				QuoteIdentifier(rules.TableName(desiredTable))),
 		}
 
 		return []Instruction{comment}, nil, nil
 	}
 
-	commonColumnNames := lo.Filter(targetColumnNames, func(name string, _ int) bool {
-		return slices.Contains(sourceColumnNames, name)
+	commonColumnNames := lo.Filter(desiredColumnNames, func(name string, _ int) bool {
+		return slices.Contains(currentColumnNames, name)
 	})
 
-	targetData, err := getTableData(ctx, targetDatabaseConnection, targetTable, targetColumnNames, primaryKeyColumnNames, rules)
+	desiredData, err := getTableData(ctx, desiredDatabaseConnection, desiredTable, desiredColumnNames, primaryKeyColumnNames, rules)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sourceData, err := getTableData(ctx, sourceDatabaseConnection, sourceTable, commonColumnNames, primaryKeyColumnNames, rules)
+	currentData, err := getTableData(ctx, currentDatabaseConnection, currentTable, commonColumnNames, primaryKeyColumnNames, rules)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -125,12 +125,12 @@ func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, targ
 	var modifications []Instruction
 	var removals []Instruction
 
-	for _, key := range targetData.Keys {
-		targetRow := targetData.Rows[key]
+	for _, key := range desiredData.Keys {
+		desiredRow := desiredData.Rows[key]
 
-		sourceRow, found := sourceData.Rows[key]
+		currentRow, found := currentData.Rows[key]
 		if !found {
-			insertions = append(insertions, insertRowInstruction(rules, targetTable, targetColumnNames, targetRow))
+			insertions = append(insertions, insertRowInstruction(rules, desiredTable, desiredColumnNames, desiredRow))
 
 			continue
 		}
@@ -138,17 +138,17 @@ func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, targ
 		var setClauses []*SetClause[Quoter]
 
 		for _, name := range commonColumnNames {
-			if targetRow[name] == sourceRow[name] {
+			if desiredRow[name] == currentRow[name] {
 				continue
 			}
 
-			if rules.SkipUpdate != nil && rules.SkipUpdate(targetTable, name) {
+			if rules.SkipUpdate != nil && rules.SkipUpdate(desiredTable, name) {
 				continue
 			}
 
 			setClauses = append(setClauses, &SetClause[Quoter]{
 				ColumnName: name,
-				Expression: targetRow[name],
+				Expression: desiredRow[name],
 			})
 		}
 
@@ -157,21 +157,21 @@ func diffTableData[Table any, Quoter IdentifierQuoter](ctx context.Context, targ
 		}
 
 		modifications = append(modifications, &UpdateInstruction[Quoter]{
-			TableName:  rules.TableName(targetTable),
+			TableName:  rules.TableName(desiredTable),
 			SetClauses: setClauses,
-			Condition:  RowKeyCondition[Quoter](primaryKeyColumnNames, targetRow),
+			Condition:  RowKeyCondition[Quoter](primaryKeyColumnNames, desiredRow),
 		})
 	}
 
-	for _, key := range sourceData.Keys {
-		_, found := targetData.Rows[key]
+	for _, key := range currentData.Keys {
+		_, found := desiredData.Rows[key]
 		if found {
 			continue
 		}
 
 		removals = append(removals, &DeleteInstruction[Quoter]{
-			TableName: rules.TableName(sourceTable),
-			Condition: RowKeyCondition[Quoter](primaryKeyColumnNames, sourceData.Rows[key]),
+			TableName: rules.TableName(currentTable),
+			Condition: RowKeyCondition[Quoter](primaryKeyColumnNames, currentData.Rows[key]),
 		})
 	}
 
@@ -195,34 +195,34 @@ func insertRowInstruction[Table any, Quoter IdentifierQuoter](rules DataRules[Ta
 	}
 }
 
-// The schema section creates this table with no row, so every target row becomes an
+// The schema section creates this table with no row, so every desired row becomes an
 // INSERT statement.
-func tableDataInstructions[Table any, Quoter IdentifierQuoter](ctx context.Context, db *sql.DB, targetTable Table,
+func tableDataInstructions[Table any, Quoter IdentifierQuoter](ctx context.Context, db *sql.DB, desiredTable Table,
 	rules DataRules[Table, Quoter]) ([]Instruction, error) {
-	targetColumnNames := rules.WritableColumns(targetTable)
-	if len(targetColumnNames) == 0 {
+	desiredColumnNames := rules.WritableColumns(desiredTable)
+	if len(desiredColumnNames) == 0 {
 		return nil, nil
 	}
 
 	// An empty column list breaks the ORDER BY clause of the SELECT statement.
-	orderColumnNames, err := rules.PrimaryKey(ctx, db, targetTable)
+	orderColumnNames, err := rules.PrimaryKey(ctx, db, desiredTable)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(orderColumnNames) == 0 {
-		orderColumnNames = targetColumnNames
+		orderColumnNames = desiredColumnNames
 	}
 
-	targetData, err := getTableData(ctx, db, targetTable, targetColumnNames, orderColumnNames, rules)
+	desiredData, err := getTableData(ctx, db, desiredTable, desiredColumnNames, orderColumnNames, rules)
 	if err != nil {
 		return nil, err
 	}
 
 	var instructions []Instruction
 
-	for _, key := range targetData.Keys {
-		instructions = append(instructions, insertRowInstruction(rules, targetTable, targetColumnNames, targetData.Rows[key]))
+	for _, key := range desiredData.Keys {
+		instructions = append(instructions, insertRowInstruction(rules, desiredTable, desiredColumnNames, desiredData.Rows[key]))
 	}
 
 	return instructions, nil

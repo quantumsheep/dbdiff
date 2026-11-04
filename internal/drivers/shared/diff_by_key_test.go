@@ -14,23 +14,23 @@ func TestDiffByKey(t *testing.T) {
 		Key: func(object string) string {
 			return object[:1]
 		},
-		Create: func(target string) []Instruction {
+		Create: func(desired string) []Instruction {
 			return []Instruction{&SQLCommentInstruction{
-				Text: "create " + target,
+				Text: "create " + desired,
 			}}
 		},
-		Change: func(target string, source string) ([]Instruction, error) {
-			if target == source {
+		Change: func(desired string, current string) ([]Instruction, error) {
+			if desired == current {
 				return nil, nil
 			}
 
 			return []Instruction{&SQLCommentInstruction{
-				Text: "change " + target,
+				Text: "change " + desired,
 			}}, nil
 		},
-		Drop: func(source string) []Instruction {
+		Drop: func(current string) []Instruction {
 			return []Instruction{&SQLCommentInstruction{
-				Text: "drop " + source,
+				Text: "drop " + current,
 			}}
 		},
 	}
@@ -62,7 +62,7 @@ func TestDiffByKey(t *testing.T) {
 
 	t.Run("ChangeError", func(t *testing.T) {
 		failingRules := rules
-		failingRules.Change = func(target string, source string) ([]Instruction, error) {
+		failingRules.Change = func(desired string, current string) ([]Instruction, error) {
 			return nil, errors.New("change failed")
 		}
 
@@ -72,19 +72,19 @@ func TestDiffByKey(t *testing.T) {
 		require.Nil(t, removals)
 	})
 
-	targetDatabase := &sql.DB{}
-	sourceDatabase := &sql.DB{}
+	desiredDatabase := &sql.DB{}
+	currentDatabase := &sql.DB{}
 
 	t.Run("DiffSides", func(t *testing.T) {
 		get := func(_ context.Context, db *sql.DB) ([]string, error) {
-			if db == targetDatabase {
+			if db == desiredDatabase {
 				return []string{"a1", "b2"}, nil
 			}
 
 			return []string{"b2", "c3"}, nil
 		}
 
-		additions, removals, err := DiffSides(t.Context(), targetDatabase, sourceDatabase, get, rules)
+		additions, removals, err := DiffSides(t.Context(), desiredDatabase, currentDatabase, get, rules)
 		require.NoError(t, err)
 		require.Equal(t, []Instruction{
 			&SQLCommentInstruction{
@@ -100,14 +100,14 @@ func TestDiffByKey(t *testing.T) {
 
 	t.Run("DiffSidesGetError", func(t *testing.T) {
 		get := func(_ context.Context, db *sql.DB) ([]string, error) {
-			if db == sourceDatabase {
+			if db == currentDatabase {
 				return nil, errors.New("get failed")
 			}
 
 			return []string{"a1"}, nil
 		}
 
-		additions, removals, err := DiffSides(t.Context(), targetDatabase, sourceDatabase, get, rules)
+		additions, removals, err := DiffSides(t.Context(), desiredDatabase, currentDatabase, get, rules)
 		require.EqualError(t, err, "get failed")
 		require.Nil(t, additions)
 		require.Nil(t, removals)
@@ -116,17 +116,17 @@ func TestDiffByKey(t *testing.T) {
 	replaceKey := func(object string) string {
 		return object[:1]
 	}
-	replaceEqual := func(target string, source string) bool {
-		return target == source
+	replaceEqual := func(desired string, current string) bool {
+		return desired == current
 	}
-	replaceCreate := func(target string) Instruction {
+	replaceCreate := func(desired string) Instruction {
 		return &SQLCommentInstruction{
-			Text: "create " + target,
+			Text: "create " + desired,
 		}
 	}
-	replaceDrop := func(source string) Instruction {
+	replaceDrop := func(current string) Instruction {
 		return &SQLCommentInstruction{
-			Text: "drop " + source,
+			Text: "drop " + current,
 		}
 	}
 

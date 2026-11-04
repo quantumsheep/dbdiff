@@ -96,7 +96,7 @@ func TestInstructions(t *testing.T) {
 			TableName:         "_users_temp",
 			ColumnNames:       []string{"id", "email"},
 			SelectExpressions: []string{`"id"`, "NULL"},
-			SourceTableName:   "users",
+			CurrentTableName:  "users",
 		}
 
 		require.Equal(t,
