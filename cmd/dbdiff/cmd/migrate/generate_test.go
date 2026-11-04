@@ -83,13 +83,17 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
 		migrations := filepath.Join(directory, "migrations")
+		absentPath := filepath.Join(directory, "absent.yaml")
+
+		// The text of the error depends on the operating system.
+		_, readError := os.ReadFile(absentPath)
+		require.Error(t, readError)
 
 		result := clitest.Run(t, "migrate", "generate", "--driver", "sqlite3",
-			"--config", filepath.Join(directory, "absent.yaml"),
+			"--config", absentPath,
 			"--migrations", migrations, "--desired", filepath.Join(directory, "schema.sql"), "add_users")
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, fmt.Sprintf("dbdiff: failed to read the configuration file: open %s: no such file or directory\n",
-			filepath.Join(directory, "absent.yaml")), result.Stderr)
+		require.Equal(t, "dbdiff: failed to read the configuration file: "+readError.Error()+"\n", result.Stderr)
 
 		result = clitest.Run(t, "migrate", "generate", "--driver", "sqlite3",
 			"--migrations", migrations, "--desired", filepath.Join(directory, "schema.sql"), "add_users")

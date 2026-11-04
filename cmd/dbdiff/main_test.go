@@ -279,10 +279,14 @@ help:Shows a list of commands or help for one command
 	t.Run("ConfigFlagWithAPathThatDoesNotExist", func(t *testing.T) {
 		missingPath := filepath.Join(t.TempDir(), "missing.yaml")
 
+		// The text of the error depends on the operating system.
+		_, readError := os.ReadFile(missingPath)
+		require.Error(t, readError)
+
 		result := clitest.Run(t, "diff", "--config", missingPath, "current.sqlite", "desired.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: failed to read the configuration file: open "+missingPath+": no such file or directory\n", result.Stderr)
+		require.Equal(t, "dbdiff: failed to read the configuration file: "+readError.Error()+"\n", result.Stderr)
 	})
 
 	t.Run("CommentsFlag", func(t *testing.T) {
