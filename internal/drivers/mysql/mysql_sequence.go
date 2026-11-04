@@ -35,31 +35,23 @@ func (s *MySQLSequence) CreateInstruction() *MySQLCreateSequenceInstruction {
 }
 
 func (d *MySQLDriver) DiffSequences(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetSequences, driversshared.DiffRules[*MySQLSequence]{
-		Key: func(sequence *MySQLSequence) string {
-			return sequence.Name
-		},
-		Create: func(sequence *MySQLSequence) []driversshared.Instruction {
-			return []driversshared.Instruction{sequence.CreateInstruction()}
-		},
-		Change: func(target *MySQLSequence, source *MySQLSequence) ([]driversshared.Instruction, error) {
-			if target.Equal(source) {
-				return nil, nil
-			}
-
-			return []driversshared.Instruction{
-				&MySQLDropSequenceInstruction{
-					Name: source.Name,
-				},
-				target.CreateInstruction(),
-			}, nil
-		},
-		Drop: func(sequence *MySQLSequence) []driversshared.Instruction {
-			return []driversshared.Instruction{&MySQLDropSequenceInstruction{
-				Name: sequence.Name,
-			}}
-		},
-	})
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetSequences,
+		driversshared.ReplaceRules(
+			func(sequence *MySQLSequence) string {
+				return sequence.Name
+			},
+			func(target *MySQLSequence, source *MySQLSequence) bool {
+				return target.Equal(source)
+			},
+			func(sequence *MySQLSequence) driversshared.Instruction {
+				return sequence.CreateInstruction()
+			},
+			func(sequence *MySQLSequence) driversshared.Instruction {
+				return &MySQLDropSequenceInstruction{
+					Name: sequence.Name,
+				}
+			},
+		))
 	if err != nil {
 		return nil, err
 	}

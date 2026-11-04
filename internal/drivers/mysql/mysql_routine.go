@@ -27,33 +27,24 @@ func (r *MySQLRoutine) CreateInstruction() *MySQLCreateRoutineInstruction {
 }
 
 func (d *MySQLDriver) DiffRoutines(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetRoutines, driversshared.DiffRules[*MySQLRoutine]{
-		Key: func(routine *MySQLRoutine) string {
-			return routine.Type + " " + routine.Name
-		},
-		Create: func(routine *MySQLRoutine) []driversshared.Instruction {
-			return []driversshared.Instruction{routine.CreateInstruction()}
-		},
-		Change: func(target *MySQLRoutine, source *MySQLRoutine) ([]driversshared.Instruction, error) {
-			if target.Definition == source.Definition {
-				return nil, nil
-			}
-
-			return []driversshared.Instruction{
-				&MySQLDropRoutineInstruction{
-					Type: source.Type,
-					Name: source.Name,
-				},
-				target.CreateInstruction(),
-			}, nil
-		},
-		Drop: func(routine *MySQLRoutine) []driversshared.Instruction {
-			return []driversshared.Instruction{&MySQLDropRoutineInstruction{
-				Type: routine.Type,
-				Name: routine.Name,
-			}}
-		},
-	})
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetRoutines,
+		driversshared.ReplaceRules(
+			func(routine *MySQLRoutine) string {
+				return routine.Type + " " + routine.Name
+			},
+			func(target *MySQLRoutine, source *MySQLRoutine) bool {
+				return target.Definition == source.Definition
+			},
+			func(routine *MySQLRoutine) driversshared.Instruction {
+				return routine.CreateInstruction()
+			},
+			func(routine *MySQLRoutine) driversshared.Instruction {
+				return &MySQLDropRoutineInstruction{
+					Type: routine.Type,
+					Name: routine.Name,
+				}
+			},
+		))
 	if err != nil {
 		return nil, err
 	}

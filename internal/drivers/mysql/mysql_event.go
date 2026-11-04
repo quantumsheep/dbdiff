@@ -24,31 +24,23 @@ func (e *MySQLEvent) CreateInstruction() *MySQLCreateEventInstruction {
 }
 
 func (d *MySQLDriver) DiffEvents(ctx context.Context) ([]driversshared.Instruction, error) {
-	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetEvents, driversshared.DiffRules[*MySQLEvent]{
-		Key: func(event *MySQLEvent) string {
-			return event.Name
-		},
-		Create: func(event *MySQLEvent) []driversshared.Instruction {
-			return []driversshared.Instruction{event.CreateInstruction()}
-		},
-		Change: func(target *MySQLEvent, source *MySQLEvent) ([]driversshared.Instruction, error) {
-			if stripStartsClause(target.Definition) == stripStartsClause(source.Definition) {
-				return nil, nil
-			}
-
-			return []driversshared.Instruction{
-				&MySQLDropEventInstruction{
-					Name: source.Name,
-				},
-				target.CreateInstruction(),
-			}, nil
-		},
-		Drop: func(event *MySQLEvent) []driversshared.Instruction {
-			return []driversshared.Instruction{&MySQLDropEventInstruction{
-				Name: event.Name,
-			}}
-		},
-	})
+	additions, removals, err := driversshared.DiffSides(ctx, d.TargetDatabaseConnection, d.SourceDatabaseConnection, d.GetEvents,
+		driversshared.ReplaceRules(
+			func(event *MySQLEvent) string {
+				return event.Name
+			},
+			func(target *MySQLEvent, source *MySQLEvent) bool {
+				return stripStartsClause(target.Definition) == stripStartsClause(source.Definition)
+			},
+			func(event *MySQLEvent) driversshared.Instruction {
+				return event.CreateInstruction()
+			},
+			func(event *MySQLEvent) driversshared.Instruction {
+				return &MySQLDropEventInstruction{
+					Name: event.Name,
+				}
+			},
+		))
 	if err != nil {
 		return nil, err
 	}
