@@ -22,6 +22,10 @@ func Command() *cli.Command {
 		Action:       action,
 		OnUsageError: helpers.OnUsageError,
 		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: helpers.ConfigFlagUsage,
+			},
 			&cli.BoolFlag{
 				Name:  "privileges",
 				Usage: "Compare the owner and the privileges of each object. A role belongs to the server, so this comparison is off by default",
@@ -66,7 +70,12 @@ func action(ctx context.Context, command *cli.Command) error {
 	current := driversshared.ParseDataSource(currentArgument)
 	desired := driversshared.ParseDataSource(desiredArgument)
 
-	driverName := driversshared.DriverName(command.String("driver"))
+	config, path, err := helpers.ReadConfigWithFlags(command)
+	if err != nil {
+		return err
+	}
+
+	driverName := config.Driver
 	if driverName == "" {
 		detected, err := helpers.DetectDriverName(current, desired)
 		if err != nil {
@@ -76,16 +85,16 @@ func action(ctx context.Context, command *cli.Command) error {
 		driverName = detected
 	}
 
-	err := helpers.CheckDriverSettings(driverName, command.String("schema"), command.String("server-version"), "")
+	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, path)
 	if err != nil {
 		return err
 	}
 
 	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
-		ServerVersion:     command.String("server-version"),
-		Schema:            command.String("schema"),
+		ServerVersion:     config.ServerVersion,
+		Schema:            config.Schema,
 		ComparePrivileges: command.Bool("privileges"),
-		IgnoreTables:      command.StringSlice("ignore-table"),
+		IgnoreTables:      config.IgnoreTables,
 	})
 	if err != nil {
 		return err

@@ -107,7 +107,7 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, "diff", "--server-version", "16", "current.sqlite", "desired.sqlite")
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: use the --server-version flag only with the postgres driver and the mysql driver\n", result.Stderr)
+		require.Equal(t, "dbdiff: use the --server-version flag and the key \"server-version\" of dbdiff.yaml only with the postgres driver and the mysql driver\n", result.Stderr)
 	})
 
 	t.Run("UnsupportedDriver", func(t *testing.T) {
@@ -125,7 +125,7 @@ func TestDbdiffCommand(t *testing.T) {
 		result := clitest.Run(t, "diff", "--schema", "public", currentPath, finalPath)
 
 		require.Equal(t, 1, result.ExitCode)
-		require.Equal(t, "dbdiff: use the --schema flag only with the postgres driver\n", result.Stderr)
+		require.Equal(t, "dbdiff: use the --schema flag and the key \"schema\" of dbdiff.yaml only with the postgres driver\n", result.Stderr)
 	})
 
 	t.Run("DiffTwoDatabases", func(t *testing.T) {
@@ -202,6 +202,70 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Equal(t, 0, result.ExitCode)
 		require.Empty(t, result.Stderr)
 		require.Equal(t, "\n", result.Stdout)
+	})
+
+	t.Run("IgnoreTableKeyOfConfigFile", func(t *testing.T) {
+		directory := t.TempDir()
+		currentPath := filepath.Join(directory, "current.sqlite")
+		finalPath := filepath.Join(directory, "final.sqlite")
+
+		clitest.WriteSQLiteDatabase(t, currentPath, "")
+		clitest.WriteSQLiteDatabase(t, finalPath, `CREATE TABLE example (id INTEGER PRIMARY KEY);`)
+
+		configPath := clitest.WriteMigrationConfig(t, directory, "ignore-table:\n  - example\nmigrations: ignored\n")
+
+		result := clitest.Run(t, "diff", "--config", configPath, currentPath, finalPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, "\n", result.Stdout)
+	})
+
+	t.Run("IgnoreTableFlagReplacesTheKeyOfConfigFile", func(t *testing.T) {
+		directory := t.TempDir()
+		currentPath := filepath.Join(directory, "current.sqlite")
+		finalPath := filepath.Join(directory, "final.sqlite")
+
+		clitest.WriteSQLiteDatabase(t, currentPath, "")
+		clitest.WriteSQLiteDatabase(t, finalPath, `CREATE TABLE example (id INTEGER PRIMARY KEY);CREATE TABLE other (id INTEGER PRIMARY KEY);`)
+
+		configPath := clitest.WriteMigrationConfig(t, directory, "ignore-table:\n  - example\n")
+
+		result := clitest.Run(t, "diff", "--config", configPath, "--ignore-table", "other", currentPath, finalPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Contains(t, result.Stdout, "CREATE TABLE \"example\"")
+		require.NotContains(t, result.Stdout, "CREATE TABLE \"other\"")
+	})
+
+	t.Run("DriverKeyOfConfigFileWithSchemaFlag", func(t *testing.T) {
+		directory := t.TempDir()
+		configPath := clitest.WriteMigrationConfig(t, directory, "driver: sqlite3\n")
+
+		result := clitest.Run(t, "diff", "--config", configPath, "--schema", "public", "current.sqlite", "desired.sqlite")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: use the --schema flag and the key \"schema\" of "+configPath+" only with the postgres driver\n", result.Stderr)
+	})
+
+	t.Run("ServerVersionKeyOfConfigFileWithSQLiteDriver", func(t *testing.T) {
+		directory := t.TempDir()
+		configPath := clitest.WriteMigrationConfig(t, directory, "driver: sqlite3\nserver-version: \"16\"\n")
+
+		result := clitest.Run(t, "diff", "--config", configPath, "current.sqlite", "desired.sqlite")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: use the --server-version flag and the key \"server-version\" of "+configPath+" only with the postgres driver and the mysql driver\n", result.Stderr)
+	})
+
+	t.Run("ConfigFlagWithAPathThatDoesNotExist", func(t *testing.T) {
+		missingPath := filepath.Join(t.TempDir(), "missing.yaml")
+
+		result := clitest.Run(t, "diff", "--config", missingPath, "current.sqlite", "desired.sqlite")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: failed to read the configuration file: open "+missingPath+": no such file or directory\n", result.Stderr)
 	})
 
 	t.Run("CommentsFlag", func(t *testing.T) {

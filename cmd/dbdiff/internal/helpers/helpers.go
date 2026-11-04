@@ -55,8 +55,7 @@ func nameTheDriverFlag(err error) error {
 	return fmt.Errorf("%w with the --driver flag", err)
 }
 
-// CheckDriverSettings refuses a setting that the driver does not read. An empty
-// configPath names only the flag, because the diff command reads no configuration file.
+// CheckDriverSettings refuses a setting that the driver does not read.
 func CheckDriverSettings(
 	driverName driversshared.DriverName,
 	schema string,
@@ -75,9 +74,5 @@ func CheckDriverSettings(
 }
 
 func settingName(name string, configPath string) string {
-	if configPath == "" {
-		return fmt.Sprintf("the --%s flag", name)
-	}
-
 	return fmt.Sprintf("the --%s flag and the key %q of %s", name, name, configPath)
 }

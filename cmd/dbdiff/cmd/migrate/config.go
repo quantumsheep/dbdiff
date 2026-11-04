@@ -13,41 +13,22 @@ import (
 )
 
 func migrationConfigFromCommand(command *cli.Command, requiredKey string) (*internalmigrations.Config, string, error) {
-	path := command.String("config")
-
-	optional := path == ""
-	if optional {
-		path = internalmigrations.DefaultConfigPath
-	}
-
-	config, err := internalmigrations.ReadConfig(path, optional)
+	config, path, err := helpers.ReadConfigWithFlags(command)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to read the configuration file: %w", err)
-	}
-
-	driverName := command.String("driver")
-	if driverName != "" {
-		config.Driver = driversshared.DriverName(driverName)
+		return nil, "", err
 	}
 
 	overrides := map[string]*string{
-		"migrations":     &config.Migrations,
-		"database":       &config.Database,
-		"desired":        &config.Desired,
-		"schema":         &config.Schema,
-		"server-version": &config.ServerVersion,
+		"migrations": &config.Migrations,
+		"database":   &config.Database,
+		"desired":    &config.Desired,
 	}
 
-	for flagName, value := range overrides {
+	for _, flagName := range []string{"migrations", "database", "desired"} {
 		flagValue := command.String(flagName)
 		if flagValue != "" {
-			*value = flagValue
+			*overrides[flagName] = flagValue
 		}
-	}
-
-	ignoreTables := command.StringSlice("ignore-table")
-	if len(ignoreTables) > 0 {
-		config.IgnoreTables = ignoreTables
 	}
 
 	requiredValues := []struct {
@@ -130,7 +111,7 @@ func migrationFlags(flags ...cli.Flag) []cli.Flag {
 	return append([]cli.Flag{
 		&cli.StringFlag{
 			Name:  "config",
-			Usage: "Path of the configuration file. The default is dbdiff.yaml of the working directory",
+			Usage: helpers.ConfigFlagUsage,
 		},
 		&cli.StringFlag{
 			Name:  "migrations",

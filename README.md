@@ -65,6 +65,7 @@ dbdiff diff postgres://localhost:5432/current postgres://localhost:5432/desired
 | `--comments`       | none                              | Print a comment before each change.                                                                         |
 | `--privileges`     | none                              | Compare the owners and the privileges (PostgreSQL and MySQL).                                               |
 | `--exit-code`      | none                              | If the schemas differ, exit with code 1.                                                                    |
+| `--config`         | A file path                       | Read this configuration file. The default is `dbdiff.yaml` in the working directory.                        |
 | `--ignore-table`   | A table name                      | Ignore this table. Repeat the flag for more tables.                                                         |
 | `--server-version` | A server version                  | Select the version of the temporary server. Only the postgres driver and the mysql driver accept this flag. |
 
@@ -111,6 +112,8 @@ dbdiff does not support MariaDB on Linux with arm64.
 ## Migrations
 
 `dbdiff migrate` reads `dbdiff.yaml` from the working directory. Each key has the name of its long flag. A flag overrides its key. The keys are `driver`, `migrations`, `desired`, `database`, `schema`, `server-version`, and `ignore-table`. `--config`, `--to`, and `--run` have no key.
+
+`dbdiff diff` also reads `dbdiff.yaml`. It uses only the keys `driver`, `schema`, `server-version`, and `ignore-table`, and it ignores the other keys. Give the two schemas of `diff` as arguments.
 
 ```yaml
 driver: postgres
