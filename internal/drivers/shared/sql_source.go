@@ -8,7 +8,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
+
+// Two runs can share one scratch server, so the name of a temporary database holds the time.
+func ScratchDatabaseName(role string) string {
+	return fmt.Sprintf("dbdiff_%s_%d", role, time.Now().UnixNano())
+}
 
 type SQLSource struct {
 	Path  string

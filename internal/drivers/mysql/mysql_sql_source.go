@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/go-sql-driver/mysql"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -107,7 +106,7 @@ func (d *MySQLDriver) OpenSide(
 
 	scratch := &mysqlScratchDatabase{
 		serverConfig: serverConfig,
-		name:         fmt.Sprintf("dbdiff_%s_%d", role, time.Now().UnixNano()),
+		name:         driversshared.ScratchDatabaseName(role),
 	}
 
 	err = scratch.create(ctx)
@@ -136,6 +135,10 @@ func (d *MySQLDriver) scratchServerConfig(
 	ctx context.Context,
 	otherSource driversshared.DataSource,
 ) (*mysql.Config, error) {
+	if d.ScratchDatabase != "" {
+		return ParseMySQLConnectionString(d.ScratchDatabase)
+	}
+
 	flavor := embeddedmysql.MySQL
 	version := d.ScratchServerVersion
 

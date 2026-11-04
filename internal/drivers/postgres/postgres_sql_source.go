@@ -11,8 +11,11 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
@@ -255,17 +258,7 @@ func (d *PostgresDriver) OpenSide(
 		return nil, err
 	}
 
-	scratchServer, err := d.ScratchServer()
-	if err != nil {
-		return nil, err
-	}
-
-	databaseConnectionString, err := scratchServer.CreateDatabase(ctx, role)
-	if err != nil {
-		return nil, err
-	}
-
-	connection, err := OpenPostgresConnection(databaseConnectionString, schema)
+	connection, err := d.openScratchDatabase(ctx, schema, role)
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +270,82 @@ func (d *PostgresDriver) OpenSide(
 	}
 
 	return connection, nil
+}
+
+func (d *PostgresDriver) openScratchDatabase(ctx context.Context, schema string, role string) (*sql.DB, error) {
+	if d.ScratchDatabase == "" {
+		scratchServer, err := d.ScratchServer()
+		if err != nil {
+			return nil, err
+		}
+
+		databaseConnectionString, err := scratchServer.CreateDatabase(ctx, role)
+		if err != nil {
+			return nil, err
+		}
+
+		return OpenPostgresConnection(databaseConnectionString, schema)
+	}
+
+	connectionConfig, err := pgx.ParseConfig(d.ScratchDatabase)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the connection URL of the scratch database: %w", err)
+	}
+
+	name := driversshared.ScratchDatabaseName(role)
+
+	err = executeOnPostgresServer(ctx, d.ScratchDatabase, "CREATE DATABASE "+driversshared.QuoteIdentifier(name))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create the temporary database %q: %w", name, err)
+	}
+
+	d.scratchDatabaseNames = append(d.scratchDatabaseNames, name)
+
+	connectionConfig.Database = name
+
+	if schema != "" {
+		connectionConfig.RuntimeParams["search_path"] = driversshared.QuoteIdentifier(schema)
+	}
+
+	return stdlib.OpenDB(*connectionConfig), nil
+}
+
+func executeOnPostgresServer(ctx context.Context, connectionString string, statement string) error {
+	connection, err := sql.Open("pgx", connectionString)
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = connection.Close() }()
+
+	_, err = connection.ExecContext(ctx, statement)
+
+	return err
+}
+
+// If the context of the diff stops, the cleanup must still run. The time limit stops a
+// cleanup that waits for a server that does not answer.
+func (d *PostgresDriver) releaseScratchResources(ctx context.Context) error {
+	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
+	var firstError error
+
+	for _, name := range d.scratchDatabaseNames {
+		err := executeOnPostgresServer(cleanupContext, d.ScratchDatabase, "DROP DATABASE "+driversshared.QuoteIdentifier(name))
+		if err != nil && firstError == nil {
+			firstError = fmt.Errorf("failed to drop the temporary database %q: %w", name, err)
+		}
+	}
+
+	d.scratchDatabaseNames = nil
+
+	err := d.StopScratchServer()
+	if err != nil && firstError == nil {
+		firstError = err
+	}
+
+	return firstError
 }
 
 func (d *PostgresDriver) ScratchServer() (*PostgresScratchServer, error) {

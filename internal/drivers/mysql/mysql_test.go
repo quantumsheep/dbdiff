@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,6 +284,46 @@ func (d *TestingMySQLDriver) FetchAllFromCurrent(table string, additionalRules s
 	require.NoError(d.tb, rows.Err())
 
 	return results
+}
+
+// The diff runs two times. The first diff proves the instructions. The second diff keeps
+// the scratch database open, so the test can read its name and prove the drop.
+func requireDiffOnScratchDatabase(
+	t *testing.T,
+	serverConnectionString string,
+	scratchDatabase string,
+	expected driversshared.Instructions,
+) {
+	t.Helper()
+
+	directory := t.TempDir()
+	sqltest.WriteSQLFile(t, directory, "001_users.sql", `
+		CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
+		CREATE VIEW adult_users AS SELECT id FROM users WHERE age >= 18;
+	`)
+
+	driver := newTestMySQLDriverWithDesiredDirectory(t, serverConnectionString, directory)
+	driver.ScratchDatabase = scratchDatabase
+
+	driver.RequireDiffApplies(expected)
+
+	release, err := driver.openSides(t.Context(), driver.current, driver.desired)
+	require.NoError(t, err)
+
+	require.Len(t, driver.scratchDatabases, 1)
+
+	scratchDatabaseName := driver.scratchDatabases[0].name
+	require.True(t, strings.HasPrefix(scratchDatabaseName, "dbdiff_desired_"))
+	require.Nil(t, driver.scratchServer)
+
+	release()
+
+	var remainingDatabases int
+
+	err = driver.conn.QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?", scratchDatabaseName).Scan(&remainingDatabases)
+	require.NoError(t, err)
+	require.Equal(t, 0, remainingDatabases)
 }
 
 func TestMySQLDriver(t *testing.T) {
@@ -1382,6 +1423,31 @@ func TestMySQLDriver(t *testing.T) {
 		})
 	})
 
+	t.Run("SQLSourceAsDesiredOnAScratchDatabase", func(t *testing.T) {
+		requireDiffOnScratchDatabase(t, mysqlTestConnectionString, "mysql://root:password@localhost:3306/",
+			driversshared.Instructions{
+				&MySQLCreateTableInstruction{
+					Name: "users",
+					Columns: []*MySQLColumn{
+						{
+							Name:    "id",
+							Type:    "int",
+							NotNull: true,
+						},
+						{
+							Name: "age",
+							Type: "int",
+						},
+					},
+					PrimaryKey: []string{"id"},
+				},
+				&MySQLCreateViewInstruction{
+					Name:       "adult_users",
+					Definition: "select `users`.`id` AS `id` from `users` where (`users`.`age` >= 18)",
+				},
+			})
+	})
+
 	t.Run("TwoSQLSources", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary mysql server needs a download on the first run")
@@ -2155,6 +2221,31 @@ func TestMariaDBDriver(t *testing.T) {
 				Definition: "select `users`.`id` AS `id` from `users` where `users`.`age` >= 18",
 			},
 		})
+	})
+
+	t.Run("SQLSourceAsDesiredOnAScratchDatabase", func(t *testing.T) {
+		requireDiffOnScratchDatabase(t, mariadbTestConnectionString, "mariadb://root:password@localhost:3307/",
+			driversshared.Instructions{
+				&MySQLCreateTableInstruction{
+					Name: "users",
+					Columns: []*MySQLColumn{
+						{
+							Name:    "id",
+							Type:    "int(11)",
+							NotNull: true,
+						},
+						{
+							Name: "age",
+							Type: "int(11)",
+						},
+					},
+					PrimaryKey: []string{"id"},
+				},
+				&MySQLCreateViewInstruction{
+					Name:       "adult_users",
+					Definition: "select `users`.`id` AS `id` from `users` where `users`.`age` >= 18",
+				},
+			})
 	})
 
 	t.Run("IgnoredTable", func(t *testing.T) {

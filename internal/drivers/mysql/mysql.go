@@ -16,6 +16,7 @@ import (
 type MySQLDriverConfig struct {
 	ComparePrivileges    bool
 	ScratchServerVersion string
+	ScratchDatabase      string
 	IgnoreTables         []string
 }
 
@@ -24,6 +25,7 @@ type MySQLDriver struct {
 	CurrentDatabaseConnection *sql.DB
 	ComparePrivileges         bool
 	ScratchServerVersion      string
+	ScratchDatabase           string
 	IgnoreTables              []string
 
 	scratchServer       *embeddedmysql.EmbeddedMySQL
@@ -46,6 +48,7 @@ func NewMySQLDriver(config *MySQLDriverConfig) *MySQLDriver {
 	return &MySQLDriver{
 		ComparePrivileges:    config.ComparePrivileges,
 		ScratchServerVersion: config.ScratchServerVersion,
+		ScratchDatabase:      config.ScratchDatabase,
 		IgnoreTables:         config.IgnoreTables,
 	}
 }

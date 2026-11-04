@@ -117,6 +117,21 @@ func TestNewDriverAndDiff(t *testing.T) {
 		_, err := NewDriver(SQLiteDriverName, WithServerVersion("16"))
 		require.EqualError(t, err, "the server version option applies to the postgres driver and to the mysql driver")
 	})
+
+	t.Run("ScratchDatabaseOnTheSQLiteDriver", func(t *testing.T) {
+		_, err := NewDriver(SQLiteDriverName, WithScratchDatabase("postgres://localhost/scratch"))
+		require.EqualError(t, err, "the scratch database option applies to the postgres driver and to the mysql driver")
+	})
+
+	t.Run("ScratchDatabaseWithServerVersion", func(t *testing.T) {
+		_, err := NewDriver(PostgresDriverName, WithScratchDatabase("postgres://localhost/scratch"), WithServerVersion("17"))
+		require.EqualError(t, err, "the scratch database option and the server version option cannot go together, because dbdiff starts no temporary server for a scratch database")
+	})
+
+	t.Run("ScratchDatabaseOfAnotherEngine", func(t *testing.T) {
+		_, err := NewDriver(MySQLDriverName, WithScratchDatabase("postgres://localhost/scratch"))
+		require.EqualError(t, err, "the scratch database must be a connection URL of the mysql driver")
+	})
 }
 
 func TestDetectDriver(t *testing.T) {

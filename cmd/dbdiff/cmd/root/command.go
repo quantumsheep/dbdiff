@@ -46,6 +46,10 @@ func Command() *cli.Command {
 				Name:  "server-version",
 				Usage: "Version of the temporary server that runs the SQL files. The postgres driver and the mysql driver accept this flag",
 			},
+			&cli.StringFlag{
+				Name:  "scratch-database",
+				Usage: "Connection URL of an existing server that runs the SQL files instead of a temporary server. dbdiff creates its temporary databases on this server and drops them at the end. The user of the URL must have the privilege to create and drop a database. The postgres driver and the mysql driver accept this flag",
+			},
 			&cli.StringSliceFlag{
 				Name:  "ignore-table",
 				Usage: "Name of a table that the diff ignores. Repeat the flag for each table",

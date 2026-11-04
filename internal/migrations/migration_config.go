@@ -17,13 +17,14 @@ const DefaultConfigPath = "dbdiff.yaml"
 
 // The yaml tags must stay equal to the long flag names of the CLI.
 type Config struct {
-	Driver        driversshared.DriverName `yaml:"driver"`
-	Migrations    string                   `yaml:"migrations"`
-	Database      string                   `yaml:"database"`
-	Desired       string                   `yaml:"desired"`
-	Schema        string                   `yaml:"schema"`
-	ServerVersion string                   `yaml:"server-version"`
-	IgnoreTables  []string                 `yaml:"ignore-table"`
+	Driver          driversshared.DriverName `yaml:"driver"`
+	Migrations      string                   `yaml:"migrations"`
+	Database        string                   `yaml:"database"`
+	Desired         string                   `yaml:"desired"`
+	Schema          string                   `yaml:"schema"`
+	ServerVersion   string                   `yaml:"server-version"`
+	ScratchDatabase string                   `yaml:"scratch-database"`
+	IgnoreTables    []string                 `yaml:"ignore-table"`
 }
 
 var removedConfigKeys = map[string]string{
@@ -119,6 +120,10 @@ func expandConfigVariables(config *Config, path string) error {
 		{
 			key:   "server-version",
 			value: &config.ServerVersion,
+		},
+		{
+			key:   "scratch-database",
+			value: &config.ScratchDatabase,
 		},
 	}
 

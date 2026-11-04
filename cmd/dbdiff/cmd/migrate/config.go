@@ -88,7 +88,7 @@ func openSet(
 		driverName = detected
 	}
 
-	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, path)
+	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, config.ScratchDatabase, path)
 	if err != nil {
 		return nil, nil, nil, err
 	}

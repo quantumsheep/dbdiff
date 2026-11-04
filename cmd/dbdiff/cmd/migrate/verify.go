@@ -31,7 +31,7 @@ func verifyAction(
 	return runner.Verify(ctx, func(ctx context.Context, replay driversshared.DataSource) (driversshared.Instructions, error) {
 		driverName := config.Driver
 		if driverName == "" {
-			detected, err := helpers.DetectDriverName(database, replay)
+			detected, err := helpers.DetectDriverName(database, replay, config.ScratchDatabase)
 			if err != nil {
 				return nil, err
 			}
@@ -40,9 +40,10 @@ func verifyAction(
 		}
 
 		driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
-			ServerVersion: config.ServerVersion,
-			Schema:        config.Schema,
-			IgnoreTables:  config.IgnoreTables,
+			ServerVersion:   config.ServerVersion,
+			ScratchDatabase: config.ScratchDatabase,
+			Schema:          config.Schema,
+			IgnoreTables:    config.IgnoreTables,
 		})
 		if err != nil {
 			return nil, err

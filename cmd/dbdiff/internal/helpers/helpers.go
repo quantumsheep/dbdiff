@@ -29,12 +29,23 @@ func OnUsageError(ctx context.Context, command *cli.Command, err error, isSubcom
 	return err
 }
 
-// DetectDriverName names the engine of two data sources. The error of the detection
-// names no CLI flag, so this wrap names the flag that gives the driver.
+// DetectDriverName names the engine of two data sources. If the two sides hold SQL text,
+// the scratch database names the engine. The error of the detection names no CLI flag, so
+// this wrap names the flag that gives the driver.
 func DetectDriverName(
 	current driversshared.DataSource,
 	desired driversshared.DataSource,
+	scratchDatabase string,
 ) (driversshared.DriverName, error) {
+	if scratchDatabase != "" && driversshared.IsSQLSource(current) && driversshared.IsSQLSource(desired) {
+		scratchDriverName, err := driversshared.DetectDriverOfDatabase(driversshared.ConnectionStringDataSource{
+			ConnectionString: scratchDatabase,
+		})
+		if err == nil {
+			return scratchDriverName, nil
+		}
+	}
+
 	driverName, err := driversshared.DetectDriver(current, desired)
 
 	return driverName, nameTheDriverFlag(err)
@@ -60,6 +71,7 @@ func CheckDriverSettings(
 	driverName driversshared.DriverName,
 	schema string,
 	serverVersion string,
+	scratchDatabase string,
 	configPath string,
 ) error {
 	if schema != "" && driverName != driversshared.PostgresDriverName {
@@ -68,6 +80,15 @@ func CheckDriverSettings(
 
 	if serverVersion != "" && driverName == driversshared.SQLiteDriverName {
 		return fmt.Errorf("use %s only with the postgres driver and the mysql driver", settingName("server-version", configPath))
+	}
+
+	if scratchDatabase != "" && driverName == driversshared.SQLiteDriverName {
+		return fmt.Errorf("use %s only with the postgres driver and the mysql driver", settingName("scratch-database", configPath))
+	}
+
+	if scratchDatabase != "" && serverVersion != "" {
+		return fmt.Errorf("do not use %s together with %s. dbdiff starts no temporary server when a scratch database is set",
+			settingName("scratch-database", configPath), settingName("server-version", configPath))
 	}
 
 	return nil

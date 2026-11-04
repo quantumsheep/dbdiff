@@ -13,6 +13,7 @@ import (
 
 type DriverOptions struct {
 	ServerVersion     string
+	ScratchDatabase   string
 	Schema            string
 	ComparePrivileges bool
 	IgnoreTables      []string
@@ -33,6 +34,10 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 			return nil, fmt.Errorf("the server version option applies to the postgres driver and to the mysql driver")
 		}
 
+		if options.ScratchDatabase != "" {
+			return nil, fmt.Errorf("the scratch database option applies to the postgres driver and to the mysql driver")
+		}
+
 		return driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{
 			IgnoreTables: options.IgnoreTables,
 		}), nil
@@ -41,9 +46,15 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 			return nil, fmt.Errorf("the schema option applies to the postgres driver only")
 		}
 
+		err := validateScratchDatabase(driverName, options)
+		if err != nil {
+			return nil, err
+		}
+
 		return driversmysql.NewMySQLDriver(&driversmysql.MySQLDriverConfig{
 			ComparePrivileges:    options.ComparePrivileges,
 			ScratchServerVersion: options.ServerVersion,
+			ScratchDatabase:      options.ScratchDatabase,
 			IgnoreTables:         options.IgnoreTables,
 		}), nil
 	case driversshared.PostgresDriverName:
@@ -52,15 +63,40 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 			return nil, err
 		}
 
+		err = validateScratchDatabase(driverName, options)
+		if err != nil {
+			return nil, err
+		}
+
 		return driverspostgres.NewPostgresDriver(&driverspostgres.PostgresDriverConfig{
 			Schema:               options.Schema,
 			ComparePrivileges:    options.ComparePrivileges,
 			ScratchServerVersion: options.ServerVersion,
+			ScratchDatabase:      options.ScratchDatabase,
 			IgnoreTables:         options.IgnoreTables,
 		}), nil
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)
 	}
+}
+
+func validateScratchDatabase(driverName driversshared.DriverName, options DriverOptions) error {
+	if options.ScratchDatabase == "" {
+		return nil
+	}
+
+	if options.ServerVersion != "" {
+		return fmt.Errorf("the scratch database option and the server version option cannot go together, because dbdiff starts no temporary server for a scratch database")
+	}
+
+	scratchDriverName, err := driversshared.DetectDriverOfDatabase(driversshared.ConnectionStringDataSource{
+		ConnectionString: options.ScratchDatabase,
+	})
+	if err != nil || scratchDriverName != driverName {
+		return fmt.Errorf("the scratch database must be a connection URL of the %s driver", driverName)
+	}
+
+	return nil
 }
 
 func NewMigrator(

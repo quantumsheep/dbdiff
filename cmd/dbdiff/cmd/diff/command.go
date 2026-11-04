@@ -77,7 +77,7 @@ func action(ctx context.Context, command *cli.Command) error {
 
 	driverName := config.Driver
 	if driverName == "" {
-		detected, err := helpers.DetectDriverName(current, desired)
+		detected, err := helpers.DetectDriverName(current, desired, config.ScratchDatabase)
 		if err != nil {
 			return err
 		}
@@ -85,13 +85,14 @@ func action(ctx context.Context, command *cli.Command) error {
 		driverName = detected
 	}
 
-	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, path)
+	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, config.ScratchDatabase, path)
 	if err != nil {
 		return err
 	}
 
 	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
 		ServerVersion:     config.ServerVersion,
+		ScratchDatabase:   config.ScratchDatabase,
 		Schema:            config.Schema,
 		ComparePrivileges: command.Bool("privileges"),
 		IgnoreTables:      config.IgnoreTables,

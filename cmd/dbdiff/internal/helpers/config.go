@@ -11,7 +11,7 @@ import (
 const ConfigFlagUsage = "Path of the configuration file. The default is dbdiff.yaml of the working directory"
 
 // ReadConfigWithFlags reads the configuration file and lets the flags driver, schema,
-// server-version, and ignore-table replace their keys.
+// server-version, scratch-database, and ignore-table replace their keys.
 func ReadConfigWithFlags(command *cli.Command) (*internalmigrations.Config, string, error) {
 	path := command.String("config")
 
@@ -38,6 +38,11 @@ func ReadConfigWithFlags(command *cli.Command) (*internalmigrations.Config, stri
 	serverVersion := command.String("server-version")
 	if serverVersion != "" {
 		config.ServerVersion = serverVersion
+	}
+
+	scratchDatabase := command.String("scratch-database")
+	if scratchDatabase != "" {
+		config.ScratchDatabase = scratchDatabase
 	}
 
 	ignoreTables := command.StringSlice("ignore-table")

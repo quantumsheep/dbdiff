@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -5343,6 +5344,62 @@ func TestPostgresDriver(t *testing.T) {
 		}, instructions)
 
 		harness.ExecOnCurrent(instructions.String())
+	})
+
+	t.Run("SQLFileDesiredOnAScratchDatabase", func(t *testing.T) {
+		harness := NewTestPostgresDriver(t)
+		harness.ExecOnCurrent(`CREATE TABLE users (id INT NOT NULL);`)
+
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "schema.sql", `
+			CREATE TABLE users (id INT NOT NULL, name TEXT);
+			CREATE VIEW user_names AS SELECT name FROM users;
+		`)
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{
+			ScratchDatabase: postgresTestConnectionString,
+		})
+
+		current := harness.current
+		desired := driversshared.ParseDataSource(desiredPath)
+
+		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+
+		require.Equal(t, driversshared.Instructions{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "name",
+							Type: "text",
+						},
+					},
+				},
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "user_names",
+				Query: " SELECT name\n   FROM users;",
+			},
+		}, instructions)
+
+		harness.ExecOnCurrent(instructions.String())
+
+		release, err := driver.openSides(t.Context(), current, desired)
+		require.NoError(t, err)
+
+		scratchDatabaseNames := slices.Clone(driver.scratchDatabaseNames)
+		require.Len(t, scratchDatabaseNames, 1)
+		require.True(t, strings.HasPrefix(scratchDatabaseNames[0], "dbdiff_desired_"))
+
+		release()
+
+		var remainingDatabases int
+
+		err = harness.conn.QueryRowContext(t.Context(),
+			"SELECT count(*) FROM pg_database WHERE datname = $1", scratchDatabaseNames[0]).Scan(&remainingDatabases)
+		require.NoError(t, err)
+		require.Equal(t, 0, remainingDatabases)
 	})
 
 	t.Run("HistoryTableStaysOutOfTheDiff", func(t *testing.T) {

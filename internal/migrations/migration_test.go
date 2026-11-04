@@ -126,18 +126,20 @@ func TestConfig(t *testing.T) {
 
 	t.Run("ReadEveryKey", func(t *testing.T) {
 		path := writeConfig(t, "driver: postgres\nmigrations: ./migrations\ndatabase: postgres://localhost/app\n"+
-			"desired: schema.sql\nschema: public\nserver-version: 17.11.0\nignore-table:\n  - example\n")
+			"desired: schema.sql\nschema: public\nserver-version: 17.11.0\nscratch-database: postgres://localhost/scratch\n"+
+			"ignore-table:\n  - example\n")
 
 		config, err := ReadConfig(path, false)
 		require.NoError(t, err)
 		require.Equal(t, &Config{
-			Driver:        driversshared.PostgresDriverName,
-			Migrations:    "./migrations",
-			Database:      "postgres://localhost/app",
-			Desired:       "schema.sql",
-			Schema:        "public",
-			ServerVersion: "17.11.0",
-			IgnoreTables:  []string{"example"},
+			Driver:          driversshared.PostgresDriverName,
+			Migrations:      "./migrations",
+			Database:        "postgres://localhost/app",
+			Desired:         "schema.sql",
+			Schema:          "public",
+			ServerVersion:   "17.11.0",
+			ScratchDatabase: "postgres://localhost/scratch",
+			IgnoreTables:    []string{"example"},
 		}, config)
 	})
 

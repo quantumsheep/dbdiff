@@ -16,6 +16,7 @@ type PostgresDriverConfig struct {
 	Schema               string
 	ComparePrivileges    bool
 	ScratchServerVersion string
+	ScratchDatabase      string
 	IgnoreTables         []string
 }
 
@@ -27,10 +28,12 @@ type PostgresDriver struct {
 	ComparePrivileges         bool
 	IgnoreTables              []string
 	ScratchServerVersion      string
+	ScratchDatabase           string
 
 	ScratchVersion embeddedpostgres.PostgresVersion
 
-	scratchServer *PostgresScratchServer
+	scratchServer        *PostgresScratchServer
+	scratchDatabaseNames []string
 
 	recreatedObjectNames map[string]bool
 }
@@ -42,6 +45,7 @@ func NewPostgresDriver(config *PostgresDriverConfig) *PostgresDriver {
 		ComparePrivileges:    config.ComparePrivileges,
 		IgnoreTables:         config.IgnoreTables,
 		ScratchServerVersion: config.ScratchServerVersion,
+		ScratchDatabase:      config.ScratchDatabase,
 	}
 }
 
@@ -169,11 +173,13 @@ func (d *PostgresDriver) openSides(
 	current driversshared.DataSource,
 	desired driversshared.DataSource,
 ) (func(), error) {
-	d.ScratchVersion = d.scratchVersionOfSources(ctx, current, desired)
+	if d.ScratchDatabase == "" {
+		d.ScratchVersion = d.scratchVersionOfSources(ctx, current, desired)
+	}
 
 	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, d.DesiredSchema, "desired")
 	if err != nil {
-		_ = d.StopScratchServer()
+		_ = d.releaseScratchResources(ctx)
 		return nil, err
 	}
 
@@ -182,7 +188,7 @@ func (d *PostgresDriver) openSides(
 	currentDatabaseConnection, err := d.OpenSide(ctx, current, d.CurrentSchema, "current")
 	if err != nil {
 		_ = d.DesiredDatabaseConnection.Close()
-		_ = d.StopScratchServer()
+		_ = d.releaseScratchResources(ctx)
 
 		return nil, err
 	}
@@ -194,7 +200,7 @@ func (d *PostgresDriver) openSides(
 		_ = d.CurrentDatabaseConnection.Close()
 		d.DesiredDatabaseConnection = nil
 		d.CurrentDatabaseConnection = nil
-		_ = d.StopScratchServer()
+		_ = d.releaseScratchResources(ctx)
 	}, nil
 }
 

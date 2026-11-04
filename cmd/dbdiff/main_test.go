@@ -2,6 +2,7 @@ package main_test
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -388,6 +389,51 @@ CREATE TABLE "posts" (
 
 		require.Equal(t, 1, result.ExitCode)
 		require.Equal(t, "dbdiff: unknown postgres version \"8\"\n", result.Stderr)
+	})
+
+	t.Run("ScratchDatabaseFlagWithSQLiteDriver", func(t *testing.T) {
+		result := clitest.Run(t, "diff", "--scratch-database", "postgres://localhost/scratch", "current.sqlite", "desired.sqlite")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: use the --scratch-database flag and the key \"scratch-database\" of dbdiff.yaml only with the postgres driver and the mysql driver\n", result.Stderr)
+	})
+
+	t.Run("ScratchDatabaseFlagWithServerVersionFlag", func(t *testing.T) {
+		result := clitest.Run(t, "diff", "--driver", "postgres", "--server-version", "17",
+			"--scratch-database", "postgres://localhost/scratch", "current.sql", "desired.sql")
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: do not use the --scratch-database flag and the key \"scratch-database\" of dbdiff.yaml together with the --server-version flag and the key \"server-version\" of dbdiff.yaml. dbdiff starts no temporary server when a scratch database is set\n", result.Stderr)
+	})
+
+	t.Run("ScratchDatabaseFlagOfAnotherEngine", func(t *testing.T) {
+		currentPath := sqltest.WriteSQLFile(t, t.TempDir(), "current.sql", "")
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "desired.sql", "")
+
+		result := clitest.Run(t, "diff", "--driver", "mysql", "--scratch-database", "postgres://localhost/scratch", currentPath, desiredPath)
+
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, "dbdiff: the scratch database must be a connection URL of the mysql driver\n", result.Stderr)
+	})
+
+	t.Run("ScratchDatabaseKeyOfConfigFile", func(t *testing.T) {
+		if os.Getenv("DBDIFF_TEST_SKIP_POSTGRES") != "" {
+			t.Skip("DBDIFF_TEST_SKIP_POSTGRES stops the tests that need a PostgreSQL server")
+		}
+
+		t.Setenv("DBDIFF_TEST_SCRATCH_DATABASE", "postgres://user:password@localhost:5432/dbdiff?sslmode=disable")
+
+		directory := t.TempDir()
+		configPath := clitest.WriteMigrationConfig(t, directory, "scratch-database: ${DBDIFF_TEST_SCRATCH_DATABASE}\n")
+
+		currentPath := sqltest.WriteSQLFile(t, directory, "current.sql", "CREATE TABLE users (id INT NOT NULL);")
+		desiredPath := sqltest.WriteSQLFile(t, directory, "desired.sql", "CREATE TABLE users (id INT NOT NULL, name TEXT);")
+
+		result := clitest.Run(t, "diff", "--config", configPath, currentPath, desiredPath)
+
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, "ALTER TABLE \"users\" ADD COLUMN \"name\" text;\n", result.Stdout)
 	})
 
 	t.Run("SQLFileCurrentWithPostgresDriver", func(t *testing.T) {

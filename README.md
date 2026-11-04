@@ -78,6 +78,7 @@ dbdiff completion fish > ~/.config/fish/completions/dbdiff.fish   # fish
 | `--config`         | A file path                       | Read this configuration file. The default is `dbdiff.yaml` in the working directory.                        |
 | `--ignore-table`   | A table name                      | Ignore this table. Repeat the flag for more tables.                                                         |
 | `--server-version` | A server version                  | Select the version of the temporary server. Only the postgres driver and the mysql driver accept this flag. |
+| `--scratch-database` | A connection URL                | Run the SQL files on this server, not on a temporary server. Only the postgres driver and the mysql driver accept this flag. |
 
 ### Flags of `migrate`
 
@@ -93,6 +94,7 @@ dbdiff completion fish > ~/.config/fish/completions/dbdiff.fish   # fish
 | `--driver`         | `sqlite3`, `postgres`, or `mysql`               | Select the engine. dbdiff detects it from the arguments by default.                                         |
 | `--schema`         | A schema name                                   | Select the PostgreSQL schema. The default is the search path. Only the postgres driver accepts this flag.   |
 | `--server-version` | A server version                                | Select the version of the temporary server. Only the postgres driver and the mysql driver accept this flag. |
+| `--scratch-database` | A connection URL                              | Run the SQL files on this server, not on a temporary server. Only the postgres driver and the mysql driver accept this flag. |
 | `--ignore-table`   | A table name                                    | Ignore this table. Repeat the flag for more tables.                                                         |
 
 ## SQL files
@@ -100,6 +102,16 @@ dbdiff completion fish > ~/.config/fish/completions/dbdiff.fish   # fish
 dbdiff runs a `.sql` file, or the `.sql` files of a directory in name order, in a temporary database. For PostgreSQL and MySQL, it downloads a temporary server on the first run, with the version of the other side. The `--server-version` flag sets another version.
 
 Each file runs in one transaction. If a file holds a statement that cannot run in a transaction, for example `CREATE INDEX CONCURRENTLY`, add the line `-- dbdiff:no-transaction` to the file.
+
+### Scratch database
+
+To use an existing server instead of a temporary server, give its connection URL with `--scratch-database`, or with the key `scratch-database`. dbdiff then downloads nothing and starts no server. For each SQL side, dbdiff creates a database with a name that starts with `dbdiff_`. At the end, dbdiff drops the database, also when the diff fails. The user of the URL must have the privilege to create and drop a database. If both sides are SQL files and `--driver` is not set, the scheme of the URL selects the driver. Do not use `--scratch-database` together with `--server-version`.
+
+```bash
+dbdiff diff --scratch-database postgres://user:password@localhost:5432/postgres current.sql desired.sql
+```
+
+A scratch database needs none of the server requirements below. It also works for MariaDB on Linux with arm64.
 
 ### Server requirements
 
@@ -122,9 +134,9 @@ dbdiff does not support MariaDB on Linux with arm64.
 
 ## Migrations
 
-`dbdiff migrate` reads `dbdiff.yaml` from the working directory. Each key has the name of its long flag. A flag overrides its key. The keys are `driver`, `migrations`, `desired`, `database`, `schema`, `server-version`, and `ignore-table`. `--config`, `--to`, and `--run` have no key.
+`dbdiff migrate` reads `dbdiff.yaml` from the working directory. Each key has the name of its long flag. A flag overrides its key. The keys are `driver`, `migrations`, `desired`, `database`, `schema`, `server-version`, `scratch-database`, and `ignore-table`. `--config`, `--to`, and `--run` have no key.
 
-`dbdiff diff` also reads `dbdiff.yaml`. It uses only the keys `driver`, `schema`, `server-version`, and `ignore-table`, and it ignores the other keys. Give the two schemas of `diff` as arguments.
+`dbdiff diff` also reads `dbdiff.yaml`. It uses only the keys `driver`, `schema`, `server-version`, `scratch-database`, and `ignore-table`, and it ignores the other keys. Give the two schemas of `diff` as arguments.
 
 ```yaml
 driver: postgres

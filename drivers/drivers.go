@@ -61,10 +61,11 @@ func DetectDriver(current DataSource, desired DataSource) (DriverName, error) {
 }
 
 type driverOptions struct {
-	serverVersion string
-	postgres      *PostgreSQLDriverConfig
-	mysql         *MySQLDriverConfig
-	ignoreTables  []string
+	serverVersion   string
+	scratchDatabase string
+	postgres        *PostgreSQLDriverConfig
+	mysql           *MySQLDriverConfig
+	ignoreTables    []string
 }
 
 // Option configures NewDriver.
@@ -75,6 +76,16 @@ type Option func(*driverOptions)
 func WithServerVersion(serverVersion string) Option {
 	return func(merged *driverOptions) {
 		merged.serverVersion = serverVersion
+	}
+}
+
+// WithScratchDatabase names the connection URL of an existing server that runs a SQL data
+// source. The driver creates its temporary databases on this server and drops them after
+// the diff. The user of the URL must have the privilege to create and drop a database.
+// Only the postgres driver and the mysql driver accept this option.
+func WithScratchDatabase(connectionString string) Option {
+	return func(merged *driverOptions) {
+		merged.scratchDatabase = connectionString
 	}
 }
 
@@ -134,8 +145,9 @@ func NewDriver(name DriverName, options ...Option) (*Driver, error) {
 	}
 
 	internalOptions := internaldrivers.DriverOptions{
-		ServerVersion: merged.serverVersion,
-		IgnoreTables:  merged.ignoreTables,
+		ServerVersion:   merged.serverVersion,
+		ScratchDatabase: merged.scratchDatabase,
+		IgnoreTables:    merged.ignoreTables,
 	}
 
 	if merged.postgres != nil {
