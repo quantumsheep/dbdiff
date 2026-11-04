@@ -89,6 +89,7 @@ dbdiff completion fish > ~/.config/fish/completions/dbdiff.fish   # fish
 | `--database`       | A connection URL                                | Read or change this database. Each command except `generate` accepts this flag.                             |
 | `--to`             | A migration version                             | For `up` and `baseline`, stop after this version. The default is the last migration.                        |
 | `--run`            | none                                            | For `preview`, apply the pending files in one transaction. Then roll back the transaction.                  |
+| `--empty`          | none                                            | For `generate`, write a file with no statement. The command does not read the desired schema.               |
 | `--driver`         | `sqlite3`, `postgres`, or `mysql`               | Select the engine. dbdiff detects it from the arguments by default.                                         |
 | `--schema`         | A schema name                                   | Select the PostgreSQL schema. The default is the search path. Only the postgres driver accepts this flag.   |
 | `--server-version` | A server version                                | Select the version of the temporary server. Only the postgres driver and the mysql driver accept this flag. |
@@ -143,6 +144,13 @@ dbdiff replaces each `${NAME}` in a value of the file with the environment varia
 ```console
 $ dbdiff migrate generate add_created_at
 migrations/20260822143000_add_created_at.sql
+```
+
+For a data change, add the `--empty` flag. `generate` then writes a file with no statement, and it does not read the desired schema. Write the statements in the file.
+
+```console
+$ dbdiff migrate generate --empty backfill_users
+migrations/20260822143100_backfill_users.sql
 ```
 
 The other commands act on the database that `--database` or the `database` key names:

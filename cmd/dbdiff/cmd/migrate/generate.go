@@ -23,6 +23,10 @@ func generateCommand() *cli.Command {
 				Name:  "desired",
 				Usage: "The desired schema. A .sql file, a directory of .sql files, or a connection URL",
 			},
+			&cli.BoolFlag{
+				Name:  "empty",
+				Usage: "Write a migration file with no statement. The command does not read the desired schema",
+			},
 		),
 		OnUsageError: helpers.OnUsageError,
 		Arguments: []cli.Argument{
@@ -36,7 +40,14 @@ func generateCommand() *cli.Command {
 }
 
 func generateAction(ctx context.Context, command *cli.Command) error {
-	config, path, err := migrationConfigFromCommand(command, "desired")
+	empty := command.Bool("empty")
+
+	requiredKey := "desired"
+	if empty {
+		requiredKey = "migrations"
+	}
+
+	config, path, err := migrationConfigFromCommand(command, requiredKey)
 	if err != nil {
 		return err
 	}
@@ -53,6 +64,17 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 
 	err = os.MkdirAll(config.Migrations, 0o750)
 	if err != nil {
+		return err
+	}
+
+	if empty {
+		emptyPath, err := internalmigrations.WriteEmptyFile(config.Migrations, slug, time.Now(), helpers.Version())
+		if err != nil {
+			return err
+		}
+
+		_, err = fmt.Fprintln(command.Root().Writer, emptyPath)
+
 		return err
 	}
 

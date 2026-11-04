@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/clitest"
+	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
@@ -264,5 +266,41 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		entries, err := os.ReadDir(migrations)
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
+	})
+
+	t.Run("EmptyFlag", func(t *testing.T) {
+		directory := t.TempDir()
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+
+		configPath := clitest.WriteMigrationConfig(t, directory, "migrations: "+migrations+"\n")
+
+		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "--empty", "backfill_users")
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+		entries, err := os.ReadDir(migrations)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+
+		name := entries[0].Name()
+		require.Regexp(t, `^\d{14}_backfill_users\.sql$`, name)
+		require.Equal(t, filepath.Join(migrations, name)+"\n", result.Stdout)
+
+		moment, err := time.Parse("20060102150405", name[:14])
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(filepath.Join(migrations, name))
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff "+helpers.Version()+"\n-- generated "+moment.UTC().Format(time.RFC3339)+"\n", string(content))
+	})
+
+	t.Run("EmptyFlagWithNoMigrations", func(t *testing.T) {
+		directory := t.TempDir()
+
+		configPath := clitest.WriteMigrationConfig(t, directory, "")
+
+		result := clitest.Run(t, "migrate", "generate", "--config", configPath, "--empty", "backfill_users")
+		require.Equal(t, 1, result.ExitCode)
+		require.Equal(t, fmt.Sprintf("dbdiff: name the migration directory with the --migrations flag, or with the key \"migrations\" of %s\n", configPath), result.Stderr)
 	})
 }

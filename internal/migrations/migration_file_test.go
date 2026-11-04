@@ -90,6 +90,34 @@ func TestGenerateMigration(t *testing.T) {
 		require.Contains(t, string(content), `ADD COLUMN "email"`)
 		require.NotContains(t, string(content), "CREATE TABLE")
 	})
+
+	t.Run("WriteTheHeaderOfAnEmptyFileAlone", func(t *testing.T) {
+		directory := t.TempDir()
+		moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
+
+		path, err := internalmigrations.WriteEmptyFile(directory, "backfill", moment, "test")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(directory, "20260822143000_backfill.sql"), path)
+
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff test\n-- generated 2026-08-22T14:30:00Z\n", string(content))
+	})
+
+	t.Run("TheEmptyFileTakesTheNextFreeVersion", func(t *testing.T) {
+		directory := t.TempDir()
+		moment := time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC)
+
+		sqltest.WriteSQLFile(t, directory, "20260822143000_init.sql", "SELECT 1;")
+
+		path, err := internalmigrations.WriteEmptyFile(directory, "backfill", moment, "test")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(directory, "20260822143001_backfill.sql"), path)
+
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff test\n-- generated 2026-08-22T14:30:01Z\n", string(content))
+	})
 }
 
 func TestSplitMigrationInstructions(t *testing.T) {

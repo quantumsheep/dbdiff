@@ -101,6 +101,33 @@ func WriteFiles(
 	return paths, nil
 }
 
+func WriteEmptyFile(directory string, slug string, generatedAt time.Time, toolVersion string) (string, error) {
+	err := os.MkdirAll(directory, 0o750)
+	if err != nil {
+		return "", err
+	}
+
+	used, err := usedMigrationVersions(directory)
+	if err != nil {
+		return "", err
+	}
+
+	moment := generatedAt
+
+	for used[VersionOfTime(moment)] {
+		moment = moment.Add(time.Second)
+	}
+
+	path := filepath.Join(directory, VersionOfTime(moment)+"_"+slug+".sql")
+
+	err = os.WriteFile(path, []byte(RenderFile(toolVersion, moment, nil)), 0o600)
+	if err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
 // Two generate runs of one second give one version, and the sort of the replay then holds
 // no order between the two files. The history table also refuses the second version, which
 // its primary key holds already.
