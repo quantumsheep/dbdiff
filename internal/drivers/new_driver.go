@@ -63,10 +63,10 @@ func NewDriver(driverName driversshared.DriverName, options DriverOptions) (driv
 	}
 }
 
-func NewMigrator(ctx context.Context, driverName driversshared.DriverName, desired driversshared.ConnectionStringDataSource,
+func NewMigrator(ctx context.Context, driverName driversshared.DriverName, database driversshared.ConnectionStringDataSource,
 	schema string) (internalmigrations.Migrator, error) {
 	if driverName == "" {
-		detected, err := driversshared.DetectDriverOfDatabase(desired)
+		detected, err := driversshared.DetectDriverOfDatabase(database)
 		if err != nil {
 			return nil, err
 		}
@@ -76,11 +76,11 @@ func NewMigrator(ctx context.Context, driverName driversshared.DriverName, desir
 
 	switch driverName {
 	case driversshared.SQLiteDriverName:
-		return driverssqlite.NewSQLiteMigrator(desired.ConnectionString)
+		return driverssqlite.NewSQLiteMigrator(database.ConnectionString)
 	case driversshared.PostgresDriverName:
-		return driverspostgres.NewPostgresMigrator(ctx, desired.ConnectionString, schema)
+		return driverspostgres.NewPostgresMigrator(ctx, database.ConnectionString, schema)
 	case driversshared.MySQLDriverName:
-		return driversmysql.NewMySQLMigrator(ctx, desired.ConnectionString)
+		return driversmysql.NewMySQLMigrator(ctx, database.ConnectionString)
 	default:
 		return nil, fmt.Errorf("unsupported driver: %s", driverName)
 	}
@@ -100,9 +100,9 @@ func (openDatabaseError *OpenDatabaseError) Unwrap() error {
 	return openDatabaseError.Err
 }
 
-func OpenMigrationSet(ctx context.Context, driverName driversshared.DriverName, desired driversshared.ConnectionStringDataSource,
+func OpenMigrationSet(ctx context.Context, driverName driversshared.DriverName, database driversshared.ConnectionStringDataSource,
 	schema string, directory string) (internalmigrations.Migrator, *internalmigrations.Set, error) {
-	migrator, err := NewMigrator(ctx, driverName, desired, schema)
+	migrator, err := NewMigrator(ctx, driverName, database, schema)
 	if err != nil {
 		return nil, nil, &OpenDatabaseError{
 			Err: err,

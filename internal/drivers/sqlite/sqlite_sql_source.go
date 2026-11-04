@@ -12,10 +12,10 @@ import (
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
-func (d *SQLiteDriver) OpenSide(ctx context.Context, current driversshared.DataSource, role string) (*sql.DB, error) {
-	path, isSQLSource := driversshared.SQLSourcePath(current)
+func (d *SQLiteDriver) OpenSide(ctx context.Context, dataSource driversshared.DataSource, role string) (*sql.DB, error) {
+	path, isSQLSource := driversshared.SQLSourcePath(dataSource)
 	if !isSQLSource {
-		connectionSource := current.(driversshared.ConnectionStringDataSource)
+		connectionSource := dataSource.(driversshared.ConnectionStringDataSource)
 		filePath := TrimSQLitePrefix(connectionSource.ConnectionString)
 
 		// sql.Open creates a file that is absent, and a wrong path then reads an empty

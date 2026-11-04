@@ -59,14 +59,14 @@ func (d *TestingSQLiteDriver) desiredDatabase() *sql.DB {
 // a side that a database path names. A test that reads or writes such a side materializes
 // it here, on its first use. The driver materializes its own copy of a SQL source on
 // every Diff call, so a write through this accessor never reaches the diff.
-func (d *TestingSQLiteDriver) database(current driversshared.DataSource, connection **sql.DB, role string) *sql.DB {
+func (d *TestingSQLiteDriver) database(dataSource driversshared.DataSource, connection **sql.DB, role string) *sql.DB {
 	d.tb.Helper()
 
 	if *connection != nil {
 		return *connection
 	}
 
-	path, isSQLSource := driversshared.SQLSourcePath(current)
+	path, isSQLSource := driversshared.SQLSourcePath(dataSource)
 	require.True(d.tb, isSQLSource, "the %s side holds no open connection", role)
 
 	sqlSource, err := driversshared.NewSQLSource(path)
