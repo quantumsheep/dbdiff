@@ -109,10 +109,10 @@ func (d *TestingSQLiteDriver) FetchAllFromSource(table string, additionalRules s
 
 	sourceConnection := d.sourceDatabase()
 
-	columns, err := d.GetTableColumns(d.tb.Context(), sourceConnection, table)
+	rows, err := sourceConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))
 	require.NoError(d.tb, err)
 
-	rows, err := sourceConnection.Query(fmt.Sprintf("SELECT * FROM %q %s;", table, additionalRules))
+	columns, err := rows.Columns()
 	require.NoError(d.tb, err)
 
 	var results []map[string]any
@@ -131,7 +131,7 @@ func (d *TestingSQLiteDriver) FetchAllFromSource(table string, additionalRules s
 		row := make(map[string]any)
 
 		for i, column := range columns {
-			row[column.Name] = columnValues[i]
+			row[column] = columnValues[i]
 		}
 
 		results = append(results, row)
@@ -1691,6 +1691,63 @@ func TestSQLiteDriver(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("RecreationAvoidsTheNameOfAnExistingTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnSource(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY);
+			CREATE TABLE _t_temp (id INTEGER PRIMARY KEY);
+			CREATE INDEX _T_TEMP2 ON _t_temp (id);
+			INSERT INTO t (id) VALUES (1);
+			INSERT INTO _t_temp (id) VALUES (2);
+		`)
+		driver.ExecOnTarget(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);
+			CREATE TABLE _t_temp (id INTEGER PRIMARY KEY);
+			CREATE INDEX _T_TEMP2 ON _t_temp (id);
+		`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp3",
+					Columns: []*SQLiteColumn{
+						{
+							Name:               "id",
+							Type:               "INTEGER",
+							PrimaryKey:         true,
+							PrimaryKeyConflict: "REPLACE",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp3",
+					ColumnNames:       []string{"id"},
+					SelectExpressions: []string{`"id"`},
+					SourceTableName:   "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp3",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, driver.FetchAllFromSource("t", ""))
+		require.Equal(t, []map[string]any{
+			{"id": int64(2)},
+		}, driver.FetchAllFromSource("_t_temp", ""))
+	})
+
 	t.Run("CreateTableWithADeferredForeignKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -2331,7 +2388,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:      "idx_users_active",
 				TableName: "users",
 				Keys:      []string{`"name"`},
-				Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+				Where:     "active = 1",
 			},
 		})
 	})
@@ -2362,7 +2419,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:      "idx_users_active",
 				TableName: "users",
 				Keys:      []string{`"name"`},
-				Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+				Where:     "active = 1",
 			},
 		})
 	})
@@ -2485,7 +2542,7 @@ func TestSQLiteDriver(t *testing.T) {
 					Name:      "idx_users_active",
 					TableName: "users",
 					Keys:      []string{`"name"`},
-					Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+					Where:     "active = 1",
 				},
 			),
 			[]driversshared.Instruction{
@@ -2686,7 +2743,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:      "notes_score",
 				TableName: "notes",
 				Keys:      []string{`"score" DESC`, "lower(body)"},
-				Condition: &SQLiteIndexPredicateCondition{Expression: "score > 0"},
+				Where:     "score > 0",
 			},
 		})
 	})
@@ -2722,7 +2779,7 @@ func TestSQLiteDriver(t *testing.T) {
 				Name:      "codes_name",
 				TableName: "codes",
 				Keys:      []string{`"name"`},
-				Condition: &SQLiteIndexPredicateCondition{Expression: `name LIKE 'a\%' ESCAPE'\'`},
+				Where:     `name LIKE 'a\%' ESCAPE'\'`,
 			},
 		})
 	})
@@ -4351,7 +4408,7 @@ func TestSQLiteDriver(t *testing.T) {
 
 		driver := &SQLiteDriver{}
 
-		_, err = driver.GetTableColumns(t.Context(), db, "users")
+		_, _, err = driver.GetTableColumns(t.Context(), db, "users", parseTableDefinition(""))
 		require.ErrorIs(t, err, errRowIteration)
 	})
 

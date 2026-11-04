@@ -137,6 +137,11 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 		return nil, err
 	}
 
+	reservedNames, err := d.getReservedNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	additions, removals, err := driversshared.DiffByKey(targetTables, sourceTables, driversshared.DiffRules[*SQLiteTable]{
 		Key: func(table *SQLiteTable) string {
 			return table.Name
@@ -145,7 +150,7 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 			return table.Instructions()
 		},
 		Change: func(target *SQLiteTable, source *SQLiteTable) ([]driversshared.Instruction, error) {
-			return target.DiffTable(source)
+			return target.DiffTable(source, reservedNames)
 		},
 		Drop: func(table *SQLiteTable) []driversshared.Instruction {
 			return []driversshared.Instruction{&driversshared.SQLDropTableInstruction{
@@ -161,6 +166,32 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 	slices.Reverse(removals)
 
 	return append(additions, removals...), nil
+}
+
+// A table, an index, and a view share one namespace, and SQLite compares names without
+// case. The set holds the lowercase name of each object of the two sides, so the temporary
+// table of a recreation can take a free name.
+func (d *SQLiteDriver) getReservedNames(ctx context.Context) (map[string]bool, error) {
+	reservedNames := make(map[string]bool)
+
+	for _, db := range []*sql.DB{d.SourceDatabaseConnection, d.TargetDatabaseConnection} {
+		names, err := driversshared.QueryAll(ctx, db, "SELECT name FROM sqlite_master ORDER BY name;", func(rows *sql.Rows) (string, error) {
+			var name string
+
+			err := rows.Scan(&name)
+
+			return name, err
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		for _, name := range names {
+			reservedNames[strings.ToLower(name)] = true
+		}
+	}
+
+	return reservedNames, nil
 }
 
 func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]driversshared.Instruction, error) {
@@ -242,27 +273,27 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 }
 
 func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*SQLiteTable, error) {
-	columns, err := d.GetTableColumns(ctx, db, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	primaryKey, err := d.GetTablePrimaryKey(ctx, db, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	uniqueKeys, err := d.GetTableUniqueKeys(ctx, db, tableName)
-	if err != nil {
-		return nil, err
-	}
-
 	definition, err := d.GetTableDefinition(ctx, db, tableName)
 	if err != nil {
 		return nil, err
 	}
 
 	parsed := parseTableDefinition(definition)
+
+	columns, primaryKey, err := d.GetTableColumns(ctx, db, tableName, parsed)
+	if err != nil {
+		return nil, err
+	}
+
+	indexList, err := d.getIndexList(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	uniqueKeys, err := d.GetTableUniqueKeys(ctx, db, indexList)
+	if err != nil {
+		return nil, err
+	}
 
 	var uniqueConstraints []*SQLiteUniqueConstraint
 
@@ -296,7 +327,7 @@ func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName strin
 		}
 	}
 
-	indexes, err := d.GetTableIndexes(ctx, db, tableName)
+	indexes, err := d.GetTableIndexes(ctx, db, tableName, indexList)
 	if err != nil {
 		return nil, err
 	}
@@ -358,25 +389,25 @@ const (
 )
 
 // PRAGMA table_info gives no generated column, so this method reads PRAGMA table_xinfo.
-// That PRAGMA gives no expression, so parseTableDefinition reads it.
-func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteColumn, error) {
-	definition, err := d.GetTableDefinition(ctx, db, tableName)
-	if err != nil {
-		return nil, err
+// That PRAGMA gives no expression, so the parsed definition gives it. The second value
+// holds a primary key of two or more columns, in the order of the key.
+func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableName string,
+	parsed *SQLiteTableDefinition) ([]*SQLiteColumn, []string, error) {
+	type primaryKeyColumn struct {
+		Column   *SQLiteColumn
+		Position int
 	}
-
-	parsed := parseTableDefinition(definition)
 
 	// A PRAGMA statement takes no placeholder, so QuoteIdentifier must quote every name.
 	rows, err := db.QueryContext(ctx, "PRAGMA table_xinfo("+driversshared.QuoteIdentifier(tableName)+");")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	defer func() { _ = rows.Close() }()
 
 	var columns []*SQLiteColumn
-	var primaryKeyColumns []*SQLiteColumn
+	var primaryKeyColumns []primaryKeyColumn
 
 	for rows.Next() {
 		var columnID int
@@ -389,7 +420,7 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 
 		err := rows.Scan(&columnID, &name, &columnType, &isNotNull, &defaultValue, &primaryKeyPosition, &hidden)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		if hidden == hiddenColumnOfAVirtualTable {
@@ -397,10 +428,11 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 		}
 
 		column := &SQLiteColumn{
-			Name:    name,
-			Type:    columnType,
-			NotNull: isNotNull == 1,
-			Default: defaultValue,
+			Name:            name,
+			Type:            columnType,
+			NotNull:         isNotNull == 1,
+			Default:         defaultValue,
+			GeneratedStored: hidden == storedGeneratedColumn,
 		}
 
 		attributes, found := parsed.ColumnByName(name)
@@ -417,88 +449,64 @@ func (d *SQLiteDriver) GetTableColumns(ctx context.Context, db *sql.DB, tableNam
 			}
 		}
 
-		if hidden == virtualGeneratedColumn || hidden == storedGeneratedColumn {
-			column.GeneratedStored = hidden == storedGeneratedColumn
-		}
-
 		columns = append(columns, column)
 
 		if primaryKeyPosition > 0 {
-			primaryKeyColumns = append(primaryKeyColumns, column)
+			primaryKeyColumns = append(primaryKeyColumns, primaryKeyColumn{
+				Column:   column,
+				Position: primaryKeyPosition,
+			})
 		}
 	}
 
 	err = rows.Err()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// A key of one column stays a column constraint, which keeps INTEGER PRIMARY KEY as the
-	// alias of the rowid. GetTablePrimaryKey reads a key of two or more columns.
+	// alias of the rowid.
 	if len(primaryKeyColumns) == 1 {
-		primaryKeyColumns[0].PrimaryKey = true
+		primaryKeyColumns[0].Column.PrimaryKey = true
 	}
 
-	return columns, nil
-}
-
-func (d *SQLiteDriver) GetTablePrimaryKey(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
-	type primaryKeyColumn struct {
-		Name     string
-		Position int
+	if len(primaryKeyColumns) < 2 {
+		return columns, nil, nil
 	}
 
-	tableColumns, err := driversshared.QueryAll(ctx, db, "PRAGMA table_info("+driversshared.QuoteIdentifier(tableName)+");", func(rows *sql.Rows) (primaryKeyColumn, error) {
-		var column primaryKeyColumn
-		var columnID int
-		var columnType string
-		var isNotNull int
-		var defaultValue sql.NullString
-
-		err := rows.Scan(&columnID, &column.Name, &columnType, &isNotNull, &defaultValue, &column.Position)
-
-		return column, err
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	keyColumns := lo.Filter(tableColumns, func(column primaryKeyColumn, _ int) bool {
-		return column.Position != 0
-	})
-
-	if len(keyColumns) < 2 {
-		return nil, nil
-	}
-
-	slices.SortStableFunc(keyColumns, func(first primaryKeyColumn, second primaryKeyColumn) int {
+	slices.SortStableFunc(primaryKeyColumns, func(first primaryKeyColumn, second primaryKeyColumn) int {
 		return cmp.Compare(first.Position, second.Position)
 	})
 
-	names := lo.Map(keyColumns, func(keyColumn primaryKeyColumn, _ int) string {
-		return keyColumn.Name
+	primaryKey := lo.Map(primaryKeyColumns, func(keyColumn primaryKeyColumn, _ int) string {
+		return keyColumn.Column.Name
 	})
 
-	return names, nil
+	return columns, primaryKey, nil
 }
 
 // This method sorts the keys, because SQLite gives no stable order.
-func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, tableName string) ([][]string, error) {
-	indexes, err := d.getIndexList(ctx, db, tableName)
-	if err != nil {
-		return nil, err
-	}
-
+func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, indexList []sqliteIndexListEntry) ([][]string, error) {
 	var keys [][]string
 
-	for _, index := range indexes {
+	for _, index := range indexList {
 		if index.Origin != "u" {
 			continue
 		}
 
-		columnNames, err := d.GetIndexColumnNames(ctx, db, index.Name)
+		indexInfo, err := d.getIndexInfo(ctx, db, index.Name)
 		if err != nil {
 			return nil, err
+		}
+
+		var columnNames []string
+
+		for _, entry := range indexInfo {
+			if !entry.Name.Valid {
+				return nil, fmt.Errorf("the index %s holds a key at the position %d that is no column", index.Name, entry.Position)
+			}
+
+			columnNames = append(columnNames, entry.Name.String)
 		}
 
 		keys = append(keys, columnNames)
@@ -509,32 +517,9 @@ func (d *SQLiteDriver) GetTableUniqueKeys(ctx context.Context, db *sql.DB, table
 	return keys, nil
 }
 
-func (d *SQLiteDriver) GetIndexColumnNames(ctx context.Context, db *sql.DB, indexName string) ([]string, error) {
-	return driversshared.QueryAll(ctx, db, "PRAGMA index_info("+driversshared.QuoteIdentifier(indexName)+");", func(rows *sql.Rows) (string, error) {
-		var keyPosition int
-		var columnID int
-		var name sql.NullString
-
-		err := rows.Scan(&keyPosition, &columnID, &name)
-		if err != nil {
-			return "", err
-		}
-
-		if !name.Valid {
-			return "", fmt.Errorf("the index %s holds a key at the position %d that is no column", indexName, keyPosition)
-		}
-
-		return name.String, nil
-	})
-}
-
-func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string) ([]*SQLiteIndex, error) {
+func (d *SQLiteDriver) GetTableIndexes(ctx context.Context, db *sql.DB, tableName string,
+	indexList []sqliteIndexListEntry) ([]*SQLiteIndex, error) {
 	definitions, err := d.GetIndexDefinitions(ctx, db, tableName)
-	if err != nil {
-		return nil, err
-	}
-
-	indexList, err := d.getIndexList(ctx, db, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -592,6 +577,23 @@ func (d *SQLiteDriver) getIndexList(ctx context.Context, db *sql.DB, tableName s
 	})
 }
 
+// PRAGMA index_info gives a NULL name for an expression key.
+type sqliteIndexInfoEntry struct {
+	Position int
+	Name     sql.NullString
+}
+
+func (d *SQLiteDriver) getIndexInfo(ctx context.Context, db *sql.DB, indexName string) ([]sqliteIndexInfoEntry, error) {
+	return driversshared.QueryAll(ctx, db, "PRAGMA index_info("+driversshared.QuoteIdentifier(indexName)+");", func(rows *sql.Rows) (sqliteIndexInfoEntry, error) {
+		var entry sqliteIndexInfoEntry
+		var columnID int
+
+		err := rows.Scan(&entry.Position, &columnID, &entry.Name)
+
+		return entry, err
+	})
+}
+
 // An index that a UNIQUE constraint or a PRIMARY KEY builds holds no text.
 func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tableName string) (map[string]string, error) {
 	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
@@ -625,32 +627,37 @@ func (d *SQLiteDriver) GetIndexDefinitions(ctx context.Context, db *sql.DB, tabl
 // PRAGMA index_info gives no name for an expression key, no direction, and no collation,
 // so definitionKeys and indexKeyModifiers read those parts from the text.
 func (d *SQLiteDriver) GetIndexKeys(ctx context.Context, db *sql.DB, indexName string, definitionKeys []string) ([]string, error) {
-	return driversshared.QueryAll(ctx, db, "PRAGMA index_info("+driversshared.QuoteIdentifier(indexName)+");", func(rows *sql.Rows) (string, error) {
-		var keyPosition int
-		var columnID int
-		var name sql.NullString
+	indexInfo, err := d.getIndexInfo(ctx, db, indexName)
+	if err != nil {
+		return nil, err
+	}
 
-		err := rows.Scan(&keyPosition, &columnID, &name)
-		if err != nil {
-			return "", err
-		}
+	keys := make([]string, 0, len(indexInfo))
 
-		if name.Valid {
+	for _, entry := range indexInfo {
+		keyPosition := entry.Position
+		definitionKeyFound := keyPosition >= 0 && keyPosition < len(definitionKeys)
+
+		if entry.Name.Valid {
 			modifiers := ""
 
-			if keyPosition >= 0 && keyPosition < len(definitionKeys) {
+			if definitionKeyFound {
 				modifiers = indexKeyModifiers(definitionKeys[keyPosition])
 			}
 
-			return driversshared.QuoteIdentifier(name.String) + modifiers, nil
+			keys = append(keys, driversshared.QuoteIdentifier(entry.Name.String)+modifiers)
+
+			continue
 		}
 
-		if keyPosition < 0 || keyPosition >= len(definitionKeys) {
-			return "", fmt.Errorf("the definition of the index %s holds no key at the position %d", indexName, keyPosition)
+		if !definitionKeyFound {
+			return nil, fmt.Errorf("the definition of the index %s holds no key at the position %d", indexName, keyPosition)
 		}
 
-		return definitionKeys[keyPosition], nil
-	})
+		keys = append(keys, definitionKeys[keyPosition])
+	}
+
+	return keys, nil
 }
 
 func (d *SQLiteDriver) GetTriggers(ctx context.Context, db *sql.DB, objectName string) ([]*SQLiteTrigger, error) {

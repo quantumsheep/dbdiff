@@ -46,7 +46,8 @@ type SQLiteCreateTableInstruction struct {
 	PrimaryKeyConflict string
 
 	// A key clause holds the quoted column name with its COLLATE clause and its DESC
-	// keyword. An empty list keeps the plain names of PrimaryKey.
+	// keyword. An empty list keeps the plain names of PrimaryKey. A list that is not empty
+	// must hold one clause for each column of PrimaryKey.
 	PrimaryKeyKeys []string
 
 	UniqueConstraints []*SQLiteUniqueConstraint
@@ -67,7 +68,7 @@ func (i *SQLiteCreateTableInstruction) String() string {
 
 	if len(i.PrimaryKey) > 0 {
 		keys := driversshared.QuoteIdentifiers(i.PrimaryKey)
-		if len(i.PrimaryKeyKeys) == len(i.PrimaryKey) {
+		if len(i.PrimaryKeyKeys) > 0 {
 			keys = i.PrimaryKeyKeys
 		}
 
@@ -125,20 +126,12 @@ func (i *SQLiteCreateVirtualTableInstruction) Comment() string {
 	return driversshared.DefinitionComment("Create", "virtual table", i.Definition, "TABLE")
 }
 
-type SQLiteIndexPredicateCondition struct {
-	Expression string
-}
-
-func (c *SQLiteIndexPredicateCondition) ConditionClause() string {
-	return c.Expression
-}
-
 type SQLiteCreateIndexInstruction struct {
 	Unique    bool
 	Name      string
 	TableName string
 	Keys      []string
-	Condition driversshared.Condition
+	Where     string
 }
 
 func (i *SQLiteCreateIndexInstruction) String() string {
@@ -153,8 +146,8 @@ func (i *SQLiteCreateIndexInstruction) String() string {
 		driversshared.QuoteIdentifier(i.TableName),
 		strings.Join(i.Keys, ", "))
 
-	if i.Condition != nil {
-		statement += " WHERE " + i.Condition.ConditionClause()
+	if i.Where != "" {
+		statement += " WHERE " + i.Where
 	}
 
 	return statement + ";"

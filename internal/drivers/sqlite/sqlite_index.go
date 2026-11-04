@@ -29,18 +29,13 @@ func (i *SQLiteIndex) Equal(other *SQLiteIndex) bool {
 }
 
 func (i *SQLiteIndex) CreateInstruction() *SQLiteCreateIndexInstruction {
-	instruction := &SQLiteCreateIndexInstruction{
+	return &SQLiteCreateIndexInstruction{
 		Unique:    i.Unique,
 		Name:      i.Name,
 		TableName: i.Table,
 		Keys:      i.Keys,
+		Where:     i.Where,
 	}
-
-	if i.Where != "" {
-		instruction.Condition = &SQLiteIndexPredicateCondition{Expression: i.Where}
-	}
-
-	return instruction
 }
 
 const noQuote = rune(0)

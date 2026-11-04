@@ -39,16 +39,11 @@ func (c *SQLiteColumn) IsGenerated() bool {
 	return c.GeneratedExpression != ""
 }
 
-func (c *SQLiteColumn) Copy() *SQLiteColumn {
-	columnCopy := *c
-	return &columnCopy
-}
-
 func (c *SQLiteColumn) HasEqualAttributes(other *SQLiteColumn) bool {
-	copy := c.Copy()
-	copy.Name = other.Name
+	columnCopy := *c
+	columnCopy.Name = other.Name
 
-	return *copy == *other
+	return columnCopy == *other
 }
 
 func (c *SQLiteColumn) Definition() string {

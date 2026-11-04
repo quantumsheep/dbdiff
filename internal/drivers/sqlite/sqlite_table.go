@@ -3,6 +3,7 @@ package driverssqlite
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -44,7 +45,9 @@ type SQLiteTable struct {
 	Name    string
 	Columns []*SQLiteColumn
 
-	// These two fields hold a key or a constraint of two or more columns only.
+	// PrimaryKey holds a key of two or more columns only. UniqueConstraints holds a
+	// constraint of two or more columns or a named constraint only. A column holds each
+	// other key as a column constraint.
 	PrimaryKey         []string
 	PrimaryKeyName     string
 	PrimaryKeyConflict string
@@ -62,11 +65,6 @@ type SQLiteTable struct {
 
 	WithoutRowID bool
 	Strict       bool
-}
-
-func (t *SQLiteTable) Copy() *SQLiteTable {
-	tableCopy := *t
-	return &tableCopy
 }
 
 func (t *SQLiteTable) ColumnByName(name string) (*SQLiteColumn, bool) {
@@ -239,77 +237,15 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 	return diff
 }
 
-func (t *SQLiteTable) DiffTable(other *SQLiteTable) ([]driversshared.Instruction, error) {
+func (t *SQLiteTable) DiffTable(other *SQLiteTable, reservedNames map[string]bool) ([]driversshared.Instruction, error) {
 	columnsDiff := t.DiffColumns(other)
-
-	var instructions []driversshared.Instruction
 
 	// SQLite holds no ALTER COLUMN, so a changed column or constraint recreates the table.
 	if columnsDiff.NeedsRecreation() {
-		tempTable := t.Copy()
-		tempTable.Name = "_" + t.Name + "_temp"
-
-		recreation := []driversshared.Instruction{tempTable.CreateTableInstruction()}
-
-		var insertColumns []string
-		var selectColumns []string
-
-		for _, newColumn := range t.Columns {
-			// SQLite computes a generated column, and it refuses a value for that column.
-			if newColumn.IsGenerated() {
-				continue
-			}
-
-			insertColumns = append(insertColumns, newColumn.Name)
-
-			_, ok := other.ColumnByName(newColumn.Name)
-			if ok {
-				selectColumns = append(selectColumns, driversshared.QuoteIdentifier(newColumn.Name))
-				continue
-			}
-
-			oldName, ok := columnsDiff.RenamedFrom[newColumn.Name]
-			if ok {
-				selectColumns = append(selectColumns, driversshared.QuoteIdentifier(oldName))
-				continue
-			}
-
-			if newColumn.Default.Valid {
-				selectColumns = append(selectColumns, newColumn.Default.String)
-			} else {
-				selectColumns = append(selectColumns, "NULL")
-			}
-		}
-
-		recreation = append(recreation, &driversshared.SQLInsertSelectInstruction{
-			TableName:         tempTable.Name,
-			ColumnNames:       insertColumns,
-			SelectExpressions: selectColumns,
-			SourceTableName:   t.Name,
-		})
-
-		recreation = append(recreation, &driversshared.SQLDropTableInstruction{Name: t.Name})
-
-		recreation = append(recreation, &SQLiteAlterTableInstruction{
-			Name:   tempTable.Name,
-			Action: &driversshared.SQLRenameTableAction{NewName: t.Name},
-		})
-
-		// The DROP TABLE statement removes each index and each trigger of the table. The
-		// recreation builds every one of them again from the target, so the index diff and
-		// the trigger diff below compare a source that is not there.
-		recreation = append(recreation, t.IndexInstructions()...)
-		recreation = append(recreation, t.TriggerInstructions()...)
-
-		for _, instruction := range recreation {
-			instructions = append(instructions, &SQLiteTableRecreationInstruction{
-				Instruction: instruction,
-				TableName:   t.Name,
-			})
-		}
-
-		return instructions, nil
+		return t.recreationInstructions(other, columnsDiff.RenamedFrom, reservedNames), nil
 	}
+
+	var instructions []driversshared.Instruction
 
 	// The map gives no stable order. The loop walks the target columns instead, so the
 	// rename statements follow the shape of the target table on every run.
@@ -392,4 +328,86 @@ func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) ([]driversshared.Instructi
 	}
 
 	return append(additions, removals...), nil
+}
+
+// The temporary table must not take the name of an object of the two sides, because
+// SQLite refuses a CREATE TABLE statement for a name that is in use.
+func temporaryTableName(tableName string, reservedNames map[string]bool) string {
+	name := "_" + tableName + "_temp"
+	counter := 1
+
+	for reservedNames[strings.ToLower(name)] {
+		counter++
+		name = "_" + tableName + "_temp" + strconv.Itoa(counter)
+	}
+
+	return name
+}
+
+func (t *SQLiteTable) recreationInstructions(source *SQLiteTable, renamedFrom map[string]string,
+	reservedNames map[string]bool) []driversshared.Instruction {
+	temporaryTable := *t
+	temporaryTable.Name = temporaryTableName(t.Name, reservedNames)
+
+	var insertColumns []string
+	var selectColumns []string
+
+	for _, newColumn := range t.Columns {
+		// SQLite computes a generated column, and it refuses a value for that column.
+		if newColumn.IsGenerated() {
+			continue
+		}
+
+		insertColumns = append(insertColumns, newColumn.Name)
+
+		_, found := source.ColumnByName(newColumn.Name)
+		if found {
+			selectColumns = append(selectColumns, driversshared.QuoteIdentifier(newColumn.Name))
+			continue
+		}
+
+		oldName, renamed := renamedFrom[newColumn.Name]
+		if renamed {
+			selectColumns = append(selectColumns, driversshared.QuoteIdentifier(oldName))
+			continue
+		}
+
+		if newColumn.Default.Valid {
+			selectColumns = append(selectColumns, newColumn.Default.String)
+		} else {
+			selectColumns = append(selectColumns, driversshared.SQLNullLiteral)
+		}
+	}
+
+	recreation := []driversshared.Instruction{
+		temporaryTable.CreateTableInstruction(),
+		&driversshared.SQLInsertSelectInstruction{
+			TableName:         temporaryTable.Name,
+			ColumnNames:       insertColumns,
+			SelectExpressions: selectColumns,
+			SourceTableName:   t.Name,
+		},
+		&driversshared.SQLDropTableInstruction{
+			Name: t.Name,
+		},
+		&SQLiteAlterTableInstruction{
+			Name: temporaryTable.Name,
+			Action: &driversshared.SQLRenameTableAction{
+				NewName: t.Name,
+			},
+		},
+	}
+
+	// The DROP TABLE statement removes each index and each trigger of the table. The
+	// recreation builds every one of them again from the target, so the index diff and
+	// the trigger diff of DiffTable compare a source that is not there.
+	recreation = append(recreation, t.IndexInstructions()...)
+	recreation = append(recreation, t.TriggerInstructions()...)
+
+	return lo.Map(recreation, func(instruction driversshared.Instruction, _ int) driversshared.Instruction {
+		return &SQLiteTableRecreationInstruction{
+			Instruction: instruction,
+			TableName:   t.Name,
+		}
+	})
 }

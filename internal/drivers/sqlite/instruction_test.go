@@ -8,12 +8,6 @@ import (
 )
 
 func TestInstructions(t *testing.T) {
-	t.Run("IndexPredicateCondition", func(t *testing.T) {
-		condition := &SQLiteIndexPredicateCondition{Expression: "active = 1"}
-
-		require.Equal(t, "active = 1", condition.ConditionClause())
-	})
-
 	t.Run("SQLiteTableRecreationInstruction", func(t *testing.T) {
 		instruction := &SQLiteTableRecreationInstruction{
 			Instruction: &driversshared.SQLDropTableInstruction{
@@ -180,7 +174,7 @@ func TestInstructions(t *testing.T) {
 			Name:      "idx_users_active",
 			TableName: "users",
 			Keys:      []string{`"name"`, "lower(email)"},
-			Condition: &SQLiteIndexPredicateCondition{Expression: "active = 1"},
+			Where:     "active = 1",
 		}
 
 		require.Equal(t,
