@@ -1,6 +1,9 @@
 package driverssqlite
 
 import (
+	"context"
+	"database/sql"
+
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
@@ -49,4 +52,26 @@ func (v *SQLiteView) DiffTriggers(other *SQLiteView) ([]driversshared.Instructio
 	}
 
 	return append(additions, removals...), nil
+}
+
+func (d *SQLiteDriver) GetViews(ctx context.Context, db *sql.DB) ([]*SQLiteView, error) {
+	views, err := driversshared.QueryAll(ctx, db, "SELECT name, sql FROM sqlite_master WHERE type = 'view' AND name NOT LIKE 'sqlite_%' ORDER BY name", func(rows *sql.Rows) (*SQLiteView, error) {
+		view := &SQLiteView{}
+
+		err := rows.Scan(&view.Name, &view.SQL)
+
+		return view, err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, view := range views {
+		view.Triggers, err = d.GetTriggers(ctx, db, view.Name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return views, nil
 }

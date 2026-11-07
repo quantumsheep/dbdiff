@@ -1,6 +1,9 @@
 package driverssqlite
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -534,4 +537,161 @@ func (t *SQLiteTable) recreationInstructions(
 			TableName:   t.Name,
 		}
 	})
+}
+
+// A virtual table takes its own statement, and a shadow table belongs to its module.
+// The order of sqlite_master is the order of the creation, so a table that holds a foreign
+// key comes after the table that it names. Keep that order.
+func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTable, error) {
+	tableNames, err := driversshared.QueryAll(ctx, db, `
+		SELECT master.name
+		FROM sqlite_master AS master
+		WHERE master.type = 'table' AND master.name NOT LIKE 'sqlite_%'
+		AND master.name <> ?
+		AND NOT EXISTS (
+			SELECT 1 FROM pragma_table_list AS list
+			WHERE list.schema = 'main' AND list.name = master.name
+			AND list.type IN ('virtual', 'shadow')
+		)
+		ORDER BY master.rowid;
+	`, func(rows *sql.Rows) (string, error) {
+		var tableName string
+
+		err := rows.Scan(&tableName)
+
+		return tableName, err
+	}, driversshared.MigrationHistoryTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	var tables []*SQLiteTable
+
+	for _, tableName := range tableNames {
+		ignored := slices.ContainsFunc(d.IgnoreTables, func(ignoredTableName string) bool {
+			return identifierKey(ignoredTableName) == identifierKey(tableName)
+		})
+		if ignored {
+			continue
+		}
+
+		table, err := d.GetTable(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+
+		tables = append(tables, table)
+	}
+
+	return tables, nil
+}
+
+func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*SQLiteTable, error) {
+	definition, err := d.GetTableDefinition(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	parsed := parseTableDefinition(definition)
+
+	columns, primaryKey, err := d.GetTableColumns(ctx, db, tableName, parsed)
+	if err != nil {
+		return nil, err
+	}
+
+	indexList, err := d.getIndexList(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	uniqueKeys, err := d.GetTableUniqueKeys(ctx, db, indexList)
+	if err != nil {
+		return nil, err
+	}
+
+	var uniqueConstraints []*SQLiteUniqueConstraint
+
+	for _, key := range uniqueKeys {
+		parsedUnique := parsed.UniqueConstraintOf(key)
+
+		// A column constraint holds no name, so a named constraint of one column stays a
+		// table constraint. Without that rule the name goes away.
+		if len(key) != 1 || parsedUnique.Name != "" {
+			uniqueConstraints = append(uniqueConstraints, &SQLiteUniqueConstraint{
+				Name:     parsedUnique.Name,
+				Columns:  key,
+				Keys:     parsedUnique.Keys,
+				Conflict: parsedUnique.Conflict,
+			})
+
+			continue
+		}
+
+		matchingColumn, found := lo.Find(columns, func(column *SQLiteColumn) bool {
+			return column.Name == key[0]
+		})
+		if found {
+			matchingColumn.Unique = true
+
+			// The table form of the constraint holds the ON CONFLICT clause, and the
+			// column keeps it.
+			if matchingColumn.UniqueConflict == "" {
+				matchingColumn.UniqueConflict = parsedUnique.Conflict
+			}
+		}
+	}
+
+	indexes, err := d.GetTableIndexes(ctx, db, tableName, indexList)
+	if err != nil {
+		return nil, err
+	}
+
+	triggers, err := d.GetTriggers(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	foreignKeys, err := d.GetTableForeignKeys(ctx, db, tableName, parsed.ForeignKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	primaryKeyKeys := parsed.PrimaryKeyKeys
+	if len(primaryKeyKeys) != len(primaryKey) {
+		primaryKeyKeys = nil
+	}
+
+	return &SQLiteTable{
+		Name:               tableName,
+		Columns:            columns,
+		PrimaryKey:         primaryKey,
+		PrimaryKeyKeys:     primaryKeyKeys,
+		UniqueConstraints:  uniqueConstraints,
+		Indexes:            indexes,
+		Triggers:           triggers,
+		ForeignKeys:        foreignKeys,
+		CheckConstraints:   parsed.CheckConstraints,
+		PrimaryKeyName:     parsed.PrimaryKeyName,
+		PrimaryKeyConflict: parsed.PrimaryKeyConflict,
+		WithoutRowID:       parsed.WithoutRowID,
+		Strict:             parsed.Strict,
+	}, nil
+}
+
+func (d *SQLiteDriver) GetTableDefinition(ctx context.Context, db *sql.DB, tableName string) (string, error) {
+	row := db.QueryRowContext(ctx,
+		"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?;", tableName)
+
+	var definition sql.NullString
+
+	err := row.Scan(&definition)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	return definition.String, nil
 }

@@ -1,6 +1,8 @@
 package driverssqlite
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"strings"
@@ -44,4 +46,40 @@ func conflictClause(resolution string) string {
 	}
 
 	return " ON CONFLICT " + resolution
+}
+
+// This method sorts the keys, because SQLite gives no stable order.
+func (d *SQLiteDriver) GetTableUniqueKeys(
+	ctx context.Context,
+	db *sql.DB,
+	indexList []sqliteIndexListEntry,
+) ([][]string, error) {
+	var keys [][]string
+
+	for _, index := range indexList {
+		if index.Origin != "u" {
+			continue
+		}
+
+		indexInfo, err := d.getIndexInfo(ctx, db, index.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		var columnNames []string
+
+		for _, entry := range indexInfo {
+			if !entry.Name.Valid {
+				return nil, fmt.Errorf("the index %s holds a key at the position %d that is no column", index.Name, entry.Position)
+			}
+
+			columnNames = append(columnNames, entry.Name.String)
+		}
+
+		keys = append(keys, columnNames)
+	}
+
+	slices.SortStableFunc(keys, slices.Compare)
+
+	return keys, nil
 }

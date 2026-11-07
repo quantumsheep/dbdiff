@@ -54,9 +54,9 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]driversshared.Instructio
 			WritableColumns: func(table *SQLiteTable) []string {
 				return writableSQLiteColumnNames(table.Columns)
 			},
-			// go-sqlite3 reads a column of the declared type DATE as a time value, and it
-			// returns the zero time for a text that it cannot parse. The plus sign removes
-			// the declared type of the result column, so the driver returns the stored value.
+			// modernc.org/sqlite reads a valid date text of a column of the declared type DATE
+			// or DATETIME as a time value, which gives another text. The plus sign removes the
+			// declared type of the result column, so the driver returns the stored value.
 			SelectExpression: func(columnName string) string {
 				return "+" + driversshared.QuoteIdentifier(columnName)
 			},

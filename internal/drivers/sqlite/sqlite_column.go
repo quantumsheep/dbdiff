@@ -1,12 +1,16 @@
 package driverssqlite
 
 import (
+	"cmp"
+	"context"
 	"database/sql"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 type SQLiteColumn struct {
@@ -152,4 +156,111 @@ func isConstantDefault(value string) bool {
 	upperValue := strings.ToUpper(value)
 
 	return upperValue != "CURRENT_TIME" && upperValue != "CURRENT_DATE" && upperValue != "CURRENT_TIMESTAMP"
+}
+
+const (
+	hiddenColumnOfAVirtualTable = 1
+	virtualGeneratedColumn      = 2
+	storedGeneratedColumn       = 3
+)
+
+// PRAGMA table_info gives no generated column, so this method reads PRAGMA table_xinfo.
+// That PRAGMA gives no expression, so the parsed definition gives it. The second value
+// holds a primary key of two or more columns, in the order of the key.
+func (d *SQLiteDriver) GetTableColumns(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	parsed *SQLiteTableDefinition,
+) ([]*SQLiteColumn, []string, error) {
+	type primaryKeyColumn struct {
+		Column   *SQLiteColumn
+		Position int
+	}
+
+	// A PRAGMA statement takes no placeholder, so QuoteIdentifier must quote every name.
+	rows, err := db.QueryContext(ctx, "PRAGMA table_xinfo("+driversshared.QuoteIdentifier(tableName)+");")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	defer func() { _ = rows.Close() }()
+
+	var columns []*SQLiteColumn
+	var primaryKeyColumns []primaryKeyColumn
+
+	for rows.Next() {
+		var columnID int
+		var name string
+		var columnType string
+		var isNotNull int
+		var defaultValue sql.NullString
+		var primaryKeyPosition int
+		var hidden int
+
+		err := rows.Scan(&columnID, &name, &columnType, &isNotNull, &defaultValue, &primaryKeyPosition, &hidden)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if hidden == hiddenColumnOfAVirtualTable {
+			continue
+		}
+
+		column := &SQLiteColumn{
+			Name:            name,
+			Type:            columnType,
+			NotNull:         isNotNull == 1,
+			Default:         normalizedDefault(defaultValue),
+			GeneratedStored: hidden == storedGeneratedColumn,
+		}
+
+		attributes, found := parsed.ColumnByName(name)
+		if found {
+			column.AutoIncrement = attributes.AutoIncrement
+			column.Collation = attributes.Collation
+			column.Checks = attributes.Checks
+			column.PrimaryKeyConflict = attributes.PrimaryKeyConflict
+			column.UniqueConflict = attributes.UniqueConflict
+			column.NotNullConflict = attributes.NotNullConflict
+
+			if hidden == virtualGeneratedColumn || hidden == storedGeneratedColumn {
+				column.GeneratedExpression = attributes.GeneratedExpression
+			}
+		}
+
+		columns = append(columns, column)
+
+		if primaryKeyPosition > 0 {
+			primaryKeyColumns = append(primaryKeyColumns, primaryKeyColumn{
+				Column:   column,
+				Position: primaryKeyPosition,
+			})
+		}
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// A key of one column stays a column constraint, which keeps INTEGER PRIMARY KEY as the
+	// alias of the rowid.
+	if len(primaryKeyColumns) == 1 {
+		primaryKeyColumns[0].Column.PrimaryKey = true
+	}
+
+	if len(primaryKeyColumns) < 2 {
+		return columns, nil, nil
+	}
+
+	slices.SortStableFunc(primaryKeyColumns, func(first primaryKeyColumn, second primaryKeyColumn) int {
+		return cmp.Compare(first.Position, second.Position)
+	})
+
+	primaryKey := lo.Map(primaryKeyColumns, func(keyColumn primaryKeyColumn, _ int) string {
+		return keyColumn.Column.Name
+	})
+
+	return columns, primaryKey, nil
 }

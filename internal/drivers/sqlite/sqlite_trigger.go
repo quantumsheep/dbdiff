@@ -1,6 +1,9 @@
 package driverssqlite
 
 import (
+	"context"
+	"database/sql"
+
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
@@ -27,4 +30,14 @@ func diffTriggerRules() driversshared.DiffRules[*SQLiteTrigger] {
 				Name: trigger.Name,
 			}
 		})
+}
+
+func (d *SQLiteDriver) GetTriggers(ctx context.Context, db *sql.DB, objectName string) ([]*SQLiteTrigger, error) {
+	return driversshared.QueryAll(ctx, db, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? COLLATE NOCASE ORDER BY name", func(rows *sql.Rows) (*SQLiteTrigger, error) {
+		trigger := &SQLiteTrigger{}
+
+		err := rows.Scan(&trigger.Name, &trigger.SQL)
+
+		return trigger, err
+	}, objectName)
 }
