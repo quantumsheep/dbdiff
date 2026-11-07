@@ -636,6 +636,37 @@ func TestMySQLColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
 	})
 
+	t.Run("ReplaceTheOnlyColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (b varchar(10));")
+		driver.ExecOnCurrent("CREATE TABLE t (a int);")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1), (2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "b",
+						Type: "varchar(10)",
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "a",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"b": nil},
+			{"b": nil},
+		}, driver.FetchAllFromCurrent("t", ""))
+	})
+
 	t.Run("RenameAColumnThatAGeneratedColumnReads", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -1516,5 +1547,36 @@ func TestMariaDBColumn(t *testing.T) {
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
 		require.EqualError(t, err, `the check "a" of table "t" names no column. Its expression reads no column `+
 			`or more than one column. Change the check manually`)
+	})
+
+	t.Run("ReplaceTheOnlyColumn", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (b varchar(10));")
+		driver.ExecOnCurrent("CREATE TABLE t (a int);")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1), (2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "b",
+						Type: "varchar(10)",
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "a",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"b": nil},
+			{"b": nil},
+		}, driver.FetchAllFromCurrent("t", ""))
 	})
 }

@@ -519,13 +519,22 @@ func (t *MySQLTable) DiffTable(
 		})
 	}
 
+	var dropInstructions []driversshared.Instruction
+
 	for _, columnName := range columnsDiff.Removed {
-		instructions = append(instructions, &MySQLAlterTableInstruction{
+		dropInstructions = append(dropInstructions, &MySQLAlterTableInstruction{
 			Name: t.Name,
 			Action: &MySQLDropColumnAction{
 				ColumnName: columnName,
 			},
 		})
+	}
+
+	// MySQL refuses the drop of the last column, so the drops come after the additions when
+	// the diff drops every current column.
+	dropsAfterAdditions := len(columnsDiff.Removed) == len(other.Columns)
+	if !dropsAfterAdditions {
+		instructions = append(instructions, dropInstructions...)
 	}
 
 	// The map gives no stable order. The loop walks the desired columns instead, so the
@@ -592,6 +601,10 @@ func (t *MySQLTable) DiffTable(
 	}
 
 	instructions = append(instructions, addInstructions...)
+
+	if dropsAfterAdditions {
+		instructions = append(instructions, dropInstructions...)
+	}
 
 	if primaryKeyChanged && len(t.PrimaryKey) > 0 && !primaryKeyAddedWithColumn {
 		instructions = append(instructions, &MySQLAlterTableInstruction{
