@@ -119,7 +119,12 @@ jobs:
           key: embedded-postgres-${{ matrix.platform.suffix }}
 
       - name: Run Tests
-        run: go test -race -v -coverprofile=coverage.out ./...
+        run: go test -v -coverprofile=coverage.out ./...
+
+      # The race detector slows the decompression of the temporary servers past the time
+      # limit of a test, so the -short flag stops the tests of the temporary servers here.
+      - name: Run Tests With The Race Detector
+        run: go test -race -short ./...
 
       - name: Show The Coverage
         run: go tool cover -func=coverage.out
