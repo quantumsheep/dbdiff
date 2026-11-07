@@ -10,9 +10,12 @@ import (
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 )
 
-// This name is a constant of dbdiff. Every dbdiff process takes the same lock, and no
-// other application takes it.
-const mysqlMigrationLockName = "dbdiff_migrations"
+// A lock name is unique in the server, not in the database, so the name holds the
+// database. MySQL refuses a lock name longer than 64 characters, so the name holds a hash
+// of the database name.
+const mysqlMigrationLockNameExpression = "CONCAT('dbdiff_migrations_', MD5(DATABASE()))"
+
+var errMySQLMigrationLockNotTaken = errors.New("the server did not give the migration lock")
 
 var mysqlHistoryDialect = internalmigrations.SQLDialect{
 	QuoteIdentifier: QuoteIdentifier,
@@ -87,27 +90,52 @@ func (m *MySQLMigrator) SupportsTransactionalDDL() bool {
 	return false
 }
 
+// GET_LOCK gives 1 when the session takes the lock, 0 when the time limit ends, and NULL
+// when an error occurs.
 func (m *MySQLMigrator) Lock(ctx context.Context) error {
-	_, err := m.Connection.ExecContext(ctx, "SELECT GET_LOCK(?, -1);", mysqlMigrationLockName)
+	result, err := m.lockFunctionResult(ctx, "SELECT GET_LOCK("+mysqlMigrationLockNameExpression+", -1);")
+	if err != nil {
+		return err
+	}
 
-	return err
+	if result.Int64 != 1 {
+		return errMySQLMigrationLockNotTaken
+	}
+
+	return nil
 }
 
 func (m *MySQLMigrator) TryLock(ctx context.Context) (bool, error) {
-	row := m.Connection.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0);", mysqlMigrationLockName)
-
-	locked := false
-
-	err := row.Scan(&locked)
+	result, err := m.lockFunctionResult(ctx, "SELECT GET_LOCK("+mysqlMigrationLockNameExpression+", 0);")
 	if err != nil {
 		return false, err
 	}
 
-	return locked, nil
+	if !result.Valid {
+		return false, errMySQLMigrationLockNotTaken
+	}
+
+	return result.Int64 == 1, nil
 }
 
+// RELEASE_LOCK gives 0 when another session holds the lock, and NULL when no session holds it.
 func (m *MySQLMigrator) Unlock(ctx context.Context) error {
-	_, err := m.Connection.ExecContext(ctx, "SELECT RELEASE_LOCK(?);", mysqlMigrationLockName)
+	result, err := m.lockFunctionResult(ctx, "SELECT RELEASE_LOCK("+mysqlMigrationLockNameExpression+");")
+	if err != nil {
+		return err
+	}
 
-	return err
+	if result.Int64 != 1 {
+		return errors.New("this session does not hold the migration lock")
+	}
+
+	return nil
+}
+
+func (m *MySQLMigrator) lockFunctionResult(ctx context.Context, query string) (sql.NullInt64, error) {
+	var result sql.NullInt64
+
+	err := m.Connection.QueryRowContext(ctx, query).Scan(&result)
+
+	return result, err
 }

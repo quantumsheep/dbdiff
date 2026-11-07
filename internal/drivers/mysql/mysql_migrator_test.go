@@ -15,7 +15,8 @@ import (
 type TestingMySQLMigrator struct {
 	*MySQLMigrator
 
-	tb testing.TB
+	tb               testing.TB
+	connectionString string
 }
 
 func NewTestMySQLMigrator(tb testing.TB) *TestingMySQLMigrator {
@@ -41,17 +42,27 @@ func NewTestMySQLMigrator(tb testing.TB) *TestingMySQLMigrator {
 		require.NoError(tb, adminConnection.Close())
 	})
 
-	migrator, err := NewMySQLMigrator(tb.Context(),
-		testConnectionStringWithDatabase(tb, mysqlTestConnectionString, database))
-	require.NoError(tb, err)
-	tb.Cleanup(func() {
-		require.NoError(tb, migrator.Close())
+	connectionString := testConnectionStringWithDatabase(tb, mysqlTestConnectionString, database)
+
+	testingMigrator := &TestingMySQLMigrator{
+		tb:               tb,
+		connectionString: connectionString,
+	}
+	testingMigrator.MySQLMigrator = testingMigrator.OpenOtherSession()
+
+	return testingMigrator
+}
+
+func (m *TestingMySQLMigrator) OpenOtherSession() *MySQLMigrator {
+	m.tb.Helper()
+
+	migrator, err := NewMySQLMigrator(m.tb.Context(), m.connectionString)
+	require.NoError(m.tb, err)
+	m.tb.Cleanup(func() {
+		require.NoError(m.tb, migrator.Close())
 	})
 
-	return &TestingMySQLMigrator{
-		MySQLMigrator: migrator,
-		tb:            tb,
-	}
+	return migrator
 }
 
 func (m *TestingMySQLMigrator) TableNames() []string {
@@ -103,7 +114,7 @@ func TestMySQLMigrator(t *testing.T) {
 
 	t.Run("TryLockReportsALockOfAnotherSession", func(t *testing.T) {
 		first := NewTestMySQLMigrator(t)
-		second := NewTestMySQLMigrator(t)
+		second := first.OpenOtherSession()
 
 		require.NoError(t, first.Lock(t.Context()))
 
@@ -118,6 +129,39 @@ func TestMySQLMigrator(t *testing.T) {
 		require.True(t, locked)
 
 		require.NoError(t, second.Unlock(t.Context()))
+	})
+
+	t.Run("LocksOfTwoDatabasesDoNotBlockEachOther", func(t *testing.T) {
+		first := NewTestMySQLMigrator(t)
+		second := NewTestMySQLMigrator(t)
+
+		require.NoError(t, first.Lock(t.Context()))
+
+		locked, err := second.TryLock(t.Context())
+		require.NoError(t, err)
+		require.True(t, locked)
+
+		require.NoError(t, second.Unlock(t.Context()))
+		require.NoError(t, first.Unlock(t.Context()))
+	})
+
+	t.Run("UnlockWithNoLockReportsAnError", func(t *testing.T) {
+		migrator := NewTestMySQLMigrator(t)
+
+		err := migrator.Unlock(t.Context())
+		require.EqualError(t, err, "this session does not hold the migration lock")
+	})
+
+	t.Run("UnlockOfALockOfAnotherSessionReportsAnError", func(t *testing.T) {
+		first := NewTestMySQLMigrator(t)
+		second := first.OpenOtherSession()
+
+		require.NoError(t, first.Lock(t.Context()))
+
+		err := second.Unlock(t.Context())
+		require.EqualError(t, err, "this session does not hold the migration lock")
+
+		require.NoError(t, first.Unlock(t.Context()))
 	})
 
 	t.Run("EnsureHistoryTableAddsTheDirtyColumnToAnOldTable", func(t *testing.T) {
