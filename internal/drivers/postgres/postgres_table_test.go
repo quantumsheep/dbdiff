@@ -244,9 +244,10 @@ func TestPostgresTable(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresAddConstraintAction{
 						Constraint: &PostgresConstraint{
-							Name: "animal_zoo_id_fkey",
-							Type: "f",
-							Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+							Name:            "animal_zoo_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+							ReferencedTable: "zoo",
 						},
 					},
 				},
@@ -311,9 +312,10 @@ func TestPostgresTable(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresAddConstraintAction{
 						Constraint: &PostgresConstraint{
-							Name: "users_org_id_fkey",
-							Type: "f",
-							Def:  "FOREIGN KEY (org_id) REFERENCES orgs(id)",
+							Name:            "users_org_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (org_id) REFERENCES orgs(id)",
+							ReferencedTable: "orgs",
 						},
 					},
 				},
@@ -323,9 +325,10 @@ func TestPostgresTable(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresAddConstraintAction{
 						Constraint: &PostgresConstraint{
-							Name: "orgs_owner_id_fkey",
-							Type: "f",
-							Def:  "FOREIGN KEY (owner_id) REFERENCES users(id)",
+							Name:            "orgs_owner_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (owner_id) REFERENCES users(id)",
+							ReferencedTable: "users",
 						},
 					},
 				},
@@ -385,9 +388,10 @@ func TestPostgresTable(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresAddConstraintAction{
 						Constraint: &PostgresConstraint{
-							Name: "animal_zoo_id_fkey",
-							Type: "f",
-							Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+							Name:            "animal_zoo_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+							ReferencedTable: "zoo",
 						},
 					},
 				},
@@ -440,9 +444,10 @@ func TestPostgresTable(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresAddConstraintAction{
 						Constraint: &PostgresConstraint{
-							Name: "animal_zoo_id_fkey",
-							Type: "f",
-							Def:  "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+							Name:            "animal_zoo_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+							ReferencedTable: "zoo",
 						},
 					},
 				},
@@ -1426,14 +1431,6 @@ func TestPostgresTable(t *testing.T) {
 					&PostgresRowLevelSecurityAction{Mode: "ENABLE"},
 				},
 			},
-			&PostgresCreatePolicyInstruction{
-				Name:       "low_read",
-				TableName:  "measurements_low",
-				Permissive: "PERMISSIVE",
-				Command:    "SELECT",
-				Roles:      []string{"public"},
-				Using:      "(value > 0)",
-			},
 			&PostgresCommentOnTableInstruction{
 				Name: "measurements_low",
 				Text: "low range",
@@ -1443,6 +1440,14 @@ func TestPostgresTable(t *testing.T) {
 			},
 			&PostgresCreateTriggerInstruction{
 				Definition: "CREATE TRIGGER low_trigger BEFORE INSERT ON measurements_low FOR EACH ROW EXECUTE FUNCTION touch()",
+			},
+			&PostgresCreatePolicyInstruction{
+				Name:       "low_read",
+				TableName:  "measurements_low",
+				Permissive: "PERMISSIVE",
+				Command:    "SELECT",
+				Roles:      []string{"public"},
+				Using:      "(value > 0)",
 			},
 		})
 	})

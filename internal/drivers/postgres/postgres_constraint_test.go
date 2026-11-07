@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPostgresConstraint(t *testing.T) {
@@ -74,9 +75,10 @@ func TestPostgresConstraint(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresAddConstraintAction{
 						Constraint: &PostgresConstraint{
-							Name: "fk_role",
-							Type: "f",
-							Def:  "FOREIGN KEY (role_id) REFERENCES roles(id)",
+							Name:            "fk_role",
+							Type:            "f",
+							Def:             "FOREIGN KEY (role_id) REFERENCES roles(id)",
+							ReferencedTable: "roles",
 						},
 					},
 				},
@@ -99,6 +101,12 @@ func TestPostgresConstraint(t *testing.T) {
 			&PostgresAlterTableInstruction{
 				Name: "items",
 				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{ConstraintName: "small_price"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "items",
+				Actions: []driversshared.AlterTableAction{
 					&PostgresDropConstraintAction{ConstraintName: "positive_price"},
 				},
 			},
@@ -112,12 +120,6 @@ func TestPostgresConstraint(t *testing.T) {
 							Def:  "CHECK ((price >= 0))",
 						},
 					},
-				},
-			},
-			&PostgresAlterTableInstruction{
-				Name: "items",
-				Actions: []driversshared.AlterTableAction{
-					&PostgresDropConstraintAction{ConstraintName: "small_price"},
 				},
 			},
 		})
@@ -224,5 +226,259 @@ func TestPostgresConstraint(t *testing.T) {
 				},
 			},
 		})
+	})
+
+	t.Run("ChangeAReferencedPrimaryKeyAndItsForeignKey", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE accounts (id INT, region TEXT NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE orders (id INT, account_id INT, region TEXT, FOREIGN KEY (account_id) REFERENCES accounts (id));
+			INSERT INTO accounts VALUES (1, 'eu');
+			INSERT INTO orders VALUES (1, 1, 'eu');
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE accounts (id INT, region TEXT NOT NULL, PRIMARY KEY (id, region));
+			CREATE TABLE orders (
+				id INT,
+				account_id INT,
+				region TEXT,
+				FOREIGN KEY (account_id, region) REFERENCES accounts (id, region)
+			);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "orders_account_id_fkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "accounts_pkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "accounts_pkey",
+							Type: "p",
+							Def:  "PRIMARY KEY (id, region)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:            "orders_account_id_region_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (account_id, region) REFERENCES accounts(id, region)",
+							ReferencedTable: "accounts",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("orders", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "account_id": int64(1), "region": "eu"},
+		}, rows)
+	})
+
+	t.Run("ChangeAReferencedPrimaryKeyAndKeepItsForeignKey", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE accounts (id INT, region TEXT NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE orders (account_id INT REFERENCES accounts (id));
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE accounts (id INT, region TEXT NOT NULL, PRIMARY KEY (id, region), UNIQUE (id));
+			CREATE TABLE orders (account_id INT REFERENCES accounts (id));
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "orders_account_id_fkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "accounts_id_key",
+							Type: "u",
+							Def:  "UNIQUE (id)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "accounts_pkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "accounts_pkey",
+							Type: "p",
+							Def:  "PRIMARY KEY (id, region)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:            "orders_account_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (account_id) REFERENCES accounts(id)",
+							ReferencedTable: "accounts",
+						},
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("AddASelfReferenceAndAPrimaryKey", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE nodes (id INT NOT NULL, parent_id INT);`)
+		driver.ExecOnDesired(`CREATE TABLE nodes (id INT PRIMARY KEY, parent_id INT REFERENCES nodes (id));`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "nodes",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "nodes_pkey",
+							Type: "p",
+							Def:  "PRIMARY KEY (id)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "nodes",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:            "nodes_parent_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (parent_id) REFERENCES nodes(id)",
+							ReferencedTable: "nodes",
+						},
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("ChangeAReferencedUniqueIndex", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE accounts (id INT, code TEXT);
+			CREATE UNIQUE INDEX accounts_code ON accounts (code);
+			CREATE TABLE orders (account_code TEXT REFERENCES accounts (code));
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE accounts (id INT, code TEXT);
+			CREATE UNIQUE INDEX accounts_code ON accounts (code) INCLUDE (id);
+			CREATE TABLE orders (account_code TEXT REFERENCES accounts (code));
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "orders_account_code_fkey",
+					},
+				},
+			},
+			&driversshared.SQLDropIndexInstruction{
+				Name: "accounts_code",
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE UNIQUE INDEX accounts_code ON accounts USING btree (code) INCLUDE (id)",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:            "orders_account_code_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (account_code) REFERENCES accounts(code)",
+							ReferencedTable: "accounts",
+						},
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("RenameAPrimaryKey", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE accounts (id INT, CONSTRAINT accounts_pkey PRIMARY KEY (id));
+			INSERT INTO accounts VALUES (1), (2);
+		`)
+		driver.ExecOnDesired(`CREATE TABLE accounts (id INT, CONSTRAINT accounts_pk PRIMARY KEY (id));`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "accounts_pkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "accounts_pk",
+							Type: "p",
+							Def:  "PRIMARY KEY (id)",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("accounts", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+			{"id": int64(2)},
+		}, rows)
 	})
 }

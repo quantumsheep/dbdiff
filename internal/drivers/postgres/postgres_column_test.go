@@ -743,6 +743,10 @@ func TestPostgresColumn(t *testing.T) {
 					},
 				},
 			},
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER touch_doubled BEFORE UPDATE OF doubled ON measures " +
+					"FOR EACH ROW EXECUTE FUNCTION touch()",
+			},
 			&PostgresCreatePolicyInstruction{
 				Name:       "positive_doubled",
 				TableName:  "measures",
@@ -750,10 +754,6 @@ func TestPostgresColumn(t *testing.T) {
 				Command:    "ALL",
 				Roles:      []string{"public"},
 				Using:      "(doubled > 0)",
-			},
-			&PostgresCreateTriggerInstruction{
-				Definition: "CREATE TRIGGER touch_doubled BEFORE UPDATE OF doubled ON measures " +
-					"FOR EACH ROW EXECUTE FUNCTION touch()",
 			},
 		})
 
@@ -1320,5 +1320,76 @@ func TestPostgresColumn(t *testing.T) {
 				},
 			},
 		})
+	})
+
+	t.Run("RebuiltColumnThatAForeignKeyOfAnotherTableReferences", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE accounts (name TEXT, code TEXT UNIQUE);
+			CREATE TABLE orders (id INT, account_code TEXT REFERENCES accounts (code));
+			INSERT INTO accounts VALUES ('a', 'A');
+			INSERT INTO orders VALUES (1, 'A');
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE accounts (name TEXT, code TEXT GENERATED ALWAYS AS (upper(name)) STORED UNIQUE);
+			CREATE TABLE orders (id INT, account_code TEXT REFERENCES accounts (code));
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "orders_account_code_fkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{
+						ColumnName: "code",
+					},
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "code",
+							Type:                "text",
+							GeneratedExpression: "upper(name)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "accounts_code_key",
+							Type: "u",
+							Def:  "UNIQUE (code)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:            "orders_account_code_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (account_code) REFERENCES accounts(code)",
+							ReferencedTable: "accounts",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("orders", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "account_code": "A"},
+		}, rows)
 	})
 }

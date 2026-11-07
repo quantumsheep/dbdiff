@@ -275,10 +275,12 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 	return nil
 }
 
+// TableName names the table of a foreign key of another table.
 type PostgresColumnDependent struct {
 	ColumnName string
 	Kind       string
 	Name       string
+	TableName  string
 }
 
 // A DROP COLUMN statement removes the indexes and the constraints of the column. PostgreSQL
@@ -291,13 +293,15 @@ func getColumnDependents(
 	columnNames []string,
 ) ([]*PostgresColumnDependent, error) {
 	return driversshared.QueryAll(ctx, db, `
-		SELECT DISTINCT attname, kind, name
+		SELECT DISTINCT attname, kind, name, table_name
 		FROM (
 			SELECT
 				a.attname,
 				CASE
 					WHEN index_class.oid IS NOT NULL THEN 'index'
 					WHEN table_constraint.oid IS NOT NULL THEN 'constraint'
+					WHEN foreign_key_class.relnamespace = current_schema()::regnamespace THEN 'foreign key'
+					WHEN foreign_key.oid IS NOT NULL THEN 'blocker'
 					WHEN table_trigger.oid IS NOT NULL THEN 'trigger'
 					WHEN table_policy.polrelid = d.refobjid THEN 'policy'
 					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
@@ -307,6 +311,9 @@ func getColumnDependents(
 				CASE
 					WHEN index_class.oid IS NOT NULL THEN index_class.relname
 					WHEN table_constraint.oid IS NOT NULL THEN table_constraint.conname
+					WHEN foreign_key_class.relnamespace = current_schema()::regnamespace THEN foreign_key.conname
+					WHEN foreign_key.oid IS NOT NULL THEN
+						format('constraint %I on %s', foreign_key.conname, foreign_key.conrelid::regclass)
 					WHEN table_trigger.oid IS NOT NULL THEN table_trigger.tgname
 					WHEN table_policy.polrelid = d.refobjid THEN table_policy.polname
 					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
@@ -315,7 +322,8 @@ func getColumnDependents(
 						format('policy %I on %s', table_policy.polname, table_policy.polrelid::regclass)
 					WHEN r.rulename = '_RETURN' THEN format('view %s', r.ev_class::regclass)
 					ELSE format('rule %I on %s', r.rulename, r.ev_class::regclass)
-				END AS name
+				END AS name,
+				coalesce(foreign_key_class.relname, '') AS table_name
 			FROM pg_depend d
 			JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
 			LEFT JOIN pg_class index_class ON d.classid = 'pg_class'::regclass
@@ -324,6 +332,11 @@ func getColumnDependents(
 			LEFT JOIN pg_constraint table_constraint ON d.classid = 'pg_constraint'::regclass
 				AND table_constraint.oid = d.objid
 				AND table_constraint.conrelid = d.refobjid
+			LEFT JOIN pg_constraint foreign_key ON d.classid = 'pg_constraint'::regclass
+				AND foreign_key.oid = d.objid
+				AND foreign_key.conrelid <> d.refobjid
+				AND foreign_key.contype = 'f'
+			LEFT JOIN pg_class foreign_key_class ON foreign_key_class.oid = foreign_key.conrelid
 			LEFT JOIN pg_trigger table_trigger ON d.classid = 'pg_trigger'::regclass
 				AND table_trigger.oid = d.objid
 			LEFT JOIN pg_policy table_policy ON d.classid = 'pg_policy'::regclass
@@ -339,7 +352,7 @@ func getColumnDependents(
 	`, func(rows *sql.Rows) (*PostgresColumnDependent, error) {
 		dependent := &PostgresColumnDependent{}
 
-		err := rows.Scan(&dependent.ColumnName, &dependent.Kind, &dependent.Name)
+		err := rows.Scan(&dependent.ColumnName, &dependent.Kind, &dependent.Name, &dependent.TableName)
 
 		return dependent, err
 	}, driversshared.QuoteIdentifier(tableName), columnNames)

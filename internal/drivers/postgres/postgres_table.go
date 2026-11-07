@@ -65,10 +65,6 @@ func (t *PostgresTable) RowLevelSecurityInstructions() []driversshared.Instructi
 		})
 	}
 
-	for _, policy := range t.Policies {
-		instructions = append(instructions, policy.CreateInstruction())
-	}
-
 	return instructions
 }
 
@@ -86,16 +82,6 @@ func (t *PostgresTable) ReplicaIdentityInstructions() []driversshared.Instructio
 			IndexName: t.ReplicaIdentityIndex,
 		}},
 	}}
-}
-
-func (t *PostgresTable) PolicyByName(name string) (*PostgresPolicy, bool) {
-	for _, policy := range t.Policies {
-		if policy.Name == name {
-			return policy, true
-		}
-	}
-
-	return nil, false
 }
 
 // PostgreSQL accepts a comment in no CREATE statement.
@@ -481,9 +467,19 @@ func (t *PostgresTable) DiffTable(
 	instructions = append(instructions, diffComments(t, other)...)
 
 	// PostgreSQL drops every constraint and every index of a column with the column, so
-	// these two blocks come before the column removals below.
+	// these two blocks come before the column removals below. DiffTables prints the foreign
+	// keys, because a foreign key can name a key of a table that DiffTables changes later.
+	// A table holds one primary key only, so the removals come before the additions.
+	for _, currentConstraint := range other.Constraints {
+		_, found := t.ConstraintByName(currentConstraint.Name)
+		if !found && !currentConstraint.Inherited && !currentConstraint.IsForeignKey() {
+			instructions = append(instructions,
+				alterTable(&PostgresDropConstraintAction{ConstraintName: currentConstraint.Name}))
+		}
+	}
+
 	for _, desiredConstraint := range t.Constraints {
-		if desiredConstraint.Inherited {
+		if desiredConstraint.Inherited || desiredConstraint.IsForeignKey() {
 			continue
 		}
 
@@ -499,14 +495,6 @@ func (t *PostgresTable) DiffTable(
 			instructions = append(instructions,
 				alterTable(&PostgresDropConstraintAction{ConstraintName: currentConstraint.Name}),
 				alterTable(&PostgresAddConstraintAction{Constraint: desiredConstraint}))
-		}
-	}
-
-	for _, currentConstraint := range other.Constraints {
-		_, found := t.ConstraintByName(currentConstraint.Name)
-		if !found && !currentConstraint.Inherited {
-			instructions = append(instructions,
-				alterTable(&PostgresDropConstraintAction{ConstraintName: currentConstraint.Name}))
 		}
 	}
 
@@ -777,26 +765,6 @@ func diffRowLevelSecurity(desiredTable *PostgresTable, currentTable *PostgresTab
 		}
 	}
 
-	for _, desiredPolicy := range desiredTable.Policies {
-		currentPolicy, found := currentTable.PolicyByName(desiredPolicy.Name)
-		if !found {
-			instructions = append(instructions, desiredPolicy.CreateInstruction())
-			continue
-		}
-
-		if !desiredPolicy.Equal(currentPolicy) {
-			instructions = append(instructions,
-				currentPolicy.DropInstruction(), desiredPolicy.CreateInstruction())
-		}
-	}
-
-	for _, currentPolicy := range currentTable.Policies {
-		_, found := desiredTable.PolicyByName(currentPolicy.Name)
-		if !found {
-			instructions = append(instructions, currentPolicy.DropInstruction())
-		}
-	}
-
 	return instructions
 }
 
@@ -986,6 +954,14 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	// Two tables can name each other, so every foreign key comes after every table.
 	var foreignKeyInstructions []driversshared.Instruction
 
+	// A policy can read a second table, so every new policy comes after every table.
+	// PostgreSQL refuses a change of a column while a policy reads it, so every policy drop
+	// comes before every table change.
+	var policyInstructions []driversshared.Instruction
+
+	keptCurrentTables := map[string]*PostgresTable{}
+	recreatedForeignKeys := map[string]bool{}
+
 	for _, desiredTable := range desiredTables {
 		currentTable, found := lo.Find(currentTables, func(table *PostgresTable) bool {
 			return table.Name == desiredTable.Name
@@ -1009,6 +985,10 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 			foreignKeyInstructions = append(foreignKeyInstructions,
 				desiredTable.ForeignKeyInstructions()...)
 			ruleInstructions = append(ruleInstructions, desiredTable.RuleInstructions()...)
+
+			for _, policy := range desiredTable.Policies {
+				policyInstructions = append(policyInstructions, policy.CreateInstruction())
+			}
 
 			continue
 		}
@@ -1034,6 +1014,8 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 						dependent.Name, dependent.ColumnName, currentTable.Name)
 				case "relation":
 					d.markRecreated(dependent.Name)
+				case "foreign key":
+					recreatedForeignKeys[foreignKeyName(dependent.TableName, dependent.Name)] = true
 				}
 			}
 
@@ -1050,6 +1032,21 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 
 		additions = append(additions, subInstructions...)
 		ruleInstructions = append(ruleInstructions, desiredTable.DiffRules(currentTable)...)
+		keptCurrentTables[desiredTable.Name] = currentTable
+
+		policyCreations, policyDrops := driversshared.ReplaceByKey(desiredTable.Policies, currentTable.Policies,
+			func(policy *PostgresPolicy) string {
+				return policy.Name
+			},
+			(*PostgresPolicy).Equal,
+			func(policy *PostgresPolicy) driversshared.Instruction {
+				return policy.CreateInstruction()
+			},
+			func(policy *PostgresPolicy) driversshared.Instruction {
+				return policy.DropInstruction()
+			})
+		policyInstructions = append(policyInstructions, policyCreations...)
+		earlyRemovals = append(earlyRemovals, policyDrops...)
 
 		// PostgreSQL attaches an own index of a partition to a new index of the parent that
 		// matches it, and then refuses to drop it. So these removals come before every addition.
@@ -1058,7 +1055,12 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		}
 	}
 
+	foreignKeyDrops, foreignKeyAdditions := diffForeignKeys(desiredTables, currentTables, keptCurrentTables,
+		recreatedForeignKeys)
+	earlyRemovals = append(earlyRemovals, foreignKeyDrops...)
 	additions = append(additions, foreignKeyInstructions...)
+	additions = append(additions, foreignKeyAdditions...)
+	additions = append(additions, policyInstructions...)
 	additions = append(additions, ruleInstructions...)
 
 	// The reverse order gives each DROP TABLE statement before the table that it names.
@@ -1470,4 +1472,119 @@ func (d *PostgresDriver) getTableDetails(ctx context.Context, db *sql.DB, table 
 	table.Policies, err = d.GetTablePolicies(ctx, db, table.Name)
 
 	return err
+}
+
+func foreignKeyName(tableName string, constraintName string) string {
+	return tableName + "." + constraintName
+}
+
+// PostgreSQL refuses to drop a key while a foreign key uses it. A foreign key also blocks the
+// DROP COLUMN statement of a rebuilt column. Thus the drops come before every table change,
+// and the additions come after every table change. A foreign key that names a table with a
+// changed key goes through a drop and an addition too, because it can use the dropped key.
+// A partition takes the foreign keys of its parent.
+func diffForeignKeys(
+	desiredTables []*PostgresTable,
+	currentTables []*PostgresTable,
+	keptCurrentTables map[string]*PostgresTable,
+	recreatedForeignKeys map[string]bool,
+) ([]driversshared.Instruction, []driversshared.Instruction) {
+	keyChangedTables := map[string]bool{}
+
+	for _, desiredTable := range desiredTables {
+		currentTable, found := keptCurrentTables[desiredTable.Name]
+		if !found {
+			continue
+		}
+
+		for _, currentConstraint := range currentTable.Constraints {
+			if currentConstraint.Type != "p" && currentConstraint.Type != "u" {
+				continue
+			}
+
+			desiredConstraint, found := desiredTable.ConstraintByName(currentConstraint.Name)
+			if !found || desiredConstraint.Def != currentConstraint.Def {
+				keyChangedTables[currentTable.Name] = true
+			}
+		}
+
+		// A foreign key can also use a unique index that is not a constraint.
+		for _, currentIndex := range currentTable.Indexes {
+			if !strings.HasPrefix(currentIndex.Def, "CREATE UNIQUE INDEX") {
+				continue
+			}
+
+			desiredIndex, found := desiredTable.IndexByName(currentIndex.Name)
+			if !found || desiredIndex.Def != currentIndex.Def {
+				keyChangedTables[currentTable.Name] = true
+			}
+		}
+	}
+
+	foreignKeys := func(table *PostgresTable) []*PostgresConstraint {
+		return lo.Filter(table.Constraints, func(constraint *PostgresConstraint, _ int) bool {
+			return constraint.IsForeignKey() && !constraint.Inherited
+		})
+	}
+
+	mustRecreate := func(tableName string, constraint *PostgresConstraint) bool {
+		return keyChangedTables[constraint.ReferencedTable] ||
+			recreatedForeignKeys[foreignKeyName(tableName, constraint.Name)]
+	}
+
+	var drops []driversshared.Instruction
+	var additions []driversshared.Instruction
+
+	for _, currentTable := range currentTables {
+		if currentTable.IsPartition() {
+			continue
+		}
+
+		var desiredForeignKeys []*PostgresConstraint
+
+		desiredTable, found := lo.Find(desiredTables, func(table *PostgresTable) bool {
+			return table.Name == currentTable.Name
+		})
+		if found {
+			currentTable = keptCurrentTables[currentTable.Name]
+			desiredForeignKeys = foreignKeys(desiredTable)
+		} else {
+			desiredForeignKeys = lo.Filter(foreignKeys(currentTable), func(constraint *PostgresConstraint, _ int) bool {
+				return !mustRecreate(currentTable.Name, constraint)
+			})
+		}
+
+		alterTable := func(action driversshared.AlterTableAction) driversshared.Instruction {
+			return &PostgresAlterTableInstruction{
+				Name:    currentTable.Name,
+				Actions: []driversshared.AlterTableAction{action},
+			}
+		}
+
+		tableAdditions, tableDrops := driversshared.ReplaceByKey(desiredForeignKeys, foreignKeys(currentTable),
+			func(constraint *PostgresConstraint) string {
+				return constraint.Name
+			},
+			func(desired *PostgresConstraint, current *PostgresConstraint) bool {
+				return desired.Def == current.Def && !mustRecreate(currentTable.Name, current)
+			},
+			func(constraint *PostgresConstraint) driversshared.Instruction {
+				return alterTable(&PostgresAddConstraintAction{
+					Constraint: constraint,
+				})
+			},
+			func(constraint *PostgresConstraint) driversshared.Instruction {
+				return alterTable(&PostgresDropConstraintAction{
+					ConstraintName: constraint.Name,
+				})
+			})
+
+		if found {
+			additions = append(additions, tableAdditions...)
+		}
+
+		drops = append(drops, tableDrops...)
+	}
+
+	return drops, additions
 }

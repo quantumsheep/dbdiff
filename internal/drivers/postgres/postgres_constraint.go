@@ -9,9 +9,10 @@ import (
 )
 
 type PostgresConstraint struct {
-	Name string
-	Type string
-	Def  string
+	Name            string
+	Type            string
+	Def             string
+	ReferencedTable string
 
 	// The parent of a table of INHERITS holds this constraint, and each change of the parent
 	// reaches the child.
@@ -50,6 +51,8 @@ func getTableConstraints(ctx context.Context, db *sql.DB, table *PostgresTable) 
 		if err != nil {
 			return nil, err
 		}
+
+		constraint.ReferencedTable = referencedTable
 
 		if referencedTable != "" && referencedTable != table.Name {
 			table.References = append(table.References, referencedTable)
