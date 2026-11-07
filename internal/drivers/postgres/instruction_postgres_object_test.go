@@ -84,12 +84,27 @@ func TestPostgresObjectInstructions(t *testing.T) {
 	t.Run("PostgresCreateOwnedSequence", func(t *testing.T) {
 		instruction := &PostgresCreateOwnedSequenceInstruction{
 			Name:       "users_id_seq",
+			DataType:   "integer",
 			TableName:  "users",
 			ColumnName: "id",
 		}
 
 		require.Equal(t,
-			`CREATE SEQUENCE "users_id_seq" OWNED BY "users"."id";`,
+			`CREATE SEQUENCE "users_id_seq" AS integer OWNED BY "users"."id";`,
+			instruction.String())
+	})
+
+	t.Run("PostgresRestartOwnedSequence", func(t *testing.T) {
+		instruction := &PostgresRestartOwnedSequenceInstruction{
+			TableName:  "user's",
+			ColumnName: "Id",
+		}
+
+		require.Equal(t,
+			`SELECT setval(pg_get_serial_sequence('"user''s"', 'Id'), `+
+				`greatest(max("Id") + 1, (SELECT seqstart FROM pg_sequence `+
+				`WHERE seqrelid = pg_get_serial_sequence('"user''s"', 'Id')::regclass)), false) `+
+				`FROM "user's" HAVING max("Id") IS NOT NULL;`,
 			instruction.String())
 	})
 
@@ -215,6 +230,15 @@ func TestPostgresObjectInstructionComments(t *testing.T) {
 		}
 
 		require.Equal(t, `Create the sequence "users_id_seq"`, instruction.Comment())
+	})
+
+	t.Run("PostgresRestartOwnedSequence", func(t *testing.T) {
+		instruction := &PostgresRestartOwnedSequenceInstruction{
+			TableName:  "users",
+			ColumnName: "id",
+		}
+
+		require.Equal(t, `Restart the sequence of the column "id" of the table "users"`, instruction.Comment())
 	})
 
 	t.Run("PostgresCreateSequence", func(t *testing.T) {

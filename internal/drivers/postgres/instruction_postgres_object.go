@@ -85,17 +85,43 @@ func (i *PostgresCreateSequenceInstruction) Comment() string {
 
 type PostgresCreateOwnedSequenceInstruction struct {
 	Name       string
+	DataType   string
 	TableName  string
 	ColumnName string
 }
 
 func (i *PostgresCreateOwnedSequenceInstruction) String() string {
-	return fmt.Sprintf("CREATE SEQUENCE %s OWNED BY %s.%s;",
-		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteIdentifier(i.TableName), driversshared.QuoteIdentifier(i.ColumnName))
+	return fmt.Sprintf("CREATE SEQUENCE %s AS %s OWNED BY %s.%s;",
+		driversshared.QuoteIdentifier(i.Name), i.DataType,
+		driversshared.QuoteIdentifier(i.TableName), driversshared.QuoteIdentifier(i.ColumnName))
 }
 
 func (i *PostgresCreateOwnedSequenceInstruction) Comment() string {
 	return driversshared.ObjectComment("Create", "sequence", i.Name)
+}
+
+// A new sequence of a column that holds rows starts below the values of the column. The
+// statement sets the next value above them and never below the start value. HAVING skips
+// an empty table, so the sequence keeps its start value.
+type PostgresRestartOwnedSequenceInstruction struct {
+	TableName  string
+	ColumnName string
+}
+
+func (i *PostgresRestartOwnedSequenceInstruction) String() string {
+	sequence := fmt.Sprintf("pg_get_serial_sequence(%s, %s)",
+		driversshared.QuoteLiteral(driversshared.QuoteIdentifier(i.TableName)), driversshared.QuoteLiteral(i.ColumnName))
+	column := driversshared.QuoteIdentifier(i.ColumnName)
+
+	return fmt.Sprintf(
+		"SELECT setval(%[1]s, greatest(max(%[2]s) + 1, (SELECT seqstart FROM pg_sequence WHERE seqrelid = %[1]s::regclass)), false) "+
+			"FROM %[3]s HAVING max(%[2]s) IS NOT NULL;",
+		sequence, column, driversshared.QuoteIdentifier(i.TableName))
+}
+
+func (i *PostgresRestartOwnedSequenceInstruction) Comment() string {
+	return driversshared.OwnedObjectComment("Restart", "sequence", "column", i.ColumnName) +
+		" of the table " + driversshared.QuoteIdentifier(i.TableName)
 }
 
 type PostgresAlterSequenceInstruction struct {

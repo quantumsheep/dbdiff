@@ -330,6 +330,7 @@ func (t *PostgresTable) DiffTable(
 
 			instructions = append(instructions, &PostgresCreateOwnedSequenceInstruction{
 				Name:       sequenceName,
+				DataType:   desiredColumn.Type,
 				TableName:  t.Name,
 				ColumnName: desiredColumn.Name,
 			})
@@ -337,6 +338,10 @@ func (t *PostgresTable) DiffTable(
 				ColumnName: desiredColumn.Name,
 				Expression: fmt.Sprintf("nextval('%s'::regclass)", driversshared.QuoteIdentifier(sequenceName)),
 			}))
+			instructions = append(instructions, &PostgresRestartOwnedSequenceInstruction{
+				TableName:  t.Name,
+				ColumnName: desiredColumn.Name,
+			})
 		}
 
 		if desiredColumn.Serial == "" && currentColumn.Serial != "" {
@@ -399,7 +404,10 @@ func (t *PostgresTable) DiffTable(
 				instructions = append(instructions, alterTable(&PostgresAddIdentityAction{
 					ColumnName: desiredColumn.Name,
 					Identity:   desiredColumn.Identity,
-				}))
+				}), &PostgresRestartOwnedSequenceInstruction{
+					TableName:  t.Name,
+					ColumnName: desiredColumn.Name,
+				})
 			} else {
 				instructions = append(instructions, alterTable(&PostgresSetIdentityAction{
 					ColumnName: desiredColumn.Name,
