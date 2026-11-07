@@ -482,6 +482,27 @@ func (t *SQLiteTable) recreationInstructions(
 			SelectExpressions: selectColumns,
 			FromTableName:     t.Name,
 		},
+	}
+
+	// The DROP TABLE statement removes the sqlite_sequence row of the table, and the copy of
+	// the rows sets the counter of the temporary table to the largest copied key only. The
+	// counter must move to the temporary table before the drop, or SQLite gives a deleted key
+	// again. The CREATE TABLE statement of an AUTOINCREMENT column creates sqlite_sequence.
+	hasAutoIncrement := lo.SomeBy(t.Columns, func(column *SQLiteColumn) bool {
+		return column.AutoIncrement
+	})
+	if hasAutoIncrement {
+		recreation = append(recreation,
+			&SQLiteDeleteSequenceInstruction{
+				TableName: temporaryTable.Name,
+			},
+			&SQLiteCopySequenceInstruction{
+				FromTableName: t.Name,
+				ToTableName:   temporaryTable.Name,
+			})
+	}
+
+	recreation = append(recreation,
 		&driversshared.SQLDropTableInstruction{
 			Name: t.Name,
 		},
@@ -490,8 +511,7 @@ func (t *SQLiteTable) recreationInstructions(
 			Action: &driversshared.SQLRenameTableAction{
 				NewName: t.Name,
 			},
-		},
-	}
+		})
 
 	// The DROP TABLE statement removes each index and each trigger of the table. The
 	// recreation builds every one of them again from the desired table, so the index diff and

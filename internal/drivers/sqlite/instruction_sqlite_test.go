@@ -162,6 +162,20 @@ func TestSQLiteInstructions(t *testing.T) {
 			(&SQLitePragmaForeignKeysInstruction{Enabled: true}).String())
 	})
 
+	t.Run("SQLiteDeleteSequence", func(t *testing.T) {
+		require.Equal(t, `DELETE FROM sqlite_sequence WHERE name = '_it''s_temp';`,
+			(&SQLiteDeleteSequenceInstruction{TableName: "_it's_temp"}).String())
+	})
+
+	t.Run("SQLiteCopySequence", func(t *testing.T) {
+		require.Equal(t,
+			`INSERT INTO sqlite_sequence (name, seq) SELECT '_it''s_temp', seq FROM sqlite_sequence WHERE name = 'it''s' COLLATE NOCASE;`,
+			(&SQLiteCopySequenceInstruction{
+				FromTableName: "it's",
+				ToTableName:   "_it's_temp",
+			}).String())
+	})
+
 	t.Run("SQLiteCreateIndex", func(t *testing.T) {
 		instruction := &SQLiteCreateIndexInstruction{
 			Name:      "idx_users_name",
@@ -535,6 +549,16 @@ func TestSQLiteInstructionComments(t *testing.T) {
 		}
 
 		require.Equal(t, `Create the view "active_users"`, instruction.Comment())
+	})
+
+	t.Run("SQLiteSequence", func(t *testing.T) {
+		require.Equal(t, `Modify the AUTOINCREMENT counter of the table "_users_temp"`,
+			(&SQLiteDeleteSequenceInstruction{TableName: "_users_temp"}).Comment())
+		require.Equal(t, `Modify the AUTOINCREMENT counter of the table "_users_temp"`,
+			(&SQLiteCopySequenceInstruction{
+				FromTableName: "users",
+				ToTableName:   "_users_temp",
+			}).Comment())
 	})
 
 	t.Run("SQLiteDropTrigger", func(t *testing.T) {

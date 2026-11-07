@@ -1381,6 +1381,146 @@ func TestSQLiteColumn(t *testing.T) {
 		})
 	})
 
+	t.Run("RecreationKeepsTheAutoIncrementCounter", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT);
+			INSERT INTO t (c) VALUES ('a'), ('b'), ('c');
+			DELETE FROM t WHERE id = 3;
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT NOT NULL DEFAULT '');`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:          "id",
+							Type:          "INTEGER",
+							PrimaryKey:    true,
+							AutoIncrement: true,
+						},
+						{
+							Name:    "c",
+							Type:    "TEXT",
+							NotNull: true,
+							Default: sql.NullString{
+								String: "''",
+								Valid:  true,
+							},
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "c"},
+					SelectExpressions: []string{`"id"`, `"c"`},
+					FromTableName:     "t",
+				},
+				&SQLiteDeleteSequenceInstruction{TableName: "_t_temp"},
+				&SQLiteCopySequenceInstruction{
+					FromTableName: "t",
+					ToTableName:   "_t_temp",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		require.Equal(t, []map[string]any{
+			{"name": "t", "seq": int64(3)},
+		}, driver.FetchAllFromCurrent("sqlite_sequence", ""))
+
+		driver.ExecOnCurrent(`INSERT INTO t (c) VALUES ('new');`)
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "c": "a"},
+			{"id": int64(2), "c": "b"},
+			{"id": int64(4), "c": "new"},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("RecreationOfAnEmptyTableKeepsTheAutoIncrementCounter", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT);
+			INSERT INTO t (c) VALUES ('a'), ('b');
+			DELETE FROM t;
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT NOT NULL DEFAULT '');`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:          "id",
+							Type:          "INTEGER",
+							PrimaryKey:    true,
+							AutoIncrement: true,
+						},
+						{
+							Name:    "c",
+							Type:    "TEXT",
+							NotNull: true,
+							Default: sql.NullString{
+								String: "''",
+								Valid:  true,
+							},
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "c"},
+					SelectExpressions: []string{`"id"`, `"c"`},
+					FromTableName:     "t",
+				},
+				&SQLiteDeleteSequenceInstruction{TableName: "_t_temp"},
+				&SQLiteCopySequenceInstruction{
+					FromTableName: "t",
+					ToTableName:   "_t_temp",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		require.Equal(t, []map[string]any{
+			{"name": "t", "seq": int64(2)},
+		}, driver.FetchAllFromCurrent("sqlite_sequence", ""))
+
+		driver.ExecOnCurrent(`INSERT INTO t (c) VALUES ('new');`)
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(3), "c": "new"},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
 	t.Run("ModifyColumnCollationRecreatesTheTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

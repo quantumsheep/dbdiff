@@ -212,3 +212,31 @@ func (i *SQLitePragmaForeignKeysInstruction) Comment() string {
 
 	return "Turn the enforcement of the foreign keys off for the recreation of a table"
 }
+
+type SQLiteDeleteSequenceInstruction struct {
+	TableName string
+}
+
+func (i *SQLiteDeleteSequenceInstruction) String() string {
+	return "DELETE FROM sqlite_sequence WHERE name = " + driversshared.QuoteLiteral(i.TableName) + ";"
+}
+
+func (i *SQLiteDeleteSequenceInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "AUTOINCREMENT counter of the table", i.TableName)
+}
+
+// SQLite compares the table names without case, and sqlite_sequence holds the name of the
+// table as the CREATE TABLE statement wrote it, so the condition uses COLLATE NOCASE.
+type SQLiteCopySequenceInstruction struct {
+	FromTableName string
+	ToTableName   string
+}
+
+func (i *SQLiteCopySequenceInstruction) String() string {
+	return fmt.Sprintf("INSERT INTO sqlite_sequence (name, seq) SELECT %s, seq FROM sqlite_sequence WHERE name = %s COLLATE NOCASE;",
+		driversshared.QuoteLiteral(i.ToTableName), driversshared.QuoteLiteral(i.FromTableName))
+}
+
+func (i *SQLiteCopySequenceInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "AUTOINCREMENT counter of the table", i.ToTableName)
+}
