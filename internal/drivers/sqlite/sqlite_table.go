@@ -128,15 +128,94 @@ type SQLiteTableColumnsDiff struct {
 	TableOptionsChanged bool
 	ColumnOrderChanged  bool
 
-	AddsStoredGeneratedColumn bool
+	AddsColumnThatNeedsRecreation    bool
+	RemovesColumnThatNeedsRecreation bool
 }
 
 // SQLite supports no ALTER COLUMN, so a modified column, a changed foreign key, a changed
-// table constraint, or a changed table option needs a new table. SQLite also refuses an ADD
-// COLUMN action that holds a STORED generated column.
+// table constraint, or a changed table option needs a new table. SQLite also refuses some
+// ADD COLUMN and DROP COLUMN actions.
 func (d *SQLiteTableColumnsDiff) NeedsRecreation() bool {
 	return len(d.Modified) > 0 || d.ForeignKeysChanged || d.ConstraintsChanged ||
-		d.TableOptionsChanged || d.AddsStoredGeneratedColumn || d.ColumnOrderChanged
+		d.TableOptionsChanged || d.ColumnOrderChanged ||
+		d.AddsColumnThatNeedsRecreation || d.RemovesColumnThatNeedsRecreation
+}
+
+// SQLite refuses a DROP COLUMN action for each of these columns. The rules are at
+// https://www.sqlite.org/lang_altertable.html.
+func (t *SQLiteTable) NeedsRecreationToDrop(column *SQLiteColumn) bool {
+	if column.PrimaryKey || column.Unique || slices.Contains(t.PrimaryKey, column.Name) {
+		return true
+	}
+
+	for _, constraint := range t.UniqueConstraints {
+		if slices.Contains(constraint.Columns, column.Name) {
+			return true
+		}
+	}
+
+	for _, foreignKey := range t.ForeignKeys {
+		if slices.Contains(foreignKey.From, column.Name) {
+			return true
+		}
+	}
+
+	for _, index := range t.Indexes {
+		if expressionReferencesColumn(index.Where, column.Name) {
+			return true
+		}
+
+		for _, key := range index.Keys {
+			if expressionReferencesColumn(key, column.Name) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// A word that only looks like the column name, for example a function name, gives a
+// recreation that is not necessary. That recreation is correct.
+func expressionReferencesColumn(expression string, columnName string) bool {
+	index := 0
+
+	for index < len(expression) {
+		end := endOfQuotedTextOrComment(expression, index)
+		if end > index {
+			if expression[index] != '\'' && strings.EqualFold(unquoteIdentifier(expression[index:end]), columnName) {
+				return true
+			}
+
+			index = end
+
+			continue
+		}
+
+		for end < len(expression) && isIdentifierCharacter(expression[end]) {
+			end++
+		}
+
+		if end == index {
+			index++
+
+			continue
+		}
+
+		if strings.EqualFold(expression[index:end], columnName) {
+			return true
+		}
+
+		index = end
+	}
+
+	return false
+}
+
+func isIdentifierCharacter(character byte) bool {
+	return character == '_' || character == '$' || character >= 0x80 ||
+		(character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+		(character >= '0' && character <= '9')
 }
 
 // A SELECT * statement and an INSERT statement without column names read the order of
@@ -187,8 +266,8 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 
 			diff.Added = append(diff.Added, desiredColumn.Name)
 
-			if desiredColumn.IsGenerated() && desiredColumn.GeneratedStored {
-				diff.AddsStoredGeneratedColumn = true
+			if desiredColumn.NeedsRecreationToAdd() {
+				diff.AddsColumnThatNeedsRecreation = true
 			}
 
 			continue
@@ -206,6 +285,10 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		_, renamed := lo.FindKey(diff.RenamedFrom, currentColumn.Name)
 		if !found && !renamed {
 			diff.Removed = append(diff.Removed, currentColumn.Name)
+
+			if other.NeedsRecreationToDrop(currentColumn) {
+				diff.RemovesColumnThatNeedsRecreation = true
+			}
 		}
 	}
 

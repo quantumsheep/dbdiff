@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
@@ -119,4 +120,34 @@ func normalizedDefault(value sql.NullString) sql.NullString {
 		String: "(" + value.String + ")",
 		Valid:  true,
 	}
+}
+
+// SQLite refuses an ADD COLUMN action for each of these columns. The rules are at
+// https://www.sqlite.org/lang_altertable.html.
+func (c *SQLiteColumn) NeedsRecreationToAdd() bool {
+	if c.PrimaryKey || c.Unique {
+		return true
+	}
+
+	if c.IsGenerated() {
+		return c.GeneratedStored
+	}
+
+	if c.NotNull && (!c.Default.Valid || strings.EqualFold(c.Default.String, driversshared.SQLNullLiteral)) {
+		return true
+	}
+
+	return c.Default.Valid && !isConstantDefault(c.Default.String)
+}
+
+// SQLite refuses an expression in parentheses for an ADD COLUMN action, also if the
+// expression is constant.
+func isConstantDefault(value string) bool {
+	if strings.HasPrefix(value, "(") {
+		return false
+	}
+
+	upperValue := strings.ToUpper(value)
+
+	return upperValue != "CURRENT_TIME" && upperValue != "CURRENT_DATE" && upperValue != "CURRENT_TIMESTAMP"
 }

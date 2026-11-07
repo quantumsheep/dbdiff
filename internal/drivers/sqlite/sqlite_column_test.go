@@ -606,6 +606,475 @@ func TestSQLiteColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("AddNotNullColumnWithLiteralDefaultAltersTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY);
+
+			INSERT INTO t (id) VALUES (1);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT NOT NULL DEFAULT 'x');`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "t",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name:    "c",
+						Type:    "TEXT",
+						NotNull: true,
+						Default: sql.NullString{
+							String: "'x'",
+							Valid:  true,
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "c": "x"},
+		}, rows)
+	})
+
+	t.Run("AddPrimaryKeyColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (a INTEGER);
+
+			INSERT INTO t (a) VALUES (10), (20);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (a INTEGER, id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name: "a",
+							Type: "INTEGER",
+						},
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"a", "id"},
+					SelectExpressions: []string{`"a"`, "NULL"},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY a")
+
+		require.Equal(t, []map[string]any{
+			{"a": int64(10), "id": int64(1)},
+			{"a": int64(20), "id": int64(2)},
+		}, rows)
+	})
+
+	t.Run("AddUniqueColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY);
+
+			INSERT INTO t (id) VALUES (1), (2);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT UNIQUE);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name:   "c",
+							Type:   "TEXT",
+							Unique: true,
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "c"},
+					SelectExpressions: []string{`"id"`, "NULL"},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "c": nil},
+			{"id": int64(2), "c": nil},
+		}, rows)
+	})
+
+	t.Run("AddNotNullColumnWithoutDefaultRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT NOT NULL);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name:    "c",
+							Type:    "TEXT",
+							NotNull: true,
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "c"},
+					SelectExpressions: []string{`"id"`, "NULL"},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+	})
+
+	t.Run("AddColumnWithExpressionDefaultRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY);
+
+			INSERT INTO t (id) VALUES (1);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c INTEGER DEFAULT (1+1));`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name: "c",
+							Type: "INTEGER",
+							Default: sql.NullString{
+								String: "(1+1)",
+								Valid:  true,
+							},
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "c"},
+					SelectExpressions: []string{`"id"`, "(1+1)"},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "c": int64(2)},
+		}, rows)
+	})
+
+	t.Run("AddColumnWithCurrentTimestampDefaultRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY);
+
+			INSERT INTO t (id) VALUES (1);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT DEFAULT CURRENT_TIMESTAMP);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name: "c",
+							Type: "TEXT",
+							Default: sql.NullString{
+								String: "CURRENT_TIMESTAMP",
+								Valid:  true,
+							},
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "c"},
+					SelectExpressions: []string{`"id"`, "CURRENT_TIMESTAMP"},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Len(t, rows, 1)
+		require.NotNil(t, rows[0]["c"])
+	})
+
+	t.Run("DropPrimaryKeyColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id TEXT PRIMARY KEY, c TEXT);
+
+			INSERT INTO t (id, c) VALUES ('a', 'keep');
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (c TEXT);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name: "c",
+							Type: "TEXT",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"c"},
+					SelectExpressions: []string{`"c"`},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "")
+
+		require.Equal(t, []map[string]any{
+			{"c": "keep"},
+		}, rows)
+	})
+
+	t.Run("DropUniqueColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT UNIQUE);
+
+			INSERT INTO t (id, c) VALUES (1, 'x');
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreatedTableTWithIDOnly(),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
+	t.Run("DropIndexedColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT);
+			CREATE INDEX t_c ON t (c);
+
+			INSERT INTO t (id, c) VALUES (1, 'x');
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreatedTableTWithIDOnly(),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
+	t.Run("DropColumnOfPartialIndexConditionRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT);
+			CREATE INDEX t_id ON t (id) WHERE "c" IS NOT NULL;
+
+			INSERT INTO t (id, c) VALUES (1, 'x');
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreatedTableTWithIDOnly(),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
+	t.Run("DropForeignKeyColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE p (id INTEGER PRIMARY KEY);
+			CREATE TABLE t (id INTEGER PRIMARY KEY, c INTEGER REFERENCES p (id));
+
+			INSERT INTO p (id) VALUES (1);
+			INSERT INTO t (id, c) VALUES (1, 1);
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE p (id INTEGER PRIMARY KEY);
+			CREATE TABLE t (id INTEGER PRIMARY KEY);
+		`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreatedTableTWithIDOnly(),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
 	t.Run("CreateTableWithGeneratedColumns", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 
@@ -1057,4 +1526,31 @@ func TestSQLiteColumn(t *testing.T) {
 		_, _, err = driver.GetTableColumns(t.Context(), db, "users", parseTableDefinition(""))
 		require.ErrorIs(t, err, errRowIteration)
 	})
+}
+
+func recreatedTableTWithIDOnly() []driversshared.Instruction {
+	return recreated("t",
+		&SQLiteCreateTableInstruction{
+			ForeignKeys: []*SQLiteForeignKey{},
+			Name:        "_t_temp",
+			Columns: []*SQLiteColumn{
+				{
+					Name:       "id",
+					Type:       "INTEGER",
+					PrimaryKey: true,
+				},
+			},
+		},
+		&driversshared.SQLInsertSelectInstruction{
+			TableName:         "_t_temp",
+			ColumnNames:       []string{"id"},
+			SelectExpressions: []string{`"id"`},
+			FromTableName:     "t",
+		},
+		&driversshared.SQLDropTableInstruction{Name: "t"},
+		&SQLiteAlterTableInstruction{
+			Name:   "_t_temp",
+			Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+		},
+	)
 }
