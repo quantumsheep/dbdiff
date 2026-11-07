@@ -39,7 +39,12 @@ go test ./...
 `DBDIFF_TEST_SKIP_POSTGRES=1` and `DBDIFF_TEST_SKIP_MYSQL=1` skip the server tests. Do not set them on Linux, because a silent skip hides a server failure.
 
 - Put the test beside the code. Use `testify/require`.
-- Give each new behavior one `t.Run` subtest in the main test function of its package.
+- Give each new behavior one `t.Run` subtest in the test function of its file.
+- In a driver package, put the test of a schema object in `<engine>_<object>_test.go`. Name the test function from the file, for example `TestSQLiteColumn` in `sqlite_column_test.go`.
+- Put the shared test helpers and the tests of the whole driver in `<engine>_test.go`.
+- In the MySQL package, put a MariaDB test in its own function, for example `TestMariaDBColumn`.
+- In a driver package, put the test of an instruction type in the test file of its source file, for example `instruction_postgres_table_test.go`.
+- In the PostgreSQL package, the test constructors skip the server tests. If a test function holds a subtest that needs a server and uses no constructor, start the function with `skipWithoutPostgresServer(t)`.
 - In a driver test, compare the whole instruction list. Then apply the diff to the current database. This proves that the SQL runs.
 - If the change recreates a table or moves data, insert rows before the diff. Then compare the rows after the diff.
 - Compare the whole error message. Never use `require.Contains` on a message.

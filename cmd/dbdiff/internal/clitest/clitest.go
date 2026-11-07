@@ -75,7 +75,7 @@ func WriteSQLiteDatabase(tb testing.TB, path string, sqlStatements string) {
 		require.NoError(tb, database.Close())
 	}()
 
-	_, err = database.Exec(sqlStatements)
+	_, err = database.ExecContext(tb.Context(), sqlStatements)
 	require.NoError(tb, err)
 }
 

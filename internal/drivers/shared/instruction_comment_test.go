@@ -72,3 +72,26 @@ func TestInstructionComments(t *testing.T) {
 		require.Empty(t, instruction.Comment())
 	})
 }
+
+func TestAnnotateInstructions(t *testing.T) {
+	t.Run("NoInstruction", func(t *testing.T) {
+		require.Empty(t, AnnotateInstructions(nil))
+	})
+
+	t.Run("CommentOfTheDriver", func(t *testing.T) {
+		note := &SQLCommentInstruction{
+			Text: `The table "logs" holds no primary key`,
+		}
+		insert := &SQLInsertInstruction{
+			TableName: "users",
+		}
+
+		require.Equal(t, Instructions{
+			note,
+			&SQLCommentInstruction{
+				Text: `Change the rows of the table "users"`,
+			},
+			insert,
+		}, AnnotateInstructions([]Instruction{note, insert}))
+	})
+}

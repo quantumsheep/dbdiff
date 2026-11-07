@@ -1,14 +1,19 @@
 package driverspostgres
 
 import (
-	"database/sql"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/stretchr/testify/require"
 )
 
-func TestInstructions(t *testing.T) {
+func commentInstruction(text string) driversshared.Instruction {
+	return &driversshared.SQLCommentInstruction{
+		Text: text,
+	}
+}
+
+func TestPostgresTableInstructions(t *testing.T) {
 	t.Run("PostgresInsertOverriding", func(t *testing.T) {
 		instruction := &PostgresInsertOverridingInstruction{
 			TableName:   "users",
@@ -265,29 +270,6 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
-	t.Run("PostgresCommentOnRoutine", func(t *testing.T) {
-		instruction := &PostgresCommentOnRoutineInstruction{
-			Name:      "add",
-			Arguments: "integer, integer",
-			Text:      "the sum of the two values",
-		}
-
-		require.Equal(t,
-			`COMMENT ON ROUTINE "add"(integer, integer) IS 'the sum of the two values';`,
-			instruction.String())
-	})
-
-	t.Run("PostgresCommentOnType", func(t *testing.T) {
-		instruction := &PostgresCommentOnTypeInstruction{
-			Name: "mood",
-			Text: "the state of a person",
-		}
-
-		require.Equal(t,
-			`COMMENT ON TYPE "mood" IS 'the state of a person';`,
-			instruction.String())
-	})
-
 	t.Run("PostgresCommentWithAQuote", func(t *testing.T) {
 		instruction := &PostgresCommentOnTableInstruction{
 			Name: "users",
@@ -348,52 +330,6 @@ func TestInstructions(t *testing.T) {
 		}
 
 		require.Equal(t, `DROP POLICY "docs_read" ON "docs";`, instruction.String())
-	})
-
-	t.Run("PostgresCreateCastWithFunction", func(t *testing.T) {
-		instruction := &PostgresCreateCastInstruction{
-			SourceType: "point2d",
-			TargetType: "text",
-			Method:     "f",
-			Context:    "a",
-			Function:   "point2d_to_text(point2d)",
-		}
-
-		require.Equal(t,
-			`CREATE CAST (point2d AS text) WITH FUNCTION point2d_to_text(point2d) AS ASSIGNMENT;`,
-			instruction.String())
-	})
-
-	t.Run("PostgresCreateCastWithInout", func(t *testing.T) {
-		instruction := &PostgresCreateCastInstruction{
-			SourceType: "point2d",
-			TargetType: "point3d",
-			Method:     "i",
-		}
-
-		require.Equal(t, `CREATE CAST (point2d AS point3d) WITH INOUT;`, instruction.String())
-	})
-
-	t.Run("PostgresCreateCastWithoutFunction", func(t *testing.T) {
-		instruction := &PostgresCreateCastInstruction{
-			SourceType: "money_cents",
-			TargetType: "integer",
-			Method:     "b",
-			Context:    "i",
-		}
-
-		require.Equal(t,
-			`CREATE CAST (money_cents AS integer) WITHOUT FUNCTION AS IMPLICIT;`,
-			instruction.String())
-	})
-
-	t.Run("PostgresDropCast", func(t *testing.T) {
-		instruction := &PostgresDropCastInstruction{
-			SourceType: "point2d",
-			TargetType: "text",
-		}
-
-		require.Equal(t, `DROP CAST (point2d AS text);`, instruction.String())
 	})
 
 	t.Run("PostgresCreateTableThatInherits", func(t *testing.T) {
@@ -649,58 +585,6 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, `DROP RULE "no_delete" ON "base";`, instruction.String())
 	})
 
-	t.Run("PostgresCreateStatistics", func(t *testing.T) {
-		instruction := &PostgresCreateStatisticsInstruction{
-			Definition: "CREATE STATISTICS st_ab ON a, b FROM t",
-		}
-
-		require.Equal(t, `CREATE STATISTICS st_ab ON a, b FROM t;`, instruction.String())
-	})
-
-	t.Run("PostgresDropStatistics", func(t *testing.T) {
-		instruction := &PostgresDropStatisticsInstruction{Name: "st_ab"}
-
-		require.Equal(t, `DROP STATISTICS "st_ab";`, instruction.String())
-	})
-
-	t.Run("PostgresGrant", func(t *testing.T) {
-		instruction := &PostgresGrantInstruction{
-			Privileges: []string{"SELECT", "INSERT"},
-			ObjectType: "TABLE",
-			ObjectName: "users",
-			Grantee:    "app_writer",
-		}
-
-		require.Equal(t,
-			`GRANT SELECT, INSERT ON TABLE "users" TO "app_writer";`,
-			instruction.String())
-	})
-
-	t.Run("PostgresRevoke", func(t *testing.T) {
-		instruction := &PostgresRevokeInstruction{
-			Privileges: []string{"UPDATE"},
-			ObjectType: "TABLE",
-			ObjectName: "users",
-			Grantee:    "app_writer",
-		}
-
-		require.Equal(t,
-			`REVOKE UPDATE ON TABLE "users" FROM "app_writer";`,
-			instruction.String())
-	})
-
-	t.Run("PostgresSetOwner", func(t *testing.T) {
-		instruction := &PostgresSetOwnerInstruction{
-			ObjectType: "TABLE",
-			ObjectName: "users",
-			Owner:      "app_owner",
-		}
-
-		require.Equal(t,
-			`ALTER TABLE "users" OWNER TO "app_owner";`,
-			instruction.String())
-	})
-
 	t.Run("PostgresAddIdentityAction", func(t *testing.T) {
 		action := &PostgresAddIdentityAction{
 			ColumnName: "id",
@@ -853,472 +737,6 @@ func TestInstructions(t *testing.T) {
 			instruction.String())
 	})
 
-	t.Run("PostgresCreateEnumType", func(t *testing.T) {
-		instruction := &PostgresCreateEnumTypeInstruction{
-			Name:   "mood",
-			Labels: []string{"sad", "happy"},
-		}
-
-		require.Equal(t, `CREATE TYPE "mood" AS ENUM ('sad', 'happy');`, instruction.String())
-	})
-
-	t.Run("PostgresAlterTypeAddValue", func(t *testing.T) {
-		instruction := &PostgresAlterTypeAddValueInstruction{
-			Name:  "mood",
-			Value: "calm",
-		}
-
-		require.Equal(t, `ALTER TYPE "mood" ADD VALUE 'calm';`, instruction.String())
-	})
-
-	t.Run("PostgresAlterTypeAddValueBefore", func(t *testing.T) {
-		instruction := &PostgresAlterTypeAddValueInstruction{
-			Name:   "mood",
-			Value:  "calm",
-			Before: "happy",
-		}
-
-		require.Equal(t, `ALTER TYPE "mood" ADD VALUE 'calm' BEFORE 'happy';`, instruction.String())
-	})
-
-	t.Run("PostgresAlterTypeAddValueAfter", func(t *testing.T) {
-		instruction := &PostgresAlterTypeAddValueInstruction{
-			Name:  "mood",
-			Value: "calm",
-			After: "sad",
-		}
-
-		require.Equal(t, `ALTER TYPE "mood" ADD VALUE 'calm' AFTER 'sad';`, instruction.String())
-	})
-
-	t.Run("PostgresDropType", func(t *testing.T) {
-		instruction := &PostgresDropTypeInstruction{Name: "mood"}
-
-		require.Equal(t, `DROP TYPE "mood";`, instruction.String())
-	})
-
-	t.Run("PostgresCreateCompositeType", func(t *testing.T) {
-		instruction := &PostgresCreateCompositeTypeInstruction{
-			Name: "address",
-			Attributes: []*PostgresCompositeTypeAttribute{
-				{
-					Name: "street",
-					Type: "text",
-				},
-				{
-					Name: "number",
-					Type: "integer",
-				},
-			},
-		}
-
-		require.Equal(t, `CREATE TYPE "address" AS (
-	"street" text,
-	"number" integer
-);`, instruction.String())
-	})
-
-	t.Run("PostgresCreateDomain", func(t *testing.T) {
-		instruction := &PostgresCreateDomainInstruction{
-			Name:     "positive",
-			BaseType: "integer",
-		}
-
-		require.Equal(t, `CREATE DOMAIN "positive" AS integer;`, instruction.String())
-	})
-
-	t.Run("PostgresCreateDomainWithEveryPart", func(t *testing.T) {
-		instruction := &PostgresCreateDomainInstruction{
-			Name:     "positive",
-			BaseType: "integer",
-			Default: sql.NullString{
-				String: "1",
-				Valid:  true,
-			},
-			NotNull: true,
-			Constraints: []*PostgresDomainConstraint{
-				{
-					Name: "positive_check",
-					Def:  "CHECK ((VALUE > 0))",
-				},
-			},
-		}
-
-		require.Equal(t,
-			`CREATE DOMAIN "positive" AS integer DEFAULT 1 NOT NULL CONSTRAINT "positive_check" CHECK ((VALUE > 0));`,
-			instruction.String())
-	})
-
-	t.Run("PostgresDropDomain", func(t *testing.T) {
-		instruction := &PostgresDropDomainInstruction{Name: "positive"}
-
-		require.Equal(t, `DROP DOMAIN "positive";`, instruction.String())
-	})
-
-	t.Run("PostgresAlterDomainSetDefault", func(t *testing.T) {
-		instruction := &PostgresAlterDomainInstruction{
-			Name:   "positive",
-			Action: &PostgresSetDomainDefaultAction{Expression: "5"},
-		}
-
-		require.Equal(t, `ALTER DOMAIN "positive" SET DEFAULT 5;`, instruction.String())
-	})
-
-	t.Run("PostgresDropDomainDefaultAction", func(t *testing.T) {
-		action := &PostgresDropDomainDefaultAction{}
-
-		require.Equal(t, "DROP DEFAULT", action.DomainActionClause())
-	})
-
-	t.Run("PostgresSetDomainNotNullAction", func(t *testing.T) {
-		action := &PostgresSetDomainNotNullAction{}
-
-		require.Equal(t, "SET NOT NULL", action.DomainActionClause())
-	})
-
-	t.Run("PostgresDropDomainNotNullAction", func(t *testing.T) {
-		action := &PostgresDropDomainNotNullAction{}
-
-		require.Equal(t, "DROP NOT NULL", action.DomainActionClause())
-	})
-
-	t.Run("PostgresAddDomainConstraintAction", func(t *testing.T) {
-		action := &PostgresAddDomainConstraintAction{
-			ConstraintName: "positive_check",
-			Definition:     "CHECK ((VALUE > 0))",
-		}
-
-		require.Equal(t,
-			`ADD CONSTRAINT "positive_check" CHECK ((VALUE > 0))`,
-			action.DomainActionClause())
-	})
-
-	t.Run("PostgresDropDomainConstraintAction", func(t *testing.T) {
-		action := &PostgresDropDomainConstraintAction{ConstraintName: "positive_check"}
-
-		require.Equal(t, `DROP CONSTRAINT "positive_check"`, action.DomainActionClause())
-	})
-
-	t.Run("PostgresCreateFunction", func(t *testing.T) {
-		instruction := &PostgresCreateFunctionInstruction{
-			Definition: "CREATE FUNCTION add(integer) RETURNS integer AS $$ SELECT 1 $$ LANGUAGE sql",
-		}
-
-		require.Equal(t,
-			"CREATE FUNCTION add(integer) RETURNS integer AS $$ SELECT 1 $$ LANGUAGE sql;",
-			instruction.String())
-	})
-
-	t.Run("PostgresDropFunction", func(t *testing.T) {
-		instruction := &PostgresDropFunctionInstruction{
-			Name:      "add",
-			Arguments: "integer",
-		}
-
-		require.Equal(t, `DROP FUNCTION "add"(integer);`, instruction.String())
-	})
-
-	t.Run("PostgresCreateProcedure", func(t *testing.T) {
-		instruction := &PostgresCreateProcedureInstruction{
-			Definition: "CREATE PROCEDURE audit(entry text) LANGUAGE sql AS $$ SELECT 1 $$",
-		}
-
-		require.Equal(t,
-			"CREATE PROCEDURE audit(entry text) LANGUAGE sql AS $$ SELECT 1 $$;",
-			instruction.String())
-	})
-
-	t.Run("PostgresDropProcedure", func(t *testing.T) {
-		instruction := &PostgresDropProcedureInstruction{
-			Name:      "audit",
-			Arguments: "entry text",
-		}
-
-		require.Equal(t, `DROP PROCEDURE "audit"(entry text);`, instruction.String())
-	})
-
-	t.Run("PostgresCreateAggregate", func(t *testing.T) {
-		instruction := &PostgresCreateAggregateInstruction{
-			Name:               "total",
-			Arguments:          "integer",
-			TransitionFunction: "int4pl",
-			StateType:          "integer",
-		}
-
-		require.Equal(t,
-			`CREATE AGGREGATE "total"(integer) (SFUNC = int4pl, STYPE = integer);`,
-			instruction.String())
-	})
-
-	t.Run("PostgresCreateAggregateWithEveryOption", func(t *testing.T) {
-		instruction := &PostgresCreateAggregateInstruction{
-			Name:                "total",
-			Arguments:           "integer",
-			TransitionFunction:  "int4pl",
-			TransitionSpace:     128,
-			StateType:           "integer",
-			FinalFunctionExtra:  true,
-			FinalFunctionModify: "s",
-			FinalFunction: sql.NullString{
-				String: "int4out",
-				Valid:  true,
-			},
-			CombineFunction: sql.NullString{
-				String: "int4pl",
-				Valid:  true,
-			},
-			SerializeFunction: sql.NullString{
-				String: "numeric_avg_serialize",
-				Valid:  true,
-			},
-			DeserializeFunction: sql.NullString{
-				String: "numeric_avg_deserialize",
-				Valid:  true,
-			},
-			InitialCondition: sql.NullString{
-				String: "0",
-				Valid:  true,
-			},
-			MovingTransitionFunction: sql.NullString{
-				String: "int4pl",
-				Valid:  true,
-			},
-			MovingInverseTransitionFunction: sql.NullString{
-				String: "int4mi",
-				Valid:  true,
-			},
-			MovingStateType: sql.NullString{
-				String: "integer",
-				Valid:  true,
-			},
-			MovingTransitionSpace: 256,
-			MovingFinalFunction: sql.NullString{
-				String: "int4out",
-				Valid:  true,
-			},
-			MovingFinalFunctionExtra:  true,
-			MovingFinalFunctionModify: "w",
-			MovingInitialCondition: sql.NullString{
-				String: "0",
-				Valid:  true,
-			},
-			SortOperator: sql.NullString{
-				String: ">",
-				Valid:  true,
-			},
-			Parallel: "s",
-		}
-
-		require.Equal(t,
-			`CREATE AGGREGATE "total"(integer) (SFUNC = int4pl, STYPE = integer, SSPACE = 128, `+
-				`FINALFUNC = int4out, FINALFUNC_EXTRA, FINALFUNC_MODIFY = SHAREABLE, COMBINEFUNC = int4pl, `+
-				`SERIALFUNC = numeric_avg_serialize, DESERIALFUNC = numeric_avg_deserialize, INITCOND = '0', `+
-				`MSFUNC = int4pl, MINVFUNC = int4mi, MSTYPE = integer, MSSPACE = 256, MFINALFUNC = int4out, `+
-				`MFINALFUNC_EXTRA, MFINALFUNC_MODIFY = READ_WRITE, MINITCOND = '0', SORTOP = OPERATOR(>), `+
-				`PARALLEL = SAFE);`,
-			instruction.String())
-	})
-
-	t.Run("PostgresDropAggregate", func(t *testing.T) {
-		instruction := &PostgresDropAggregateInstruction{
-			Name:      "total",
-			Arguments: "integer",
-		}
-
-		require.Equal(t, `DROP AGGREGATE "total"(integer);`, instruction.String())
-	})
-
-	t.Run("PostgresCreateOperator", func(t *testing.T) {
-		instruction := &PostgresCreateOperatorInstruction{
-			Name:     "===",
-			Function: "int4eq",
-			LeftArgument: sql.NullString{
-				String: "integer",
-				Valid:  true,
-			},
-			RightArgument: sql.NullString{
-				String: "integer",
-				Valid:  true,
-			},
-		}
-
-		require.Equal(t,
-			`CREATE OPERATOR === (FUNCTION = "int4eq", LEFTARG = integer, RIGHTARG = integer);`,
-			instruction.String())
-	})
-
-	t.Run("PostgresCreateOperatorWithEveryOption", func(t *testing.T) {
-		instruction := &PostgresCreateOperatorInstruction{
-			Name:     "===",
-			Function: "int4eq",
-			LeftArgument: sql.NullString{
-				String: "integer",
-				Valid:  true,
-			},
-			RightArgument: sql.NullString{
-				String: "integer",
-				Valid:  true,
-			},
-			Commutator: sql.NullString{
-				String: "===",
-				Valid:  true,
-			},
-			Negator: sql.NullString{
-				String: "!==",
-				Valid:  true,
-			},
-			RestrictFunction: sql.NullString{
-				String: "eqsel",
-				Valid:  true,
-			},
-			JoinFunction: sql.NullString{
-				String: "eqjoinsel",
-				Valid:  true,
-			},
-			CanHash:  true,
-			CanMerge: true,
-		}
-
-		require.Equal(t,
-			`CREATE OPERATOR === (FUNCTION = "int4eq", LEFTARG = integer, RIGHTARG = integer, `+
-				`COMMUTATOR = ===, NEGATOR = !==, RESTRICT = eqsel, JOIN = eqjoinsel, HASHES, MERGES);`,
-			instruction.String())
-	})
-
-	t.Run("PostgresDropOperatorWithoutALeftArgument", func(t *testing.T) {
-		instruction := &PostgresDropOperatorInstruction{
-			Name: "===",
-			RightArgument: sql.NullString{
-				String: "integer",
-				Valid:  true,
-			},
-		}
-
-		require.Equal(t, `DROP OPERATOR === (NONE, integer);`, instruction.String())
-	})
-
-	t.Run("PostgresCreateExtension", func(t *testing.T) {
-		instruction := &PostgresCreateExtensionInstruction{Name: "pgcrypto"}
-
-		require.Equal(t, `CREATE EXTENSION "pgcrypto";`, instruction.String())
-	})
-
-	t.Run("PostgresAlterExtension", func(t *testing.T) {
-		instruction := &PostgresAlterExtensionInstruction{
-			Name:       "pgcrypto",
-			NewVersion: "1.3",
-		}
-
-		require.Equal(t, `ALTER EXTENSION "pgcrypto" UPDATE TO '1.3';`, instruction.String())
-	})
-
-	t.Run("PostgresDropExtension", func(t *testing.T) {
-		instruction := &PostgresDropExtensionInstruction{Name: "pgcrypto"}
-
-		require.Equal(t, `DROP EXTENSION "pgcrypto";`, instruction.String())
-	})
-
-	t.Run("PostgresCreateOwnedSequence", func(t *testing.T) {
-		instruction := &PostgresCreateOwnedSequenceInstruction{
-			Name:       "users_id_seq",
-			TableName:  "users",
-			ColumnName: "id",
-		}
-
-		require.Equal(t,
-			`CREATE SEQUENCE "users_id_seq" OWNED BY "users"."id";`,
-			instruction.String())
-	})
-
-	t.Run("PostgresCreateSequence", func(t *testing.T) {
-		instruction := &PostgresCreateSequenceInstruction{
-			Name:      "counter",
-			DataType:  "bigint",
-			Increment: 1,
-			Min:       1,
-			Max:       9223372036854775807,
-			Start:     1,
-			Cache:     1,
-		}
-
-		require.Equal(t,
-			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1 NO CYCLE;`,
-			instruction.String())
-	})
-
-	t.Run("PostgresCreateSequenceWithCycle", func(t *testing.T) {
-		instruction := &PostgresCreateSequenceInstruction{
-			Name:      "counter",
-			DataType:  "bigint",
-			Increment: 1,
-			Min:       1,
-			Max:       10,
-			Start:     1,
-			Cache:     1,
-			Cycle:     true,
-		}
-
-		require.Equal(t,
-			`CREATE SEQUENCE "counter" AS bigint INCREMENT BY 1 MINVALUE 1 MAXVALUE 10 START WITH 1 CACHE 1 CYCLE;`,
-			instruction.String())
-	})
-
-	t.Run("PostgresAlterSequenceOneClause", func(t *testing.T) {
-		instruction := &PostgresAlterSequenceInstruction{
-			Name: "counter",
-			Increment: sql.NullInt64{
-				Int64: 2,
-				Valid: true,
-			},
-		}
-
-		require.Equal(t, `ALTER SEQUENCE "counter" INCREMENT BY 2;`, instruction.String())
-	})
-
-	t.Run("PostgresAlterSequenceEveryClauseInOrder", func(t *testing.T) {
-		instruction := &PostgresAlterSequenceInstruction{
-			Name: "counter",
-			DataType: sql.NullString{
-				String: "integer",
-				Valid:  true,
-			},
-			Increment: sql.NullInt64{
-				Int64: 2,
-				Valid: true,
-			},
-			Min: sql.NullInt64{
-				Int64: 5,
-				Valid: true,
-			},
-			Max: sql.NullInt64{
-				Int64: 50,
-				Valid: true,
-			},
-			Start: sql.NullInt64{
-				Int64: 5,
-				Valid: true,
-			},
-			Cycle: sql.NullBool{
-				Bool:  true,
-				Valid: true,
-			},
-			Restart: sql.NullInt64{
-				Int64: 5,
-				Valid: true,
-			},
-		}
-
-		require.Equal(t,
-			`ALTER SEQUENCE "counter" AS integer INCREMENT BY 2 MINVALUE 5 MAXVALUE 50 START WITH 5 CYCLE RESTART WITH 5;`,
-			instruction.String())
-	})
-
-	t.Run("PostgresDropSequence", func(t *testing.T) {
-		instruction := &PostgresDropSequenceInstruction{Name: "counter"}
-
-		require.Equal(t, `DROP SEQUENCE "counter";`, instruction.String())
-	})
-
 	t.Run("ColumnDefinitionIsNotAnInstruction", func(t *testing.T) {
 		// A fragment must never satisfy Instruction. Go cannot express that negatively at
 		// compile time, so this check runs at run time.
@@ -1344,5 +762,217 @@ func TestInstructions(t *testing.T) {
 			Def:  "PRIMARY KEY (id)",
 		}
 		require.Equal(t, `CONSTRAINT "users_pkey" PRIMARY KEY (id)`, constraint.Clause())
+	})
+}
+
+func TestPostgresTableInstructionComments(t *testing.T) {
+	t.Run("PostgresInsertOverriding", func(t *testing.T) {
+		instruction := &PostgresInsertOverridingInstruction{
+			TableName: "users",
+		}
+
+		require.Equal(t, `Change the rows of the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresAlterTable", func(t *testing.T) {
+		instruction := &PostgresAlterTableInstruction{
+			Name: "posts",
+		}
+
+		require.Equal(t, `Modify the table "posts"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreateTable", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name: "users",
+		}
+
+		require.Equal(t, `Create the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreateTablePartition", func(t *testing.T) {
+		instruction := &PostgresCreateTablePartitionInstruction{
+			Name:       "measurements_2026",
+			ParentName: "measurements",
+		}
+
+		require.Equal(t, `Create the table "measurements_2026"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreateIndex", func(t *testing.T) {
+		instruction := &PostgresCreateIndexInstruction{
+			Definition: "CREATE UNIQUE INDEX posts_slug ON posts USING btree (slug)",
+		}
+
+		require.Equal(t, `Create the index "posts_slug" of the table "posts"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreateTrigger", func(t *testing.T) {
+		instruction := &PostgresCreateTriggerInstruction{
+			Definition: "CREATE TRIGGER sync_updated_at BEFORE UPDATE ON scim FOR EACH ROW EXECUTE FUNCTION sync_updated_at()",
+		}
+
+		require.Equal(t, `Create the trigger "sync_updated_at" of the table "scim"`, instruction.Comment())
+	})
+
+	t.Run("PostgresDropTrigger", func(t *testing.T) {
+		instruction := &PostgresDropTriggerInstruction{
+			Name:      "sync_created_at",
+			TableName: "scim",
+		}
+
+		require.Equal(t, `Drop the trigger "sync_created_at" of the table "scim"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreatePolicy", func(t *testing.T) {
+		instruction := &PostgresCreatePolicyInstruction{
+			Name:      "read_own_row",
+			TableName: "users",
+		}
+
+		require.Equal(t, `Create the policy "read_own_row" of the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresDropPolicy", func(t *testing.T) {
+		instruction := &PostgresDropPolicyInstruction{
+			Name:      "read_every_row",
+			TableName: "users",
+		}
+
+		require.Equal(t, `Drop the policy "read_every_row" of the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreateRule", func(t *testing.T) {
+		instruction := &PostgresCreateRuleInstruction{
+			Definition: "CREATE RULE notify_me AS\n    ON UPDATE TO users DO\n NOTIFY users;",
+		}
+
+		require.Equal(t, `Create the rule "notify_me" of the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresDropRule", func(t *testing.T) {
+		instruction := &PostgresDropRuleInstruction{
+			Name:      "notify_them",
+			TableName: "users",
+		}
+
+		require.Equal(t, `Drop the rule "notify_them" of the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnTable", func(t *testing.T) {
+		instruction := &PostgresCommentOnTableInstruction{
+			Name: "users",
+			Text: "the people of the site",
+		}
+
+		require.Equal(t, `Modify the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnColumn", func(t *testing.T) {
+		instruction := &PostgresCommentOnColumnInstruction{
+			TableName:  "users",
+			ColumnName: "id",
+			Text:       "the key",
+		}
+
+		require.Equal(t, `Modify the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnView", func(t *testing.T) {
+		instruction := &PostgresCommentOnViewInstruction{
+			Name: "active_users",
+			Text: "the people that signed in",
+		}
+
+		require.Equal(t, `Modify the view "active_users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnMaterializedView", func(t *testing.T) {
+		instruction := &PostgresCommentOnMaterializedViewInstruction{
+			Name: "daily_totals",
+			Text: "the totals of one day",
+		}
+
+		require.Equal(t, `Modify the materialized view "daily_totals"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCommentOnIndex", func(t *testing.T) {
+		instruction := &PostgresCommentOnIndexInstruction{
+			Name: "users_email",
+			Text: "the lookup key of the sign in",
+		}
+
+		require.Equal(t, `Modify the index "users_email"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreateMaterializedView", func(t *testing.T) {
+		instruction := &PostgresCreateMaterializedViewInstruction{
+			Name:  "sales_of_the_month",
+			Query: "SELECT 1",
+		}
+
+		require.Equal(t, `Create the materialized view "sales_of_the_month"`, instruction.Comment())
+	})
+
+	t.Run("PostgresDropMaterializedView", func(t *testing.T) {
+		instruction := &PostgresDropMaterializedViewInstruction{
+			Name: "sales_of_the_year",
+		}
+
+		require.Equal(t, `Drop the materialized view "sales_of_the_year"`, instruction.Comment())
+	})
+
+	t.Run("PostgresCreateView", func(t *testing.T) {
+		instruction := &PostgresCreateViewInstruction{
+			Name:  "recent_posts",
+			Query: "SELECT id FROM posts",
+		}
+
+		require.Equal(t, `Create the view "recent_posts"`, instruction.Comment())
+	})
+
+	t.Run("PostgresDetachPartition", func(t *testing.T) {
+		instruction := &PostgresDetachPartitionInstruction{
+			ParentName:    "measurements",
+			PartitionName: "measurements_low",
+		}
+
+		require.Equal(t, `Detach the partition of the table "measurements"`, instruction.Comment())
+	})
+
+	t.Run("PostgresAttachPartition", func(t *testing.T) {
+		instruction := &PostgresAttachPartitionInstruction{
+			ParentName:    "measurements",
+			PartitionName: "measurements_low",
+		}
+
+		require.Equal(t, `Attach the partition of the table "measurements"`, instruction.Comment())
+	})
+}
+
+func TestPostgresTableAnnotateInstructions(t *testing.T) {
+	t.Run("OneCommentForAGroupOfOneObject", func(t *testing.T) {
+		dropColumn := &PostgresAlterTableInstruction{
+			Name: "users",
+			Actions: []driversshared.AlterTableAction{
+				&driversshared.SQLDropColumnAction{
+					ColumnName: "age",
+				},
+			},
+		}
+		dropConstraint := &PostgresAlterTableInstruction{
+			Name: "users",
+			Actions: []driversshared.AlterTableAction{
+				&PostgresDropConstraintAction{
+					ConstraintName: "users_age_check",
+				},
+			},
+		}
+
+		require.Equal(t, driversshared.Instructions{
+			commentInstruction(`Modify the table "users"`),
+			dropColumn,
+			dropConstraint,
+		}, driversshared.AnnotateInstructions([]driversshared.Instruction{dropColumn, dropConstraint}))
 	})
 }
