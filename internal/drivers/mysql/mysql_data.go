@@ -49,6 +49,30 @@ func (d *MySQLDriver) DiffData(
 		})
 }
 
+// The data diff orders the rows by table name, not by the foreign keys.
+func dataNeedsForeignKeyChecksOff(instructions []driversshared.Instruction, desiredTables []*MySQLTable) bool {
+	return lo.SomeBy(instructions, func(instruction driversshared.Instruction) bool {
+		var tableName string
+
+		switch rowInstruction := instruction.(type) {
+		case *MySQLInsertInstruction:
+			tableName = rowInstruction.TableName
+		case *MySQLUpdateInstruction:
+			tableName = rowInstruction.TableName
+		case *MySQLDeleteInstruction:
+			tableName = rowInstruction.TableName
+		default:
+			return false
+		}
+
+		return lo.SomeBy(desiredTables, func(table *MySQLTable) bool {
+			return lo.SomeBy(table.ForeignKeys, func(foreignKey *MySQLForeignKey) bool {
+				return table.Name == tableName || foreignKey.ReferencedTable == tableName
+			})
+		})
+	})
+}
+
 // MySQL computes a generated column, and it refuses a value for that column.
 func writableMySQLColumnNames(columns []*MySQLColumn) []string {
 	writable := lo.Filter(columns, func(column *MySQLColumn, _ int) bool {

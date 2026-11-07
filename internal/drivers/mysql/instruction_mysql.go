@@ -508,5 +508,5 @@ func (i *MySQLSetForeignKeyChecksInstruction) Comment() string {
 		return "Turn the enforcement of the foreign keys on again"
 	}
 
-	return "Turn the enforcement of the foreign keys off for the creation order of the tables"
+	return "Turn the enforcement of the foreign keys off for the order of the instructions"
 }

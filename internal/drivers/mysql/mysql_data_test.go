@@ -163,6 +163,52 @@ func TestMySQLData(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", "ORDER BY code"))
 	})
 
+	t.Run("DataOfATableWithAForeignKey", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.CompareData = true
+
+		schema := `
+			CREATE TABLE b_parent (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE a_child (
+				id int NOT NULL,
+				parent_id int,
+				PRIMARY KEY (id),
+				CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES b_parent (id)
+			);
+		`
+
+		driver.ExecOnDesired(schema)
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnDesired(`
+			INSERT INTO b_parent VALUES (1);
+			INSERT INTO a_child VALUES (10, 1);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLSetForeignKeyChecksInstruction{},
+			&MySQLInsertInstruction{
+				TableName:   "a_child",
+				ColumnNames: []string{"id", "parent_id"},
+				Expressions: []string{"10", "1"},
+			},
+			&MySQLInsertInstruction{
+				TableName:   "b_parent",
+				ColumnNames: []string{"id"},
+				Expressions: []string{"1"},
+			},
+			&MySQLSetForeignKeyChecksInstruction{
+				Enabled: true,
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(10), "parent_id": int64(1)},
+		}, driver.FetchAllFromCurrent("a_child", "ORDER BY id"))
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, driver.FetchAllFromCurrent("b_parent", "ORDER BY id"))
+	})
+
 	t.Run("DataOfATableWithNoPrimaryKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true

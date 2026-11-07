@@ -732,7 +732,7 @@ func TestMySQLInstructionComments(t *testing.T) {
 	})
 
 	t.Run("MySQLSetForeignKeyChecks", func(t *testing.T) {
-		require.Equal(t, "Turn the enforcement of the foreign keys off for the creation order of the tables",
+		require.Equal(t, "Turn the enforcement of the foreign keys off for the order of the instructions",
 			(&MySQLSetForeignKeyChecksInstruction{}).Comment())
 		require.Equal(t, "Turn the enforcement of the foreign keys on again",
 			(&MySQLSetForeignKeyChecksInstruction{Enabled: true}).Comment())

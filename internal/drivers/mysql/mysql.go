@@ -215,7 +215,7 @@ func (d *MySQLDriver) Diff(
 		instructions = append(instructions, stepInstructions...)
 	}
 
-	if needsForeignKeyChecksOff(desiredTables, currentTables) {
+	if needsForeignKeyChecksOff(desiredTables, currentTables) || dataNeedsForeignKeyChecksOff(instructions, desiredTables) {
 		instructions = append([]driversshared.Instruction{&MySQLSetForeignKeyChecksInstruction{}}, instructions...)
 		instructions = append(instructions, &MySQLSetForeignKeyChecksInstruction{Enabled: true})
 	}
