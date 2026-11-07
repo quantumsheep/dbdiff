@@ -26,6 +26,10 @@ type PostgresTable struct {
 	// A table of INHERITS is no partition, so it keeps its own columns and its own statement.
 	Inherits []string
 
+	// A child of INHERITS keeps its own default, NOT NULL flag, storage mode, and statistics
+	// target of each column. A change of the parent without ONLY changes them in each child too.
+	HasInheritanceChildren bool
+
 	References []string
 
 	Comment string
@@ -215,6 +219,14 @@ func (t *PostgresTable) DiffTable(
 		}
 	}
 
+	alterColumn := func(action driversshared.AlterTableAction) driversshared.Instruction {
+		return &PostgresAlterTableInstruction{
+			Name:    t.Name,
+			Only:    other.HasInheritanceChildren,
+			Actions: []driversshared.AlterTableAction{action},
+		}
+	}
+
 	var dropNotNullInstructions []driversshared.Instruction
 
 	for _, parentName := range t.Inherits {
@@ -233,6 +245,26 @@ func (t *PostgresTable) DiffTable(
 
 	for _, desiredColumn := range t.Columns {
 		currentColumn, found := other.ColumnByName(desiredColumn.Name)
+
+		// The parent gives the definition of an inherited column, so the child diff compares
+		// only the attributes that the child keeps.
+		if desiredColumn.Inherited {
+			if !found {
+				continue
+			}
+
+			columnCopy := *desiredColumn
+			columnCopy.Type = currentColumn.Type
+			columnCopy.Collation = currentColumn.Collation
+			columnCopy.Identity = currentColumn.Identity
+			columnCopy.IdentityOptions = currentColumn.IdentityOptions
+			columnCopy.GeneratedExpression = currentColumn.GeneratedExpression
+			columnCopy.Serial = currentColumn.Serial
+			columnCopy.SerialSequenceName = currentColumn.SerialSequenceName
+			columnCopy.Inherited = currentColumn.Inherited
+			desiredColumn = &columnCopy
+		}
+
 		if !found {
 			instructions = append(instructions,
 				alterTable(&PostgresAddColumnAction{Column: desiredColumn}))
@@ -299,6 +331,8 @@ func (t *PostgresTable) DiffTable(
 			}))
 		}
 
+		// SET NOT NULL reaches each child, and the child must keep the flag of its parent.
+		// DROP NOT NULL keeps the flag of each child that holds its own.
 		if desiredColumn.NotNull != currentColumn.NotNull {
 			if desiredColumn.NotNull {
 				instructions = append(instructions,
@@ -307,7 +341,7 @@ func (t *PostgresTable) DiffTable(
 				// PostgreSQL refuses to remove the flag of a column of the primary key,
 				// so this action waits for the constraint blocks below.
 				dropNotNullInstructions = append(dropNotNullInstructions,
-					alterTable(&PostgresDropNotNullAction{ColumnName: desiredColumn.Name}))
+					alterColumn(&PostgresDropNotNullAction{ColumnName: desiredColumn.Name}))
 			}
 		}
 
@@ -320,13 +354,13 @@ func (t *PostgresTable) DiffTable(
 
 		if desiredColumn.Default != currentColumn.Default && !serialAdded {
 			if desiredColumn.Default.Valid {
-				instructions = append(instructions, alterTable(&PostgresSetDefaultAction{
+				instructions = append(instructions, alterColumn(&PostgresSetDefaultAction{
 					ColumnName: desiredColumn.Name,
 					Expression: desiredColumn.Default.String,
 				}))
 			} else {
 				instructions = append(instructions,
-					alterTable(&PostgresDropDefaultAction{ColumnName: desiredColumn.Name}))
+					alterColumn(&PostgresDropDefaultAction{ColumnName: desiredColumn.Name}))
 			}
 		}
 
@@ -365,7 +399,7 @@ func (t *PostgresTable) DiffTable(
 				storage = "DEFAULT"
 			}
 
-			instructions = append(instructions, alterTable(&PostgresSetStorageAction{
+			instructions = append(instructions, alterColumn(&PostgresSetStorageAction{
 				ColumnName: desiredColumn.Name,
 				Storage:    storage,
 			}))
@@ -378,7 +412,7 @@ func (t *PostgresTable) DiffTable(
 				statisticsTarget = desiredColumn.StatisticsTarget.Int64
 			}
 
-			instructions = append(instructions, alterTable(&PostgresSetStatisticsAction{
+			instructions = append(instructions, alterColumn(&PostgresSetStatisticsAction{
 				ColumnName:       desiredColumn.Name,
 				StatisticsTarget: statisticsTarget,
 			}))
@@ -440,6 +474,10 @@ func (t *PostgresTable) DiffTable(
 	// PostgreSQL drops every constraint and every index of a column with the column, so
 	// these two blocks come before the column removals below.
 	for _, desiredConstraint := range t.Constraints {
+		if desiredConstraint.Inherited {
+			continue
+		}
+
 		currentConstraint, found := other.ConstraintByName(desiredConstraint.Name)
 		if !found {
 			instructions = append(instructions,
@@ -457,7 +495,7 @@ func (t *PostgresTable) DiffTable(
 
 	for _, currentConstraint := range other.Constraints {
 		_, found := t.ConstraintByName(currentConstraint.Name)
-		if !found {
+		if !found && !currentConstraint.Inherited {
 			instructions = append(instructions,
 				alterTable(&PostgresDropConstraintAction{ConstraintName: currentConstraint.Name}))
 		}
@@ -482,7 +520,7 @@ func (t *PostgresTable) DiffTable(
 
 	for _, currentColumn := range other.Columns {
 		_, found := t.ColumnByName(currentColumn.Name)
-		if !found {
+		if !found && !currentColumn.Inherited {
 			instructions = append(instructions,
 				alterTable(&driversshared.SQLDropColumnAction{ColumnName: currentColumn.Name}))
 		}
@@ -797,14 +835,22 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 	var constraints []*PostgresConstraint
 
 	for _, constraint := range t.Constraints {
-		if !constraint.IsForeignKey() {
+		if !constraint.IsForeignKey() && !constraint.Inherited {
 			constraints = append(constraints, constraint)
+		}
+	}
+
+	var columns []*PostgresColumn
+
+	for _, column := range t.Columns {
+		if !column.Inherited {
+			columns = append(columns, column)
 		}
 	}
 
 	return &PostgresCreateTableInstruction{
 		Name:         t.Name,
-		Columns:      t.Columns,
+		Columns:      columns,
 		Constraints:  constraints,
 		PartitionKey: t.PartitionKey,
 		Inherits:     t.Inherits,
@@ -928,12 +974,31 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		})
 		if !found {
 			additions = append(additions, desiredTable.Instructions()...)
+
+			if len(desiredTable.Inherits) > 0 {
+				attributeInstructions, err := desiredTable.DiffTable(
+					desiredTable.creationStateOfChild(desiredTables),
+					hasAutomaticCast,
+					serverVersion,
+				)
+				if err != nil {
+					return nil, err
+				}
+
+				additions = append(additions, attributeInstructions...)
+			}
+
 			foreignKeyInstructions = append(foreignKeyInstructions,
 				desiredTable.ForeignKeyInstructions()...)
 			ruleInstructions = append(ruleInstructions, desiredTable.RuleInstructions()...)
 
 			continue
 		}
+
+		var preInheritInstructions []driversshared.Instruction
+
+		currentTable, preInheritInstructions = currentTable.withInheritanceChanges(desiredTable, currentTables, desiredTables)
+		additions = append(additions, preInheritInstructions...)
 
 		rebuiltColumnNames := desiredTable.RebuiltColumnNames(currentTable, serverVersion)
 		if len(rebuiltColumnNames) > 0 {
@@ -1000,6 +1065,185 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		Additions:     additions,
 		Removals:      removals,
 	}, nil
+}
+
+// The current table holds the state before the parents change, and the copy holds the state
+// that the INHERIT and NO INHERIT actions and the parent statements give the child:
+//   - NO INHERIT makes each column and each constraint that no kept parent gives a local
+//     object of the child.
+//   - A change of a kept parent without ONLY reaches the child. Only DROP NOT NULL uses ONLY.
+//   - INHERIT refuses a child that has no column, no NOT NULL flag, or no CHECK constraint of
+//     the new parent, so the returned instructions add them before DiffTable prints INHERIT.
+func (t *PostgresTable) withInheritanceChanges(
+	desiredTable *PostgresTable,
+	currentTables []*PostgresTable,
+	desiredTables []*PostgresTable,
+) (*PostgresTable, []driversshared.Instruction) {
+	if len(t.Inherits) == 0 && len(desiredTable.Inherits) == 0 {
+		return t, nil
+	}
+
+	alterTable := func(action driversshared.AlterTableAction) driversshared.Instruction {
+		return &PostgresAlterTableInstruction{
+			Name:    t.Name,
+			Actions: []driversshared.AlterTableAction{action},
+		}
+	}
+
+	isKeptParent := func(name string) bool {
+		return slices.Contains(t.Inherits, name) && slices.Contains(desiredTable.Inherits, name)
+	}
+
+	keptCurrentParents := lo.Filter(currentTables, func(table *PostgresTable, _ int) bool {
+		return isKeptParent(table.Name)
+	})
+	keptDesiredParents := lo.Filter(desiredTables, func(table *PostgresTable, _ int) bool {
+		return isKeptParent(table.Name)
+	})
+	newDesiredParents := lo.Filter(desiredTables, func(table *PostgresTable, _ int) bool {
+		return slices.Contains(desiredTable.Inherits, table.Name) && !slices.Contains(t.Inherits, table.Name)
+	})
+
+	parentColumn := func(parents []*PostgresTable, name string) (*PostgresColumn, bool) {
+		for _, parent := range parents {
+			column, found := parent.ColumnByName(name)
+			if found {
+				return column, true
+			}
+		}
+
+		return nil, false
+	}
+
+	var preInheritInstructions []driversshared.Instruction
+
+	tableCopy := *t
+
+	tableCopy.Columns = lo.Map(t.Columns, func(column *PostgresColumn, _ int) *PostgresColumn {
+		columnCopy := *column
+
+		currentParentColumn, keptParentHoldsColumn := parentColumn(keptCurrentParents, column.Name)
+		if column.Inherited && !keptParentHoldsColumn {
+			columnCopy.Inherited = false
+		}
+
+		desiredParentColumn, found := parentColumn(keptDesiredParents, column.Name)
+		if keptParentHoldsColumn && found && desiredParentColumn.NotNull && !currentParentColumn.NotNull {
+			columnCopy.NotNull = true
+		}
+
+		newParentColumn, found := parentColumn(newDesiredParents, column.Name)
+		if found && newParentColumn.NotNull && !columnCopy.NotNull {
+			preInheritInstructions = append(preInheritInstructions, alterTable(&PostgresSetNotNullAction{
+				ColumnName: column.Name,
+			}))
+			columnCopy.NotNull = true
+		}
+
+		return &columnCopy
+	})
+
+	for _, desiredColumn := range desiredTable.Columns {
+		_, found := t.ColumnByName(desiredColumn.Name)
+		if found || !desiredColumn.Inherited {
+			continue
+		}
+
+		keptParentColumn, found := parentColumn(keptDesiredParents, desiredColumn.Name)
+		if found {
+			columnCopy := *keptParentColumn
+			columnCopy.Comment = ""
+			columnCopy.Inherited = true
+			tableCopy.Columns = append(tableCopy.Columns, &columnCopy)
+
+			continue
+		}
+
+		newParentColumn, found := parentColumn(newDesiredParents, desiredColumn.Name)
+		if !found {
+			continue
+		}
+
+		columnCopy := *newParentColumn
+		columnCopy.Comment = ""
+		columnCopy.Storage = ""
+		columnCopy.StatisticsTarget = sql.NullInt64{}
+		columnCopy.Serial = ""
+		columnCopy.SerialSequenceName = ""
+		columnCopy.Inherited = false
+		preInheritInstructions = append(preInheritInstructions, alterTable(&PostgresAddColumnAction{
+			Column: &columnCopy,
+		}))
+		tableCopy.Columns = append(tableCopy.Columns, &columnCopy)
+	}
+
+	tableCopy.Constraints = lo.Map(t.Constraints, func(constraint *PostgresConstraint, _ int) *PostgresConstraint {
+		keptParentHoldsConstraint := lo.SomeBy(keptCurrentParents, func(parent *PostgresTable) bool {
+			_, found := parent.ConstraintByName(constraint.Name)
+			return found
+		})
+		if !constraint.Inherited || keptParentHoldsConstraint {
+			return constraint
+		}
+
+		constraintCopy := *constraint
+		constraintCopy.Inherited = false
+
+		return &constraintCopy
+	})
+
+	for _, parent := range newDesiredParents {
+		for _, parentConstraint := range parent.Constraints {
+			_, found := tableCopy.ConstraintByName(parentConstraint.Name)
+			if found || parentConstraint.Type != "c" || strings.HasSuffix(parentConstraint.Def, " NO INHERIT") {
+				continue
+			}
+
+			constraintCopy := *parentConstraint
+			constraintCopy.Inherited = false
+			preInheritInstructions = append(preInheritInstructions, alterTable(&PostgresAddConstraintAction{
+				Constraint: &constraintCopy,
+			}))
+			tableCopy.Constraints = append(tableCopy.Constraints, &constraintCopy)
+		}
+	}
+
+	return &tableCopy, preInheritInstructions
+}
+
+// CREATE TABLE INHERITS gives each inherited column the default, the NOT NULL flag, and the
+// storage mode of the parent. The returned table holds that state, so DiffTable prints the
+// attributes that the new child keeps for itself.
+func (t *PostgresTable) creationStateOfChild(desiredTables []*PostgresTable) *PostgresTable {
+	parents := lo.Filter(desiredTables, func(table *PostgresTable, _ int) bool {
+		return slices.Contains(t.Inherits, table.Name)
+	})
+
+	tableCopy := *t
+
+	tableCopy.Columns = lo.Map(t.Columns, func(column *PostgresColumn, _ int) *PostgresColumn {
+		if !column.Inherited {
+			return column
+		}
+
+		for _, parent := range parents {
+			parentColumn, found := parent.ColumnByName(column.Name)
+			if !found {
+				continue
+			}
+
+			columnCopy := *parentColumn
+			columnCopy.Comment = column.Comment
+			columnCopy.StatisticsTarget = sql.NullInt64{}
+			columnCopy.Inherited = true
+
+			return &columnCopy
+		}
+
+		return column
+	})
+
+	return &tableCopy
 }
 
 func (t *PostgresTable) RebuiltColumnNames(other *PostgresTable, serverVersion int) []string {
@@ -1122,7 +1366,13 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 				FROM pg_index i
 				JOIN pg_class replica_index ON replica_index.oid = i.indexrelid
 				WHERE i.indrelid = c.oid AND i.indisreplident
-			), '')
+			), ''),
+			EXISTS (
+				SELECT 1
+				FROM pg_inherits i
+				JOIN pg_class child ON child.oid = i.inhrelid
+				WHERE i.inhparent = c.oid AND NOT child.relispartition
+			)
 		FROM pg_class c
 		WHERE c.relnamespace = current_schema()::regnamespace
 		AND c.relkind IN ('r', 'p')
@@ -1140,7 +1390,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		err := rows.Scan(&table.Name, &table.PartitionKey, &table.PartitionParent,
 			&table.PartitionBound, &inherits, &table.Comment, &table.RowLevelSecurity,
 			&table.ForceRowLevelSecurity, &table.Unlogged, &storageParameters,
-			&table.ReplicaIdentity, &table.ReplicaIdentityIndex)
+			&table.ReplicaIdentity, &table.ReplicaIdentityIndex, &table.HasInheritanceChildren)
 		if err != nil {
 			return nil, err
 		}

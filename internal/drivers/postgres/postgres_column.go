@@ -32,6 +32,10 @@ type PostgresColumn struct {
 	Storage string
 
 	StatisticsTarget sql.NullInt64
+
+	// The parent of a table of INHERITS holds this column, and each change of the parent
+	// reaches the child.
+	Inherited bool
 }
 
 // A column definition accepts no storage mode before PostgreSQL 16, so a separate statement
@@ -206,7 +210,8 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 						WHEN 'bigint'::regtype THEN 'bigserial'
 					END
 				ELSE '' END,
-				coalesce(serial_sequence.relname, '')
+				coalesce(serial_sequence.relname, ''),
+				NOT a.attislocal
 			FROM pg_attribute a
 			LEFT JOIN LATERAL (
 				SELECT sequence_class.relname
@@ -233,13 +238,13 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 		`, func(rows *sql.Rows) (*PostgresColumn, error) {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
 		var identityOptions, storage, serial, serialSequenceName string
-		var notNull bool
+		var notNull, inherited bool
 		var columnDefault sql.NullString
 		var statisticsTarget sql.NullInt64
 
 		err := rows.Scan(&columnName, &columnType, &notNull, &columnDefault,
 			&identity, &generatedExpression, &collation, &comment, &storage,
-			&statisticsTarget, &identityOptions, &serial, &serialSequenceName)
+			&statisticsTarget, &identityOptions, &serial, &serialSequenceName, &inherited)
 		if err != nil {
 			return nil, err
 		}
@@ -258,6 +263,7 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 			StatisticsTarget:    statisticsTarget,
 			SerialSequenceName:  serialSequenceName,
 			Serial:              serial,
+			Inherited:           inherited,
 		}, nil
 	}, driversshared.QuoteIdentifier(table.Name))
 	if err != nil {

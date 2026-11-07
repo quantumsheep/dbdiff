@@ -377,6 +377,29 @@ func TestPostgresTableInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresCreateTableWithoutAColumn", func(t *testing.T) {
+		instruction := &PostgresCreateTableInstruction{
+			Name:     "children",
+			Inherits: []string{"parents"},
+		}
+
+		require.Equal(t, `CREATE TABLE "children" () INHERITS ("parents");`, instruction.String())
+	})
+
+	t.Run("PostgresAlterTableOnly", func(t *testing.T) {
+		instruction := &PostgresAlterTableInstruction{
+			Name: "parents",
+			Only: true,
+			Actions: []driversshared.AlterTableAction{
+				&PostgresDropDefaultAction{
+					ColumnName: "a",
+				},
+			},
+		}
+
+		require.Equal(t, `ALTER TABLE ONLY "parents" ALTER COLUMN "a" DROP DEFAULT;`, instruction.String())
+	})
+
 	t.Run("PostgresAlterTableInherit", func(t *testing.T) {
 		instruction := &PostgresAlterTableInstruction{
 			Name: "children",

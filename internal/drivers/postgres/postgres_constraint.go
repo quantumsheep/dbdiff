@@ -12,6 +12,10 @@ type PostgresConstraint struct {
 	Name string
 	Type string
 	Def  string
+
+	// The parent of a table of INHERITS holds this constraint, and each change of the parent
+	// reaches the child.
+	Inherited bool
 }
 
 func (c *PostgresConstraint) IsForeignKey() bool {
@@ -31,7 +35,8 @@ func getTableConstraints(ctx context.Context, db *sql.DB, table *PostgresTable) 
 				conname,
 				contype,
 				pg_get_constraintdef(oid),
-				coalesce((SELECT relname FROM pg_class WHERE oid = confrelid), '')
+				coalesce((SELECT relname FROM pg_class WHERE oid = confrelid), ''),
+				NOT conislocal
 			FROM pg_constraint
 			WHERE conrelid = $1::regclass
 			AND contype <> 'n'
@@ -41,7 +46,7 @@ func getTableConstraints(ctx context.Context, db *sql.DB, table *PostgresTable) 
 
 		var referencedTable string
 
-		err := rows.Scan(&constraint.Name, &constraint.Type, &constraint.Def, &referencedTable)
+		err := rows.Scan(&constraint.Name, &constraint.Type, &constraint.Def, &referencedTable, &constraint.Inherited)
 		if err != nil {
 			return nil, err
 		}

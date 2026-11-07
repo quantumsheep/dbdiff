@@ -9,7 +9,11 @@ import (
 )
 
 type PostgresAlterTableInstruction struct {
-	Name    string
+	Name string
+
+	// ONLY keeps the change away from the children of a table of INHERITS.
+	Only bool
+
 	Actions []driversshared.AlterTableAction
 }
 
@@ -18,8 +22,13 @@ func (i *PostgresAlterTableInstruction) String() string {
 		return action.TableActionClause()
 	})
 
-	return fmt.Sprintf("ALTER TABLE %s %s;",
-		driversshared.QuoteIdentifier(i.Name), strings.Join(clauses, ", "))
+	keyword := "ALTER TABLE"
+	if i.Only {
+		keyword = "ALTER TABLE ONLY"
+	}
+
+	return fmt.Sprintf("%s %s %s;",
+		keyword, driversshared.QuoteIdentifier(i.Name), strings.Join(clauses, ", "))
 }
 
 func (i *PostgresAlterTableInstruction) Comment() string {
@@ -296,8 +305,12 @@ func (i *PostgresCreateTableInstruction) String() string {
 		keyword = "CREATE UNLOGGED TABLE"
 	}
 
-	statement := fmt.Sprintf("%s %s (\n%s\n)",
-		keyword, driversshared.QuoteIdentifier(i.Name), strings.Join(lines, ",\n"))
+	body := "()"
+	if len(lines) > 0 {
+		body = "(\n" + strings.Join(lines, ",\n") + "\n)"
+	}
+
+	statement := fmt.Sprintf("%s %s %s", keyword, driversshared.QuoteIdentifier(i.Name), body)
 
 	if len(i.Inherits) > 0 {
 		statement += " INHERITS (" + strings.Join(driversshared.QuoteIdentifiers(i.Inherits), ", ") + ")"

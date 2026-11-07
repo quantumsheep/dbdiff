@@ -1,6 +1,7 @@
 package driverspostgres
 
 import (
+	"database/sql"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -723,15 +724,418 @@ func TestPostgresTable(t *testing.T) {
 				Name: "achild",
 				Columns: []*PostgresColumn{
 					{
-						Name: "a",
-						Type: "integer",
-					},
-					{
 						Name: "b",
 						Type: "integer",
 					},
 				},
 				Inherits: []string{"zparent"},
+			},
+		})
+	})
+
+	t.Run("CreateTableThatInheritsAColumnAndACheck", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE zparent (a INT CONSTRAINT a_positive CHECK (a > 0));
+			CREATE TABLE achild () INHERITS (zparent);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "zparent",
+				Columns: []*PostgresColumn{
+					{
+						Name: "a",
+						Type: "integer",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name: "a_positive",
+						Type: "c",
+						Def:  "CHECK ((a > 0))",
+					},
+				},
+			},
+			&PostgresCreateTableInstruction{
+				Name:     "achild",
+				Inherits: []string{"zparent"},
+			},
+		})
+	})
+
+	t.Run("AddAColumnAndACheckToAnInheritsParent", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (a INT);
+			CREATE TABLE children (x INT) INHERITS (parents);
+			INSERT INTO children (a, x) VALUES (1, 2);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (a INT, b INT CONSTRAINT b_positive CHECK (b > 0));
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "b",
+							Type: "integer",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "b_positive",
+							Type: "c",
+							Def:  "CHECK ((b > 0))",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("children", "")
+		require.Equal(t, []map[string]any{
+			{
+				"a": int64(1),
+				"b": nil,
+				"x": int64(2),
+			},
+		}, rows)
+	})
+
+	t.Run("ChildSetsItsOwnDefaultOnAnInheritedColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE parents (a INT DEFAULT 0);
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnDesired(schema + `ALTER TABLE children ALTER COLUMN a SET DEFAULT 5;`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "a",
+						Expression: "5",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnCurrent(`INSERT INTO children (x) VALUES (1);`)
+
+		rows := driver.FetchAllFromCurrent("children", "")
+		require.Equal(t, []map[string]any{
+			{
+				"a": int64(5),
+				"x": int64(1),
+			},
+		}, rows)
+	})
+
+	t.Run("ParentChangesADefaultThatTheChildOverrides", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (a INT DEFAULT 0);
+			CREATE TABLE children (x INT) INHERITS (parents);
+			ALTER TABLE children ALTER COLUMN a SET DEFAULT 5;
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (a INT DEFAULT 1);
+			CREATE TABLE children (x INT) INHERITS (parents);
+			ALTER TABLE children ALTER COLUMN a SET DEFAULT 5;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Only: true,
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "a",
+						Expression: "1",
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("ParentAddsAColumnThatTheChildOverrides", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (a INT);
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (a INT, b INT DEFAULT 1);
+			CREATE TABLE children (x INT) INHERITS (parents);
+			ALTER TABLE children ALTER COLUMN b SET DEFAULT 7;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "b",
+							Type: "integer",
+							Default: sql.NullString{
+								String: "1",
+								Valid:  true,
+							},
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "b",
+						Expression: "7",
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("ChildStopsInheritingAndLosesTheInheritedObjects", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (a INT CONSTRAINT a_positive CHECK (a > 0));
+			CREATE TABLE children (x INT) INHERITS (parents);
+			INSERT INTO children (a, x) VALUES (1, 2);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (a INT CONSTRAINT a_positive CHECK (a > 0));
+			CREATE TABLE children (x INT);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresNoInheritAction{
+						ParentName: "parents",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "a_positive",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{
+						ColumnName: "a",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("children", "")
+		require.Equal(t, []map[string]any{
+			{
+				"x": int64(2),
+			},
+		}, rows)
+	})
+
+	t.Run("CreateAChildWithItsOwnAttributesOnInheritedColumns", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		parent := `CREATE TABLE parents (id INT, a INT DEFAULT 1 CONSTRAINT a_positive CHECK (a > 0));`
+		driver.ExecOnCurrent(parent)
+		driver.ExecOnDesired(parent + `
+			CREATE TABLE children (x INT) INHERITS (parents);
+			ALTER TABLE children ALTER COLUMN a SET DEFAULT 9;
+			ALTER TABLE children ALTER COLUMN id SET NOT NULL;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "children",
+				Columns: []*PostgresColumn{
+					{
+						Name: "x",
+						Type: "integer",
+					},
+				},
+				Inherits: []string{"parents"},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetNotNullAction{
+						ColumnName: "id",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "a",
+						Expression: "9",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnCurrent(`INSERT INTO children (id, x) VALUES (1, 2);`)
+
+		rows := driver.FetchAllFromCurrent("children", "")
+		require.Equal(t, []map[string]any{
+			{
+				"id": int64(1),
+				"a":  int64(9),
+				"x":  int64(2),
+			},
+		}, rows)
+	})
+
+	t.Run("ChildStartsToInheritAParentThatAddsAColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (id INT NOT NULL CONSTRAINT id_positive CHECK (id > 0));
+			CREATE TABLE children (id INT, x INT);
+			INSERT INTO children (id, x) VALUES (1, 2);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (id INT NOT NULL CONSTRAINT id_positive CHECK (id > 0), a INT);
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "a",
+							Type: "integer",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetNotNullAction{
+						ColumnName: "id",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "a",
+							Type: "integer",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "id_positive",
+							Type: "c",
+							Def:  "CHECK ((id > 0))",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "children",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresInheritAction{
+						ParentName: "parents",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("children", "")
+		require.Equal(t, []map[string]any{
+			{
+				"id": int64(1),
+				"x":  int64(2),
+				"a":  nil,
+			},
+		}, rows)
+	})
+
+	t.Run("ParentSetsNotNullOnAColumnOfItsChildren", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (a INT);
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (a INT NOT NULL);
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetNotNullAction{
+						ColumnName: "a",
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("DropAColumnAndACheckOfAnInheritsParent", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (a INT, b INT CONSTRAINT b_positive CHECK (b > 0));
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (a INT);
+			CREATE TABLE children (x INT) INHERITS (parents);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "b_positive",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{
+						ColumnName: "b",
+					},
+				},
 			},
 		})
 	})
