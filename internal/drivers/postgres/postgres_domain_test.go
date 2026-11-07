@@ -33,6 +33,73 @@ func TestPostgresDomain(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateDomainWithAComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE DOMAIN amount AS integer;
+			COMMENT ON DOMAIN amount IS 'a value of money';
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateDomainInstruction{
+				Name:     "amount",
+				BaseType: "integer",
+			},
+			&PostgresCommentOnDomainInstruction{
+				Name: "amount",
+				Text: "a value of money",
+			},
+		})
+	})
+
+	t.Run("ModifyDomainComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE DOMAIN amount AS integer;
+			COMMENT ON DOMAIN amount IS 'a value';
+		`)
+		driver.ExecOnDesired(`
+			CREATE DOMAIN amount AS integer;
+			COMMENT ON DOMAIN amount IS 'a value of money';
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnDomainInstruction{
+				Name: "amount",
+				Text: "a value of money",
+			},
+		})
+	})
+
+	t.Run("RecreateADomainWithAComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE DOMAIN amount AS integer;
+			COMMENT ON DOMAIN amount IS 'a value of money';
+		`)
+		driver.ExecOnDesired(`
+			CREATE DOMAIN amount AS bigint;
+			COMMENT ON DOMAIN amount IS 'a value of money';
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropDomainInstruction{
+				Name: "amount",
+			},
+			&PostgresCreateDomainInstruction{
+				Name:     "amount",
+				BaseType: "bigint",
+			},
+			&PostgresCommentOnDomainInstruction{
+				Name: "amount",
+				Text: "a value of money",
+			},
+		})
+	})
+
 	t.Run("AlterDomain", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

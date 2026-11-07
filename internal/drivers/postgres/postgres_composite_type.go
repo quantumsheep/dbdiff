@@ -17,6 +17,7 @@ type PostgresCompositeTypeAttribute struct {
 type PostgresCompositeType struct {
 	Name       string
 	Attributes []*PostgresCompositeTypeAttribute
+	Comment    string
 }
 
 func (t *PostgresCompositeType) Equal(other *PostgresCompositeType) bool {
@@ -34,6 +35,20 @@ func (t *PostgresCompositeType) CreateInstruction() *PostgresCreateCompositeType
 		Name:       t.Name,
 		Attributes: t.Attributes,
 	}
+}
+
+// CREATE TYPE accepts no comment, so the comment takes its own statement.
+func (t *PostgresCompositeType) Instructions() []driversshared.Instruction {
+	instructions := []driversshared.Instruction{t.CreateInstruction()}
+
+	if t.Comment != "" {
+		instructions = append(instructions, &PostgresCommentOnTypeInstruction{
+			Name: t.Name,
+			Text: t.Comment,
+		})
+	}
+
+	return instructions
 }
 
 func (t *PostgresCompositeType) DropInstruction() *PostgresDropTypeInstruction {
@@ -90,7 +105,14 @@ func (d *PostgresDriver) diffCompositeType(
 	current *PostgresCompositeType,
 ) ([]driversshared.Instruction, error) {
 	if desired.Equal(current) {
-		return nil, nil
+		if desired.Comment == current.Comment {
+			return nil, nil
+		}
+
+		return []driversshared.Instruction{&PostgresCommentOnTypeInstruction{
+			Name: desired.Name,
+			Text: desired.Comment,
+		}}, nil
 	}
 
 	dependents, err := getTypeDependents(ctx, d.CurrentDatabaseConnection, current.Name)
@@ -108,12 +130,19 @@ func (d *PostgresDriver) diffCompositeType(
 			d.markRecreated(dependent.TableName)
 		}
 
-		return []driversshared.Instruction{current.DropInstruction(), desired.CreateInstruction()}, nil
+		return append([]driversshared.Instruction{current.DropInstruction()}, desired.Instructions()...), nil
 	}
 
 	instructions, possible := desired.attributeChanges(current)
 	if !possible {
 		return nil, typeDependentError(dependents[0].Name, current.Name)
+	}
+
+	if desired.Comment != current.Comment {
+		instructions = append(instructions, &PostgresCommentOnTypeInstruction{
+			Name: desired.Name,
+			Text: desired.Comment,
+		})
 	}
 
 	return instructions, nil
@@ -126,7 +155,7 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 				return compositeType.Name
 			},
 			Create: func(compositeType *PostgresCompositeType) []driversshared.Instruction {
-				return []driversshared.Instruction{compositeType.CreateInstruction()}
+				return compositeType.Instructions()
 			},
 			Change: func(desired *PostgresCompositeType, current *PostgresCompositeType) ([]driversshared.Instruction, error) {
 				return d.diffCompositeType(ctx, desired, current)
@@ -147,7 +176,8 @@ func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, 
 
 func (d *PostgresDriver) GetCompositeTypes(ctx context.Context, db *sql.DB) ([]*PostgresCompositeType, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT t.typname, a.attname, format_type(a.atttypid, a.atttypmod)
+		SELECT t.typname, a.attname, format_type(a.atttypid, a.atttypmod),
+			coalesce(obj_description(t.oid, 'pg_type'), '')
 		FROM pg_type t
 		JOIN pg_class c ON c.oid = t.typrelid AND c.relkind = 'c'
 		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -167,16 +197,19 @@ func (d *PostgresDriver) GetCompositeTypes(ctx context.Context, db *sql.DB) ([]*
 	var compositeTypes []*PostgresCompositeType
 
 	for rows.Next() {
-		var typeName, attributeName, attributeType string
+		var typeName, attributeName, attributeType, comment string
 
-		err := rows.Scan(&typeName, &attributeName, &attributeType)
+		err := rows.Scan(&typeName, &attributeName, &attributeType, &comment)
 		if err != nil {
 			return nil, err
 		}
 
 		lastCompositeType, _ := lo.Last(compositeTypes)
 		if lastCompositeType == nil || lastCompositeType.Name != typeName {
-			lastCompositeType = &PostgresCompositeType{Name: typeName}
+			lastCompositeType = &PostgresCompositeType{
+				Name:    typeName,
+				Comment: comment,
+			}
 			compositeTypes = append(compositeTypes, lastCompositeType)
 		}
 

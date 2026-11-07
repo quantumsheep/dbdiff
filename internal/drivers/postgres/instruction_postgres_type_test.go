@@ -19,6 +19,17 @@ func TestPostgresTypeInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresCommentOnDomain", func(t *testing.T) {
+		instruction := &PostgresCommentOnDomainInstruction{
+			Name: "amount",
+			Text: "a positive value",
+		}
+
+		require.Equal(t,
+			`COMMENT ON DOMAIN "amount" IS 'a positive value';`,
+			instruction.String())
+	})
+
 	t.Run("PostgresCreateEnumType", func(t *testing.T) {
 		instruction := &PostgresCreateEnumTypeInstruction{
 			Name:   "mood",

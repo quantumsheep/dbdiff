@@ -48,6 +48,32 @@ func TestPostgresObjectInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresGrantToPublic", func(t *testing.T) {
+		instruction := &PostgresGrantInstruction{
+			Privileges: []string{"SELECT"},
+			ObjectType: "TABLE",
+			ObjectName: "users",
+			Grantee:    "public",
+		}
+
+		require.Equal(t,
+			`GRANT SELECT ON TABLE "users" TO PUBLIC;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresRevokeFromPublic", func(t *testing.T) {
+		instruction := &PostgresRevokeInstruction{
+			Privileges: []string{"SELECT"},
+			ObjectType: "TABLE",
+			ObjectName: "users",
+			Grantee:    "public",
+		}
+
+		require.Equal(t,
+			`REVOKE SELECT ON TABLE "users" FROM PUBLIC;`,
+			instruction.String())
+	})
+
 	t.Run("PostgresSetOwner", func(t *testing.T) {
 		instruction := &PostgresSetOwnerInstruction{
 			ObjectType: "TABLE",

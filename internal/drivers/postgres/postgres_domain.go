@@ -19,6 +19,7 @@ type PostgresDomain struct {
 	NotNull     bool
 	Default     sql.NullString
 	Constraints []*PostgresDomainConstraint
+	Comment     string
 }
 
 func (d *PostgresDomain) ConstraintByName(name string) (*PostgresDomainConstraint, bool) {
@@ -41,6 +42,20 @@ func (d *PostgresDomain) CreateInstruction() *PostgresCreateDomainInstruction {
 	}
 }
 
+// CREATE DOMAIN accepts no comment, so the comment takes its own statement.
+func (d *PostgresDomain) Instructions() []driversshared.Instruction {
+	instructions := []driversshared.Instruction{d.CreateInstruction()}
+
+	if d.Comment != "" {
+		instructions = append(instructions, &PostgresCommentOnDomainInstruction{
+			Name: d.Name,
+			Text: d.Comment,
+		})
+	}
+
+	return instructions
+}
+
 func (d *PostgresDomain) DropInstruction() *PostgresDropDomainInstruction {
 	return &PostgresDropDomainInstruction{Name: d.Name}
 }
@@ -48,10 +63,17 @@ func (d *PostgresDomain) DropInstruction() *PostgresDropDomainInstruction {
 // PostgreSQL changes no base type of a domain, so a new base type needs a recreation.
 func (d *PostgresDomain) Diff(other *PostgresDomain) []driversshared.Instruction {
 	if d.BaseType != other.BaseType {
-		return []driversshared.Instruction{other.DropInstruction(), d.CreateInstruction()}
+		return append([]driversshared.Instruction{other.DropInstruction()}, d.Instructions()...)
 	}
 
 	var instructions []driversshared.Instruction
+
+	if d.Comment != other.Comment {
+		instructions = append(instructions, &PostgresCommentOnDomainInstruction{
+			Name: d.Name,
+			Text: d.Comment,
+		})
+	}
 
 	if d.Default != other.Default {
 		if d.Default.Valid {
@@ -135,12 +157,11 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 				return domain.Name
 			},
 			Create: func(domain *PostgresDomain) []driversshared.Instruction {
-				return []driversshared.Instruction{domain.CreateInstruction()}
+				return domain.Instructions()
 			},
 			Change: func(desired *PostgresDomain, current *PostgresDomain) ([]driversshared.Instruction, error) {
 				if desired.BaseType != current.BaseType {
-					instructions, err := d.replaceUsedType(ctx, "DOMAIN", desired.Name,
-						[]driversshared.Instruction{desired.CreateInstruction()}, "")
+					instructions, err := d.replaceUsedType(ctx, "DOMAIN", desired.Name, desired.Instructions(), "")
 					if err != nil || instructions != nil {
 						return instructions, err
 					}
@@ -172,7 +193,8 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 			t.typnotnull,
 			t.typdefault,
 			c.conname,
-			pg_get_constraintdef(c.oid)
+			pg_get_constraintdef(c.oid),
+			coalesce(obj_description(t.oid, 'pg_type'), '')
 		FROM pg_type t
 		LEFT JOIN pg_constraint c ON c.contypid = t.oid AND c.contype = 'c'
 		WHERE t.typnamespace = current_schema()::regnamespace
@@ -194,8 +216,9 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 		var domainName, baseType string
 		var notNull bool
 		var defaultValue, constraintName, constraintDef sql.NullString
+		var comment string
 
-		err := rows.Scan(&domainName, &baseType, &notNull, &defaultValue, &constraintName, &constraintDef)
+		err := rows.Scan(&domainName, &baseType, &notNull, &defaultValue, &constraintName, &constraintDef, &comment)
 		if err != nil {
 			return nil, err
 		}
@@ -207,6 +230,7 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 				BaseType: baseType,
 				NotNull:  notNull,
 				Default:  defaultValue,
+				Comment:  comment,
 			}
 			domains = append(domains, lastDomain)
 		}

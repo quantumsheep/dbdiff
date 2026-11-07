@@ -148,4 +148,42 @@ func TestPostgresPrivilege(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("GrantToPublic", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INT);
+			GRANT SELECT ON users TO PUBLIC;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresGrantInstruction{
+				Privileges: []string{"SELECT"},
+				ObjectType: "TABLE",
+				ObjectName: "users",
+				Grantee:    "public",
+			},
+		})
+	})
+
+	t.Run("RevokeFromPublic", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id INT);
+			GRANT SELECT, INSERT ON users TO PUBLIC;
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresRevokeInstruction{
+				Privileges: []string{"INSERT", "SELECT"},
+				ObjectType: "TABLE",
+				ObjectName: "users",
+				Grantee:    "public",
+			},
+		})
+	})
 }

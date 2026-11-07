@@ -30,6 +30,54 @@ func TestPostgresCompositeType(t *testing.T) {
 		})
 	})
 
+	t.Run("ModifyCompositeTypeComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TYPE address AS (street TEXT);`)
+		driver.ExecOnDesired(`
+			CREATE TYPE address AS (street TEXT);
+			COMMENT ON TYPE address IS 'a postal address';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnTypeInstruction{
+				Name: "address",
+				Text: "a postal address",
+			},
+		})
+	})
+
+	t.Run("RecreateACompositeTypeWithAComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TYPE address AS (street TEXT);`)
+		driver.ExecOnDesired(`
+			CREATE TYPE address AS (street TEXT, city TEXT);
+			COMMENT ON TYPE address IS 'a postal address';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropTypeInstruction{
+				Name: "address",
+			},
+			&PostgresCreateCompositeTypeInstruction{
+				Name: "address",
+				Attributes: []*PostgresCompositeTypeAttribute{
+					{
+						Name: "street",
+						Type: "text",
+					},
+					{
+						Name: "city",
+						Type: "text",
+					},
+				},
+			},
+			&PostgresCommentOnTypeInstruction{
+				Name: "address",
+				Text: "a postal address",
+			},
+		})
+	})
+
 	t.Run("ModifyCompositeType", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

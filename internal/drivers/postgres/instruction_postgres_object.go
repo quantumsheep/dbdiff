@@ -244,7 +244,7 @@ type PostgresGrantInstruction struct {
 func (i *PostgresGrantInstruction) String() string {
 	return fmt.Sprintf("GRANT %s ON %s %s TO %s;",
 		joinPrivileges(i.Privileges), i.ObjectType,
-		driversshared.QuoteIdentifier(i.ObjectName), driversshared.QuoteIdentifier(i.Grantee))
+		driversshared.QuoteIdentifier(i.ObjectName), quoteGrantee(i.Grantee))
 }
 
 func (i *PostgresGrantInstruction) Comment() string {
@@ -261,7 +261,7 @@ type PostgresRevokeInstruction struct {
 func (i *PostgresRevokeInstruction) String() string {
 	return fmt.Sprintf("REVOKE %s ON %s %s FROM %s;",
 		joinPrivileges(i.Privileges), i.ObjectType,
-		driversshared.QuoteIdentifier(i.ObjectName), driversshared.QuoteIdentifier(i.Grantee))
+		driversshared.QuoteIdentifier(i.ObjectName), quoteGrantee(i.Grantee))
 }
 
 func (i *PostgresRevokeInstruction) Comment() string {
@@ -281,4 +281,13 @@ func (i *PostgresSetOwnerInstruction) String() string {
 
 func (i *PostgresSetOwnerInstruction) Comment() string {
 	return driversshared.OwnedObjectComment("Change", "owner", i.ObjectType, i.ObjectName)
+}
+
+// PUBLIC is a keyword, and the quoted name "PUBLIC" names a role.
+func quoteGrantee(grantee string) string {
+	if grantee == "public" {
+		return "PUBLIC"
+	}
+
+	return driversshared.QuoteIdentifier(grantee)
 }

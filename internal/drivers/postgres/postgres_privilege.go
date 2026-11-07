@@ -228,26 +228,26 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 	return owners, nil
 }
 
-// PostgreSQL gives the privileges of the owner with the object.
+// PostgreSQL gives the privileges of the owner with the object. The grantee 0 is PUBLIC, and
+// the name public cannot name a role.
 func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			c.relname,
 			c.relkind,
-			pg_get_userbyid(acl.grantee),
+			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
 			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
 		FROM pg_class c, aclexplode(c.relacl) acl
 		WHERE c.relnamespace = current_schema()::regnamespace
 		AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
 		AND acl.grantee <> c.relowner
-		AND acl.grantee <> 0
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d
 			WHERE d.objid = c.oid AND d.deptype IN ('e', 'a', 'i')
 		)
 		AND c.relname <> $1
 		GROUP BY c.relname, c.relkind, acl.grantee
-		ORDER BY c.relname, pg_get_userbyid(acl.grantee)
+		ORDER BY c.relname, grantee_name
 	`, driversshared.MigrationHistoryTableName)
 	if err != nil {
 		return nil, err

@@ -248,3 +248,17 @@ func (i *PostgresCommentOnTypeInstruction) String() string {
 func (i *PostgresCommentOnTypeInstruction) Comment() string {
 	return driversshared.ObjectComment("Modify", "type", i.Name)
 }
+
+type PostgresCommentOnDomainInstruction struct {
+	Name string
+	Text string
+}
+
+func (i *PostgresCommentOnDomainInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON DOMAIN %s IS %s;",
+		driversshared.QuoteIdentifier(i.Name), commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnDomainInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "domain", i.Name)
+}
