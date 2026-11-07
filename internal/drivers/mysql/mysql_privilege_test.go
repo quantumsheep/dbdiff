@@ -180,4 +180,76 @@ func TestMySQLPrivilege(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("RevokeTheGrantOptionOfColumnPrivileges", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.ComparePrivileges = true
+		driver.CreateTestUser("dbdiff_reader")
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id int NOT NULL, name varchar(50), PRIMARY KEY (id));
+			GRANT SELECT (id, name), INSERT (id) ON users TO 'dbdiff_reader'@'%';
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id int NOT NULL, name varchar(50), PRIMARY KEY (id));
+			GRANT SELECT (id, name), INSERT (id) ON users TO 'dbdiff_reader'@'%' WITH GRANT OPTION;
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLRevokeInstruction{
+				Privileges: []string{"GRANT OPTION"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+		})
+	})
+
+	t.Run("RevokeAColumnPrivilegeWithTheGrantOption", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.ComparePrivileges = true
+		driver.CreateTestUser("dbdiff_reader")
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
+			GRANT SELECT (id) ON users TO 'dbdiff_reader'@'%' WITH GRANT OPTION;
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLRevokeInstruction{
+				Privileges: []string{"SELECT"},
+				Columns:    []string{"id"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+			&MySQLRevokeInstruction{
+				Privileges: []string{"GRANT OPTION"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+		})
+	})
+
+	t.Run("RevokeTheGrantOptionOfATableOnce", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.ComparePrivileges = true
+		driver.CreateTestUser("dbdiff_reader")
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
+			GRANT INSERT, SELECT (id) ON users TO 'dbdiff_reader'@'%';
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
+			GRANT INSERT, SELECT (id) ON users TO 'dbdiff_reader'@'%' WITH GRANT OPTION;
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLRevokeInstruction{
+				Privileges: []string{"GRANT OPTION"},
+				TableName:  "users",
+				Grantee:    "'dbdiff_reader'@'%'",
+			},
+		})
+	})
 }

@@ -71,6 +71,8 @@ func (s *MySQLPrivilegeSet) revokeInstruction() *MySQLRevokeInstruction {
 func (d *MySQLDriver) DiffPrivileges(ctx context.Context) ([]driversshared.Instruction, error) {
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
+	var allDesiredSets []*MySQLPrivilegeSet
+	var allCurrentSets []*MySQLPrivilegeSet
 
 	for _, getSets := range []func(context.Context, *sql.DB) ([]*MySQLPrivilegeSet, error){
 		d.GetPrivileges,
@@ -89,9 +91,50 @@ func (d *MySQLDriver) DiffPrivileges(ctx context.Context) ([]driversshared.Instr
 		setAdditions, setRemovals := diffPrivilegeSets(desiredSets, currentSets)
 		additions = append(additions, setAdditions...)
 		removals = append(removals, setRemovals...)
+		allDesiredSets = append(allDesiredSets, desiredSets...)
+		allCurrentSets = append(allCurrentSets, currentSets...)
 	}
 
+	removals = append(removals, columnGrantOptionRevokes(allDesiredSets, allCurrentSets)...)
+
 	return append(additions, removals...), nil
+}
+
+// MySQL keeps one grant option for each grantee and table, and the column privileges share
+// it. The revoke of a column privilege keeps the grant option. MySQL refuses a second
+// REVOKE GRANT OPTION, and the diff of a table set revokes the grant option already.
+func columnGrantOptionRevokes(
+	desiredSets []*MySQLPrivilegeSet,
+	currentSets []*MySQLPrivilegeSet,
+) []driversshared.Instruction {
+	var revokedTargets []*MySQLPrivilegeSet
+
+	for _, currentSet := range currentSets {
+		target := &MySQLPrivilegeSet{
+			Grantee:    currentSet.Grantee,
+			TableName:  currentSet.TableName,
+			Privileges: []string{"GRANT OPTION"},
+		}
+
+		keptInDesired := lo.ContainsBy(desiredSets, func(desiredSet *MySQLPrivilegeSet) bool {
+			return target.sameTarget(desiredSet) && desiredSet.Grantable
+		})
+		revokedByTableSet := lo.ContainsBy(currentSets, func(otherSet *MySQLPrivilegeSet) bool {
+			return otherSet.Columns == nil && target.sameTarget(otherSet)
+		})
+
+		skipped := currentSet.Columns == nil || !currentSet.Grantable || keptInDesired || revokedByTableSet ||
+			lo.ContainsBy(revokedTargets, target.sameTarget)
+		if skipped {
+			continue
+		}
+
+		revokedTargets = append(revokedTargets, target)
+	}
+
+	return lo.Map(revokedTargets, func(target *MySQLPrivilegeSet, _ int) driversshared.Instruction {
+		return target.revokeInstruction()
+	})
 }
 
 func diffPrivilegeSets(
