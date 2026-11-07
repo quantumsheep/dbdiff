@@ -238,6 +238,17 @@ func TestMySQLInstructions(t *testing.T) {
 				Column: column,
 				First:  true,
 			}).TableActionClause())
+		require.Equal(t, "ADD COLUMN `id` int NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST",
+			(&MySQLAddColumnAction{
+				Column: &MySQLColumn{
+					Name:          "id",
+					Type:          "int",
+					NotNull:       true,
+					AutoIncrement: true,
+				},
+				First:      true,
+				PrimaryKey: true,
+			}).TableActionClause())
 		require.Equal(t, "MODIFY COLUMN `name` text AFTER `id`",
 			(&MySQLModifyColumnAction{
 				Column: column,

@@ -114,10 +114,20 @@ type MySQLAddColumnAction struct {
 	Column *MySQLColumn
 	First  bool
 	After  string
+
+	// MySQL refuses an AUTO_INCREMENT column outside of every key, so a new AUTO_INCREMENT
+	// column that is the whole primary key gets the key in the same action.
+	PrimaryKey bool
 }
 
 func (a *MySQLAddColumnAction) TableActionClause() string {
-	return "ADD COLUMN " + a.Column.Definition() + columnPositionClause(a.First, a.After)
+	clause := "ADD COLUMN " + a.Column.Definition()
+
+	if a.PrimaryKey {
+		clause += " PRIMARY KEY"
+	}
+
+	return clause + columnPositionClause(a.First, a.After)
 }
 
 type MySQLModifyColumnAction struct {

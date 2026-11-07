@@ -282,6 +282,84 @@ func TestMySQLColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", "ORDER BY user_id"))
 	})
 
+	t.Run("RenameAndRetypeAnAutoIncrementPrimaryKeyColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (user_id bigint NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (user_id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (5, 'Alice'), (9, 'Bob');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "id",
+					NewColumnName: "user_id",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:          "user_id",
+						Type:          "bigint",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"user_id": int64(5), "name": "Alice"},
+			{"user_id": int64(9), "name": "Bob"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY user_id"))
+	})
+
+	t.Run("ReplaceTheAutoIncrementPrimaryKeyWithANewColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, user_id bigint NOT NULL AUTO_INCREMENT, " +
+			"name varchar(20), PRIMARY KEY (user_id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (5, 'Alice'), (9, 'Bob');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name:   "users",
+				Action: &MySQLDropPrimaryKeyAction{},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:          "user_id",
+						Type:          "bigint",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+					After:      "id",
+					PrimaryKey: true,
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(5), "user_id": int64(1), "name": "Alice"},
+			{"id": int64(9), "user_id": int64(2), "name": "Bob"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY user_id"))
+	})
+
 	t.Run("RenameAColumnThatAGeneratedColumnReads", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 

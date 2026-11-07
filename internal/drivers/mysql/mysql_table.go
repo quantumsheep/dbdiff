@@ -113,20 +113,39 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 		RenamedFrom: driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*MySQLColumn).HasEqualAttributes),
 	}
 
+	// A table holds at most one AUTO_INCREMENT column. If the current one goes away and the
+	// desired table adds one, the new column replaces the old one, so a rename keeps the values.
+	// A drop and an add fail, because MySQL refuses an AUTO_INCREMENT column outside of every key.
+	currentAutoIncrementColumn, currentFound := lo.Find(other.Columns, func(column *MySQLColumn) bool {
+		return column.AutoIncrement
+	})
+	desiredAutoIncrementColumn, desiredFound := lo.Find(t.Columns, func(column *MySQLColumn) bool {
+		return column.AutoIncrement
+	})
+
+	if currentFound && desiredFound {
+		_, currentKept := t.ColumnByName(currentAutoIncrementColumn.Name)
+		_, desiredExists := other.ColumnByName(desiredAutoIncrementColumn.Name)
+
+		if !currentKept && !desiredExists {
+			diff.RenamedFrom[desiredAutoIncrementColumn.Name] = currentAutoIncrementColumn.Name
+		}
+	}
+
 	for _, desiredColumn := range t.Columns {
 		currentColumn, found := other.ColumnByName(desiredColumn.Name)
 		if !found {
-			_, renamed := diff.RenamedFrom[desiredColumn.Name]
-			if renamed {
+			oldName, renamed := diff.RenamedFrom[desiredColumn.Name]
+			if !renamed {
+				diff.Added = append(diff.Added, desiredColumn.Name)
+
 				continue
 			}
 
-			diff.Added = append(diff.Added, desiredColumn.Name)
-
-			continue
+			currentColumn, _ = other.ColumnByName(oldName)
 		}
 
-		if *desiredColumn == *currentColumn {
+		if desiredColumn.HasEqualAttributes(currentColumn) {
 			continue
 		}
 
@@ -295,6 +314,8 @@ func (t *MySQLTable) DiffTable(
 		return column.Name
 	})
 	columnOrder := columnsDiff.newNames(lo.Without(currentColumnNames, columnsDiff.Removed...))
+	primaryKeyChanged := !slices.Equal(t.PrimaryKey, columnsDiff.newNames(other.PrimaryKey))
+	primaryKeyAddedWithColumn := false
 
 	var addInstructions []driversshared.Instruction
 
@@ -306,9 +327,12 @@ func (t *MySQLTable) DiffTable(
 			return nil, fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
 		}
 
+		column := t.Columns[position]
 		action := &MySQLAddColumnAction{
-			Column: t.Columns[position],
+			Column:     column,
+			PrimaryKey: primaryKeyChanged && column.AutoIncrement && slices.Equal(t.PrimaryKey, []string{columnName}),
 		}
+		primaryKeyAddedWithColumn = primaryKeyAddedWithColumn || action.PrimaryKey
 
 		action.First, action.After, columnOrder = placeColumn(columnOrder, t.Columns, position)
 
@@ -440,7 +464,6 @@ func (t *MySQLTable) DiffTable(
 
 	// The drop of the last column of the primary key drops the key, so the drop of the key
 	// comes before the drops of the columns.
-	primaryKeyChanged := !slices.Equal(t.PrimaryKey, columnsDiff.newNames(other.PrimaryKey))
 	if primaryKeyChanged && len(other.PrimaryKey) > 0 {
 		instructions = append(instructions, &MySQLAlterTableInstruction{
 			Name:   t.Name,
@@ -522,7 +545,7 @@ func (t *MySQLTable) DiffTable(
 
 	instructions = append(instructions, addInstructions...)
 
-	if primaryKeyChanged && len(t.PrimaryKey) > 0 {
+	if primaryKeyChanged && len(t.PrimaryKey) > 0 && !primaryKeyAddedWithColumn {
 		instructions = append(instructions, &MySQLAlterTableInstruction{
 			Name: t.Name,
 			Action: &MySQLAddPrimaryKeyAction{
