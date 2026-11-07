@@ -195,6 +195,56 @@ func TestSQLiteTable(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("AddColumnBeforeAnExistingColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE people (name TEXT, age INTEGER);
+			INSERT INTO people (name, age) VALUES ('Ada', 36);
+		`)
+		driver.ExecOnDesired(`CREATE TABLE people (name TEXT, email TEXT, age INTEGER);`)
+		driver.RequireDiffApplies(slices.Concat(
+			recreationPrologue(),
+			recreated("people",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_people_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name: "name",
+							Type: "TEXT",
+						},
+						{
+							Name: "email",
+							Type: "TEXT",
+						},
+						{
+							Name: "age",
+							Type: "INTEGER",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_people_temp",
+					ColumnNames:       []string{"name", "email", "age"},
+					SelectExpressions: []string{`"name"`, "NULL", `"age"`},
+					FromTableName:     "people",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "people"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_people_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
+				},
+			),
+			recreationEpilogue("people"),
+		))
+
+		rows := driver.FetchAllFromCurrent("people", "")
+		require.Equal(t, []map[string]any{
+			{"name": "Ada", "email": nil, "age": int64(36)},
+		}, rows)
+	})
+
 	t.Run("RecreationAvoidsTheNameOfAnExistingTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

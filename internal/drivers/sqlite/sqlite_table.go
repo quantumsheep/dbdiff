@@ -273,14 +273,23 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 		ColumnOrderChanged: columnOrderChanged(t, other),
 	}
 
+	// ADD COLUMN puts the column after every other column, so a column that comes after an
+	// added column in the desired order needs a recreation.
+	addedColumnSeen := false
+
 	for _, desiredColumn := range t.Columns {
 		currentColumn, found := other.ColumnByName(desiredColumn.Name)
+		_, renamed := diff.RenamedFrom[desiredColumn.Name]
+		if (found || renamed) && addedColumnSeen {
+			diff.ColumnOrderChanged = true
+		}
+
 		if !found {
-			_, renamed := diff.RenamedFrom[desiredColumn.Name]
 			if renamed {
 				continue
 			}
 
+			addedColumnSeen = true
 			diff.Added = append(diff.Added, desiredColumn.Name)
 
 			if desiredColumn.NeedsRecreationToAdd() {
