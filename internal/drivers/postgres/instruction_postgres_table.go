@@ -131,11 +131,18 @@ func (a *PostgresDropExpressionAction) TableActionClause() string {
 type PostgresAddIdentityAction struct {
 	ColumnName string
 	Identity   string
+	Options    string
 }
 
 func (a *PostgresAddIdentityAction) TableActionClause() string {
-	return fmt.Sprintf("ALTER COLUMN %s ADD GENERATED %s AS IDENTITY",
+	clause := fmt.Sprintf("ALTER COLUMN %s ADD GENERATED %s AS IDENTITY",
 		driversshared.QuoteIdentifier(a.ColumnName), a.Identity)
+
+	if a.Options != "" {
+		clause += fmt.Sprintf(" (%s)", a.Options)
+	}
+
+	return clause
 }
 
 type PostgresSetIdentityAction struct {

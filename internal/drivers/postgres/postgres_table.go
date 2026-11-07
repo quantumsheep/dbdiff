@@ -408,6 +408,7 @@ func (t *PostgresTable) DiffTable(
 				instructions = append(instructions, alterTable(&PostgresAddIdentityAction{
 					ColumnName: desiredColumn.Name,
 					Identity:   desiredColumn.Identity,
+					Options:    desiredColumn.IdentityOptions,
 				}), &PostgresRestartOwnedSequenceInstruction{
 					TableName:  t.Name,
 					ColumnName: desiredColumn.Name,
