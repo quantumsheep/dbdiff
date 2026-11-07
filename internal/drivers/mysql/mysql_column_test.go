@@ -2,6 +2,7 @@ package driversmysql
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -197,6 +198,73 @@ func TestMySQLColumn(t *testing.T) {
 				},
 			},
 		})
+	})
+
+	t.Run("ChangeGeneratedColumnStorageKeepsDependents", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		schema := `
+			CREATE TABLE prices (
+				id int NOT NULL,
+				net int,
+				gross int GENERATED ALWAYS AS (net * 2) %s,
+				PRIMARY KEY (id),
+				KEY idx_gross (gross),
+				CONSTRAINT gross_positive CHECK (gross >= 0)
+			);
+		`
+
+		driver.ExecOnDesired(fmt.Sprintf(schema, "STORED"))
+		driver.ExecOnCurrent(fmt.Sprintf(schema, "VIRTUAL"))
+		driver.ExecOnCurrent("INSERT INTO prices (id, net) VALUES (1, 5);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLDropCheckConstraintAction{
+					Name: "gross_positive",
+				},
+			},
+			&MySQLDropIndexInstruction{
+				Name:      "idx_gross",
+				TableName: "prices",
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "gross",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:                "gross",
+						Type:                "int",
+						GeneratedExpression: "(`net` * 2)",
+						GeneratedStored:     true,
+					},
+				},
+			},
+			&MySQLCreateIndexInstruction{
+				Name:      "idx_gross",
+				TableName: "prices",
+				Keys:      []string{"`gross`"},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:       "gross_positive",
+						Expression: "(`gross` >= 0)",
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "net": int64(5), "gross": int64(10)},
+		}, driver.FetchAllFromCurrent("prices", "ORDER BY id"))
 	})
 
 	t.Run("ColumnComment", func(t *testing.T) {
@@ -403,5 +471,72 @@ func TestMariaDBColumn(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "flag": "\x01"},
 		}, driver.FetchAllFromCurrent("flags", "ORDER BY id"))
+	})
+
+	t.Run("ChangeGeneratedColumnStorageKeepsDependents", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		schema := `
+			CREATE TABLE prices (
+				id int NOT NULL,
+				net int,
+				gross int GENERATED ALWAYS AS (net * 2) %s,
+				PRIMARY KEY (id),
+				KEY idx_gross (gross),
+				CONSTRAINT gross_positive CHECK (gross >= 0)
+			);
+		`
+
+		driver.ExecOnDesired(fmt.Sprintf(schema, "STORED"))
+		driver.ExecOnCurrent(fmt.Sprintf(schema, "VIRTUAL"))
+		driver.ExecOnCurrent("INSERT INTO prices (id, net) VALUES (1, 5);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLDropCheckConstraintAction{
+					Name: "gross_positive",
+				},
+			},
+			&MySQLDropIndexInstruction{
+				Name:      "idx_gross",
+				TableName: "prices",
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "gross",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:                "gross",
+						Type:                "int(11)",
+						GeneratedExpression: "`net` * 2",
+						GeneratedStored:     true,
+					},
+				},
+			},
+			&MySQLCreateIndexInstruction{
+				Name:      "idx_gross",
+				TableName: "prices",
+				Keys:      []string{"`gross`"},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:       "gross_positive",
+						Expression: "`gross` >= 0",
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "net": int64(5), "gross": int64(10)},
+		}, driver.FetchAllFromCurrent("prices", "ORDER BY id"))
 	})
 }

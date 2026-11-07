@@ -96,6 +96,9 @@ type MySQLTableColumnsDiff struct {
 	Modified    []string
 	Removed     []string
 	RenamedFrom map[string]string
+
+	// A recreated column is in Removed and in Added.
+	Recreated []string
 }
 
 func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
@@ -125,6 +128,7 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 		if generatedKindChanged(desiredColumn, currentColumn) {
 			diff.Removed = append(diff.Removed, currentColumn.Name)
 			diff.Added = append(diff.Added, desiredColumn.Name)
+			diff.Recreated = append(diff.Recreated, desiredColumn.Name)
 
 			continue
 		}
@@ -177,9 +181,9 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 		})
 	}
 
-	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other)
-	checkAdditions, checkRemovals := t.checkConstraintChanges(other)
-	indexAdditions, indexRemovals := t.indexChanges(other)
+	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other, columnsDiff.Recreated)
+	checkAdditions, checkRemovals := t.checkConstraintChanges(other, columnsDiff.Recreated)
+	indexAdditions, indexRemovals := t.indexChanges(other, columnsDiff.Recreated)
 
 	triggerAdditions, triggerRemovals, err := driversshared.DiffByKey(t.Triggers, other.Triggers, diffTriggerRules())
 	if err != nil {
@@ -323,12 +327,27 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 	return instructions, nil
 }
 
-func (t *MySQLTable) foreignKeyChanges(other *MySQLTable) ([]driversshared.Instruction, []driversshared.Instruction) {
+// The drop of a column drops its index, and MySQL refuses the drop of a column that a check
+// constraint or a foreign key names. So the diff drops every object that uses a recreated
+// column before the drop of the column, and adds the object again after the column.
+func equalAndKept[T interface{ UsesColumn(columnName string) bool }](
+	equal func(T, T) bool,
+	recreatedColumns []string,
+) func(T, T) bool {
+	return func(desired T, current T) bool {
+		return equal(desired, current) && !lo.SomeBy(recreatedColumns, current.UsesColumn)
+	}
+}
+
+func (t *MySQLTable) foreignKeyChanges(
+	other *MySQLTable,
+	recreatedColumns []string,
+) ([]driversshared.Instruction, []driversshared.Instruction) {
 	return driversshared.ReplaceByKey(t.ForeignKeys, other.ForeignKeys,
 		func(foreignKey *MySQLForeignKey) string {
 			return foreignKey.Name
 		},
-		(*MySQLForeignKey).Equal,
+		equalAndKept((*MySQLForeignKey).Equal, recreatedColumns),
 		func(foreignKey *MySQLForeignKey) driversshared.Instruction {
 			return &MySQLAlterTableInstruction{
 				Name:   t.Name,
@@ -345,12 +364,13 @@ func (t *MySQLTable) foreignKeyChanges(other *MySQLTable) ([]driversshared.Instr
 
 func (t *MySQLTable) checkConstraintChanges(
 	other *MySQLTable,
+	recreatedColumns []string,
 ) ([]driversshared.Instruction, []driversshared.Instruction) {
 	return driversshared.ReplaceByKey(t.CheckConstraints, other.CheckConstraints,
 		func(check *MySQLCheckConstraint) string {
 			return check.Name
 		},
-		(*MySQLCheckConstraint).Equal,
+		equalAndKept((*MySQLCheckConstraint).Equal, recreatedColumns),
 		func(check *MySQLCheckConstraint) driversshared.Instruction {
 			return &MySQLAlterTableInstruction{
 				Name:   t.Name,
@@ -365,7 +385,10 @@ func (t *MySQLTable) checkConstraintChanges(
 		})
 }
 
-func (t *MySQLTable) indexChanges(other *MySQLTable) ([]driversshared.Instruction, []driversshared.Instruction) {
+func (t *MySQLTable) indexChanges(
+	other *MySQLTable,
+	recreatedColumns []string,
+) ([]driversshared.Instruction, []driversshared.Instruction) {
 	// The ADD of a foreign key builds the index of the key by itself, like the CREATE
 	// TABLE path of IndexInstructions. The current schema does not hold such an index, so the
 	// removal from the desired list changes no drop.
@@ -382,7 +405,7 @@ func (t *MySQLTable) indexChanges(other *MySQLTable) ([]driversshared.Instructio
 		func(index *MySQLIndex) string {
 			return index.Name
 		},
-		(*MySQLIndex).Equal,
+		equalAndKept((*MySQLIndex).Equal, recreatedColumns),
 		func(index *MySQLIndex) driversshared.Instruction {
 			return index.CreateInstruction()
 		},

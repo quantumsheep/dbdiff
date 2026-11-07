@@ -2,6 +2,7 @@ package driversmysql
 
 import (
 	"slices"
+	"strings"
 )
 
 type MySQLIndex struct {
@@ -21,6 +22,12 @@ func (i *MySQLIndex) Equal(other *MySQLIndex) bool {
 	}
 
 	return slices.Equal(i.Keys, other.Keys)
+}
+
+func (i *MySQLIndex) UsesColumn(columnName string) bool {
+	return slices.ContainsFunc(i.Keys, func(key string) bool {
+		return strings.Contains(key, QuoteIdentifier(columnName))
+	})
 }
 
 func (i *MySQLIndex) CreateInstruction() *MySQLCreateIndexInstruction {

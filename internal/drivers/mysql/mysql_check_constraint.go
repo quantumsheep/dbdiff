@@ -16,6 +16,10 @@ func (c *MySQLCheckConstraint) Equal(other *MySQLCheckConstraint) bool {
 	return c.Name == other.Name && c.Expression == other.Expression
 }
 
+func (c *MySQLCheckConstraint) UsesColumn(columnName string) bool {
+	return strings.Contains(c.Expression, QuoteIdentifier(columnName))
+}
+
 func (c *MySQLCheckConstraint) Clause() string {
 	expression := c.Expression
 
