@@ -351,38 +351,53 @@ func (t *MySQLTable) DiffTable(
 	// MariaDB keeps a CHECK clause of a column, and the CHECK clause of the json type, with
 	// the column. A MODIFY COLUMN action or a DROP COLUMN action removes such a check, and
 	// DROP CONSTRAINT refuses it. So the diff does not drop the check, and it adds the check
-	// again as a check of the table. MariaDB names such a check after its column, so the
-	// owner of the check comes from the name, and a change of the check rebuilds the owner.
+	// again as a check of the table. A change of the check rebuilds the owner.
 	rebuiltColumnNames := slices.Concat(columnsDiff.Modified, movedColumnNames,
 		lo.Map(reconvertedColumns, func(column *MySQLColumn, _ int) string {
 			return column.Name
 		}))
 
-	checkOwnerName := func(check *MySQLCheckConstraint) string {
-		return columnsDiff.newNames([]string{check.Name})[0]
-	}
+	currentOwnerNameByCheckName := map[string]string{}
 
 	var lateModifications []*MySQLColumn
 
 	for _, check := range other.CheckConstraints {
-		ownerName := checkOwnerName(check)
-		_, foundInCurrent := other.ColumnByName(check.Name)
-		owner, foundInDesired := t.ColumnByName(ownerName)
+		if !check.ColumnLevel {
+			continue
+		}
+
 		desiredCheck, kept := lo.Find(t.CheckConstraints, func(desired *MySQLCheckConstraint) bool {
 			return desired.Name == check.Name
 		})
+		checkChanged := !kept || !desiredCheck.Equal(check)
 
-		changed := !kept || !desiredCheck.Equal(check) || ownerName != check.Name
-		if check.ColumnLevel && foundInCurrent && foundInDesired && changed &&
-			!slices.Contains(columnsDiff.Removed, check.Name) && !slices.Contains(rebuiltColumnNames, ownerName) {
+		currentOwnerName, ownerKnown := other.columnCheckOwnerName(check)
+		if !ownerKnown && checkChanged {
+			return nil, fmt.Errorf("the check %q of table %q names no column. Its expression reads no column "+
+				"or more than one column. Change the check manually", check.Name, t.Name)
+		}
+
+		if !ownerKnown {
+			continue
+		}
+
+		currentOwnerNameByCheckName[check.Name] = currentOwnerName
+		ownerName := columnsDiff.newNames([]string{currentOwnerName})[0]
+		owner, foundInDesired := t.ColumnByName(ownerName)
+
+		ownerChanged := checkChanged || ownerName != currentOwnerName
+		if foundInDesired && ownerChanged && !slices.Contains(columnsDiff.Removed, currentOwnerName) &&
+			!slices.Contains(rebuiltColumnNames, ownerName) {
 			rebuiltColumnNames = append(rebuiltColumnNames, ownerName)
 			lateModifications = append(lateModifications, owner)
 		}
 	}
 
 	keptCurrentChecks := lo.Reject(other.CheckConstraints, func(check *MySQLCheckConstraint, _ int) bool {
-		return check.ColumnLevel && (slices.Contains(columnsDiff.Removed, check.Name) ||
-			slices.Contains(rebuiltColumnNames, checkOwnerName(check)))
+		currentOwnerName := currentOwnerNameByCheckName[check.Name]
+
+		return check.ColumnLevel && (slices.Contains(columnsDiff.Removed, currentOwnerName) ||
+			slices.Contains(rebuiltColumnNames, columnsDiff.newNames([]string{currentOwnerName})[0]))
 	})
 
 	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other, columnsDiffs)
@@ -559,6 +574,24 @@ func equalAndKept[T interface{ UsesColumn(columnName string) bool }](
 	return func(desired T, current T) bool {
 		return equal(desired, current) && !lo.SomeBy(recreatedColumns, current.UsesColumn)
 	}
+}
+
+// MariaDB names a column check after its column. A rename of the column keeps the old name
+// on the check, so the owner is then the only column that the expression reads.
+func (t *MySQLTable) columnCheckOwnerName(check *MySQLCheckConstraint) (string, bool) {
+	_, found := t.ColumnByName(check.Name)
+	if found {
+		return check.Name, true
+	}
+
+	readColumns := lo.Filter(t.Columns, func(column *MySQLColumn, _ int) bool {
+		return check.UsesColumn(column.Name)
+	})
+	if len(readColumns) != 1 {
+		return "", false
+	}
+
+	return readColumns[0].Name, true
 }
 
 // MySQL renames the columns of a foreign key with the columns. MySQL refuses a change of a

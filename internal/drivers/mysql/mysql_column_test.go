@@ -1091,4 +1091,76 @@ func TestMariaDBColumn(t *testing.T) {
 			{"aa": int64(3), "id": int64(1), "b": int64(2)},
 		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
 	})
+
+	t.Run("ChangeAColumnCheckThatKeepsTheNameOfARenamedColumn", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, aa int CHECK (aa > 1), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int CHECK (a > 0), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("ALTER TABLE t RENAME COLUMN a TO aa;")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1, 2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "aa",
+						Type: "int(11)",
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:        "aa",
+						Expression:  "`aa` > 1",
+						ColumnLevel: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "aa": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("RemoveAColumnCheckThatKeepsTheNameOfARenamedColumn", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, aa int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int CHECK (a > 0), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("ALTER TABLE t RENAME COLUMN a TO aa;")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1, 2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "aa",
+						Type: "int(11)",
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "aa": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("ChangeAColumnCheckWithNoKnownColumn", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, aa int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int CHECK (1 > 0), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("ALTER TABLE t RENAME COLUMN a TO aa;")
+
+		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
+		require.EqualError(t, err, `the check "a" of table "t" names no column. Its expression reads no column `+
+			`or more than one column. Change the check manually`)
+	})
 }
