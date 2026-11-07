@@ -882,15 +882,17 @@ func (d *MySQLDriver) GetViews(ctx context.Context, db *sql.DB) ([]*MySQLView, e
 	databaseQualifier := QuoteIdentifier(d.detailsByConnection[db].databaseName) + "."
 
 	return driversshared.QueryAll(ctx, db, `
-		SELECT TABLE_NAME, VIEW_DEFINITION
+		SELECT TABLE_NAME, VIEW_DEFINITION, SECURITY_TYPE, CHECK_OPTION
 		FROM information_schema.VIEWS
 		WHERE TABLE_SCHEMA = DATABASE()
 		ORDER BY TABLE_NAME;
 	`, func(rows *sql.Rows) (*MySQLView, error) {
 		var name string
 		var definition sql.NullString
+		var securityType string
+		var checkOption string
 
-		err := rows.Scan(&name, &definition)
+		err := rows.Scan(&name, &definition, &securityType, &checkOption)
 		if err != nil {
 			return nil, err
 		}
@@ -900,9 +902,19 @@ func (d *MySQLDriver) GetViews(ctx context.Context, db *sql.DB) ([]*MySQLView, e
 			return nil, fmt.Errorf("the view %q gives no definition. Grant the SHOW VIEW privilege", name)
 		}
 
-		return &MySQLView{
+		view := &MySQLView{
 			Name:       name,
 			Definition: removeDatabaseQualifier(definition.String, databaseQualifier),
-		}, nil
+		}
+
+		if securityType != "DEFINER" {
+			view.SecurityType = securityType
+		}
+
+		if checkOption != "NONE" {
+			view.CheckOption = checkOption
+		}
+
+		return view, nil
 	})
 }

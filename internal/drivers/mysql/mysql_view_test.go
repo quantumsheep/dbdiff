@@ -7,6 +7,35 @@ import (
 )
 
 func TestMySQLView(t *testing.T) {
+	t.Run("ChangeViewAttributes", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
+			CREATE SQL SECURITY INVOKER VIEW adult_users AS SELECT id, age FROM users WHERE age >= 18 WITH LOCAL CHECK OPTION;
+			CREATE VIEW all_users AS SELECT id, age FROM users WITH CASCADED CHECK OPTION;
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
+			CREATE VIEW adult_users AS SELECT id, age FROM users WHERE age >= 18;
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateViewInstruction{
+				Name:         "adult_users",
+				Definition:   "select `users`.`id` AS `id`,`users`.`age` AS `age` from `users` where (`users`.`age` >= 18)",
+				SecurityType: "INVOKER",
+				CheckOption:  "LOCAL",
+				OrReplace:    true,
+			},
+			&MySQLCreateViewInstruction{
+				Name:        "all_users",
+				Definition:  "select `users`.`id` AS `id`,`users`.`age` AS `age` from `users`",
+				CheckOption: "CASCADED",
+			},
+		})
+	})
+
 	t.Run("CreateViewsInDependencyOrder", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -130,6 +159,35 @@ func TestMySQLView(t *testing.T) {
 }
 
 func TestMariaDBView(t *testing.T) {
+	t.Run("ChangeViewAttributes", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
+			CREATE SQL SECURITY INVOKER VIEW adult_users AS SELECT id, age FROM users WHERE age >= 18 WITH LOCAL CHECK OPTION;
+			CREATE VIEW all_users AS SELECT id, age FROM users WITH CASCADED CHECK OPTION;
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id int NOT NULL, age int, PRIMARY KEY (id));
+			CREATE VIEW adult_users AS SELECT id, age FROM users WHERE age >= 18;
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateViewInstruction{
+				Name:         "adult_users",
+				Definition:   "select `users`.`id` AS `id`,`users`.`age` AS `age` from `users` where `users`.`age` >= 18",
+				SecurityType: "INVOKER",
+				CheckOption:  "LOCAL",
+				OrReplace:    true,
+			},
+			&MySQLCreateViewInstruction{
+				Name:        "all_users",
+				Definition:  "select `users`.`id` AS `id`,`users`.`age` AS `age` from `users`",
+				CheckOption: "CASCADED",
+			},
+		})
+	})
+
 	t.Run("CreateViewsInDependencyOrder", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 

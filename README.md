@@ -230,7 +230,7 @@ err = migrator.Up(ctx)
 | Indexes                       | ✅                                              | ✅                      | ✅                                              |
 | Constraints                   | ✅ (foreign keys, primary keys, unique, checks) | ✅                      | ✅ (foreign keys, primary keys, unique, checks) |
 | Triggers                      | ✅ (of a table and of a view)                   | ✅ (with the mode)      | ✅                                              |
-| Views                         | ✅                                              | ✅                      | ✅                                              |
+| Views                         | ✅                                              | ✅                      | ✅ (with the check option and the SQL security) |
 | Materialized views            | ➖                                              | ✅                      | ➖                                              |
 | Rules                         | ➖                                              | ✅                      | ➖                                              |
 | Extended statistics           | ➖                                              | ✅                      | ➖                                              |

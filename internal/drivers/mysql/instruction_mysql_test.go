@@ -242,6 +242,19 @@ func TestMySQLInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("MySQLCreateViewWithAttributes", func(t *testing.T) {
+		instruction := &MySQLCreateViewInstruction{
+			Name:         "adult_users",
+			Definition:   "select `id` from `users`",
+			OrReplace:    true,
+			SecurityType: "INVOKER",
+			CheckOption:  "CASCADED",
+		}
+
+		require.Equal(t, "CREATE OR REPLACE SQL SECURITY INVOKER VIEW `adult_users` AS select `id` from `users` "+
+			"WITH CASCADED CHECK OPTION;", instruction.String())
+	})
+
 	t.Run("MySQLDropView", func(t *testing.T) {
 		instruction := &MySQLDropViewInstruction{
 			Name: "adult_users",

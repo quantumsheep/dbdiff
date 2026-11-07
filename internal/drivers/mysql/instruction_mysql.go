@@ -300,9 +300,11 @@ func (i *MySQLDropTriggerInstruction) Comment() string {
 }
 
 type MySQLCreateViewInstruction struct {
-	Name       string
-	Definition string
-	OrReplace  bool
+	Name         string
+	Definition   string
+	OrReplace    bool
+	SecurityType string
+	CheckOption  string
 }
 
 func (i *MySQLCreateViewInstruction) String() string {
@@ -312,7 +314,17 @@ func (i *MySQLCreateViewInstruction) String() string {
 		statement += "OR REPLACE "
 	}
 
-	return statement + fmt.Sprintf("VIEW %s AS %s;", QuoteIdentifier(i.Name), i.Definition)
+	if i.SecurityType != "" {
+		statement += "SQL SECURITY " + i.SecurityType + " "
+	}
+
+	statement += fmt.Sprintf("VIEW %s AS %s", QuoteIdentifier(i.Name), i.Definition)
+
+	if i.CheckOption != "" {
+		statement += " WITH " + i.CheckOption + " CHECK OPTION"
+	}
+
+	return statement + ";"
 }
 
 func (i *MySQLCreateViewInstruction) Comment() string {

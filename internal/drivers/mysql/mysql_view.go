@@ -9,25 +9,34 @@ import (
 type MySQLView struct {
 	Name       string
 	Definition string
+
+	// The two attributes stay empty for the defaults, DEFINER and NONE.
+	SecurityType string
+	CheckOption  string
+}
+
+func (v *MySQLView) createInstruction() *MySQLCreateViewInstruction {
+	return &MySQLCreateViewInstruction{
+		Name:         v.Name,
+		Definition:   v.Definition,
+		SecurityType: v.SecurityType,
+		CheckOption:  v.CheckOption,
+	}
 }
 
 func (v *MySQLView) Instructions() []driversshared.Instruction {
-	return []driversshared.Instruction{&MySQLCreateViewInstruction{
-		Name:       v.Name,
-		Definition: v.Definition,
-	}}
+	return []driversshared.Instruction{v.createInstruction()}
 }
 
 func (v *MySQLView) Diff(other *MySQLView) ([]driversshared.Instruction, error) {
-	if v.Definition == other.Definition {
+	if *v == *other {
 		return nil, nil
 	}
 
-	return []driversshared.Instruction{&MySQLCreateViewInstruction{
-		Name:       v.Name,
-		Definition: v.Definition,
-		OrReplace:  true,
-	}}, nil
+	instruction := v.createInstruction()
+	instruction.OrReplace = true
+
+	return []driversshared.Instruction{instruction}, nil
 }
 
 // MySQL checks the names that a view reads at the creation of the view, so a view comes
