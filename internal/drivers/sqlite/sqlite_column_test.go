@@ -328,6 +328,68 @@ func TestSQLiteColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ModifyDeclaredColumnTypeKeepsTheValues", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (
+				id INTEGER PRIMARY KEY,
+				b VARCHAR(10)
+			);
+
+			INSERT INTO t (id, b) VALUES (1, 'keep');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE t (
+				id INTEGER PRIMARY KEY,
+				b VARCHAR(20)
+			);
+		`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name: "b",
+							Type: "VARCHAR(20)",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "b"},
+					SelectExpressions: []string{`"id"`, `"b"`},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "b": "keep"},
+		}, rows)
+	})
+
 	t.Run("ModifyColumnSetNotNull", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

@@ -98,20 +98,3 @@ func (c *SQLiteColumn) Definition() string {
 
 	return value
 }
-
-func (c *SQLiteColumn) IsTypeChangeCompatible(other *SQLiteColumn) bool {
-	// A recreation of the table converts between these four types. Every other type change
-	// can lose data.
-
-	compatibleTypes := map[string]bool{
-		"TEXT":    true,
-		"INTEGER": true,
-		"REAL":    true,
-		"BLOB":    true,
-	}
-
-	_, c1 := compatibleTypes[c.Type]
-	_, c2 := compatibleTypes[other.Type]
-
-	return c1 && c2
-}

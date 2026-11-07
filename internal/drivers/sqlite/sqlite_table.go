@@ -198,17 +198,6 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 			continue
 		}
 
-		if desiredColumn.Type != currentColumn.Type {
-			if desiredColumn.IsTypeChangeCompatible(currentColumn) {
-				diff.Modified = append(diff.Modified, desiredColumn.Name)
-				continue
-			}
-
-			diff.Removed = append(diff.Removed, currentColumn.Name)
-			diff.Added = append(diff.Added, desiredColumn.Name)
-			continue
-		}
-
 		diff.Modified = append(diff.Modified, desiredColumn.Name)
 	}
 
