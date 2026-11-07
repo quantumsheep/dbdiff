@@ -28,7 +28,8 @@ func FileUsesTransaction(content string) bool {
 // there. It splits nothing inside BEGIN ... END, because the body of a trigger, of a
 // MySQL routine, and of BEGIN ATOMIC holds whole statements. A CASE expression ends with
 // END too, so the block counter reads CASE as an opener. A bare BEGIN opens a block only
-// in a statement that owns a body, because BEGIN alone starts a transaction.
+// in a statement that owns a body or inside a block, because BEGIN alone starts a
+// transaction.
 func SplitSQLStatements(content string) []string {
 	var statements []string
 
@@ -63,13 +64,17 @@ func SplitSQLStatements(content string) []string {
 			switch {
 			case isBodyOwnerKeyword(word) && blockDepth == 0:
 				statementOwnsBody = true
-			case word == "begin" && blockDepth == 0 &&
-				(statementOwnsBody || nextSQLWord(content, end) == "atomic"):
+			case word == "begin" && (blockDepth > 0 || statementOwnsBody || nextSQLWord(content, end) == "atomic"):
 				blockDepth++
 			case word == "case" && blockDepth > 0:
 				blockDepth++
 			case word == "end" && blockDepth > 0:
-				blockDepth--
+				var closesBlock bool
+
+				end, closesBlock = readBlockEnd(content, end)
+				if closesBlock {
+					blockDepth--
+				}
 			}
 
 			index = end
@@ -84,6 +89,28 @@ func SplitSQLStatements(content string) []string {
 	}
 
 	return appendStatement(statements, content[start:])
+}
+
+// The block counter does not read IF, LOOP, WHILE, and REPEAT as openers, so their END
+// closes no block. The word after END is consumed, because the CASE of END CASE must not
+// open a block.
+func readBlockEnd(content string, index int) (int, bool) {
+	switch nextSQLWord(content, index) {
+	case "if", "loop", "while", "repeat":
+		return endOfNextSQLWord(content, index), false
+	case "case":
+		return endOfNextSQLWord(content, index), true
+	default:
+		return index, true
+	}
+}
+
+func endOfNextSQLWord(content string, index int) int {
+	start := len(content) - len(strings.TrimLeft(content[index:], " \t\n\r"))
+
+	_, end := readSQLWord(content, start)
+
+	return end
 }
 
 func isBodyOwnerKeyword(word string) bool {

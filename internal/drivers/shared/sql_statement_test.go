@@ -169,6 +169,36 @@ func TestSplitSQLStatements(t *testing.T) {
 		}, SplitSQLStatements(content))
 	})
 
+	t.Run("AMySQLTriggerBodyHoldsFlowControl", func(t *testing.T) {
+		content := "CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW BEGIN " +
+			"IF NEW.x < 0 THEN SET NEW.x = 0; END IF; " +
+			"label1: LOOP LEAVE label1; END LOOP label1; " +
+			"WHILE NEW.x > 10 DO SET NEW.x = NEW.x - 1; END WHILE; " +
+			"REPEAT SET NEW.x = NEW.x + 1; UNTIL NEW.x > 0 END REPEAT; " +
+			"CASE NEW.x WHEN 1 THEN SET NEW.y = 1; ELSE SET NEW.y = 2; END CASE; " +
+			"SET NEW.z = 1; END;\nSELECT 1;"
+
+		require.Equal(t, []string{
+			"CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW BEGIN " +
+				"IF NEW.x < 0 THEN SET NEW.x = 0; END IF; " +
+				"label1: LOOP LEAVE label1; END LOOP label1; " +
+				"WHILE NEW.x > 10 DO SET NEW.x = NEW.x - 1; END WHILE; " +
+				"REPEAT SET NEW.x = NEW.x + 1; UNTIL NEW.x > 0 END REPEAT; " +
+				"CASE NEW.x WHEN 1 THEN SET NEW.y = 1; ELSE SET NEW.y = 2; END CASE; " +
+				"SET NEW.z = 1; END",
+			"SELECT 1",
+		}, SplitSQLStatements(content))
+	})
+
+	t.Run("AMySQLProcedureBodyHoldsANestedBlock", func(t *testing.T) {
+		content := "CREATE PROCEDURE p() BEGIN DECLARE a INT; BEGIN SET a = 1; END; SET a = 2; END;\nSELECT 1;"
+
+		require.Equal(t, []string{
+			"CREATE PROCEDURE p() BEGIN DECLARE a INT; BEGIN SET a = 1; END; SET a = 2; END",
+			"SELECT 1",
+		}, SplitSQLStatements(content))
+	})
+
 	t.Run("ABacktickIdentifierHoldsASemicolon", func(t *testing.T) {
 		require.Equal(t, []string{
 			"SELECT `a;b` FROM t",
