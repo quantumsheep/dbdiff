@@ -392,6 +392,51 @@ func TestMySQLInstructions(t *testing.T) {
 			"MAXVALUE 9223372036854775806 INCREMENT BY 10 CACHE 1000 CYCLE;", instruction.String())
 	})
 
+	t.Run("MySQLAlterSequenceOneClause", func(t *testing.T) {
+		instruction := &MySQLAlterSequenceInstruction{
+			Name: "order_numbers",
+			Increment: sql.NullInt64{
+				Int64: 5,
+				Valid: true,
+			},
+		}
+
+		require.Equal(t, "ALTER SEQUENCE `order_numbers` INCREMENT BY 5;", instruction.String())
+	})
+
+	t.Run("MySQLAlterSequenceEveryClauseInOrder", func(t *testing.T) {
+		instruction := &MySQLAlterSequenceInstruction{
+			Name: "order_numbers",
+			Start: sql.NullInt64{
+				Int64: 7,
+				Valid: true,
+			},
+			Minimum: sql.NullInt64{
+				Int64: 5,
+				Valid: true,
+			},
+			Maximum: sql.NullInt64{
+				Int64: 500,
+				Valid: true,
+			},
+			Increment: sql.NullInt64{
+				Int64: 2,
+				Valid: true,
+			},
+			Cache: sql.NullInt64{
+				Int64: 20,
+				Valid: true,
+			},
+			Cycle: sql.NullBool{
+				Bool:  false,
+				Valid: true,
+			},
+		}
+
+		require.Equal(t, "ALTER SEQUENCE `order_numbers` START WITH 7 MINVALUE 5 MAXVALUE 500 "+
+			"INCREMENT BY 2 CACHE 20 NOCYCLE;", instruction.String())
+	})
+
 	t.Run("MySQLDropSequence", func(t *testing.T) {
 		instruction := &MySQLDropSequenceInstruction{
 			Name: "order_numbers",
@@ -661,6 +706,14 @@ func TestMySQLInstructionComments(t *testing.T) {
 		}
 
 		require.Equal(t, `Create the sequence "order_numbers"`, instruction.Comment())
+	})
+
+	t.Run("MySQLAlterSequence", func(t *testing.T) {
+		instruction := &MySQLAlterSequenceInstruction{
+			Name: "order_numbers",
+		}
+
+		require.Equal(t, `Modify the sequence "order_numbers"`, instruction.Comment())
 	})
 
 	t.Run("MySQLDropSequence", func(t *testing.T) {

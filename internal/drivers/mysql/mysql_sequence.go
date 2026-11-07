@@ -34,24 +34,80 @@ func (s *MySQLSequence) CreateInstruction() *MySQLCreateSequenceInstruction {
 	}
 }
 
+// ALTER SEQUENCE keeps the counter, and a drop and a create start the counter again.
+// MariaDB accepts a change of every option, and START WITH does not restart the sequence.
+func (s *MySQLSequence) Diff(current *MySQLSequence) []driversshared.Instruction {
+	if s.Equal(current) {
+		return nil
+	}
+
+	instruction := &MySQLAlterSequenceInstruction{
+		Name: s.Name,
+	}
+
+	if s.Start != current.Start {
+		instruction.Start = sql.NullInt64{
+			Int64: s.Start,
+			Valid: true,
+		}
+	}
+
+	if s.Minimum != current.Minimum {
+		instruction.Minimum = sql.NullInt64{
+			Int64: s.Minimum,
+			Valid: true,
+		}
+	}
+
+	if s.Maximum != current.Maximum {
+		instruction.Maximum = sql.NullInt64{
+			Int64: s.Maximum,
+			Valid: true,
+		}
+	}
+
+	if s.Increment != current.Increment {
+		instruction.Increment = sql.NullInt64{
+			Int64: s.Increment,
+			Valid: true,
+		}
+	}
+
+	if s.Cache != current.Cache {
+		instruction.Cache = sql.NullInt64{
+			Int64: s.Cache,
+			Valid: true,
+		}
+	}
+
+	if s.Cycle != current.Cycle {
+		instruction.Cycle = sql.NullBool{
+			Bool:  s.Cycle,
+			Valid: true,
+		}
+	}
+
+	return []driversshared.Instruction{instruction}
+}
+
 func (d *MySQLDriver) DiffSequences(ctx context.Context) ([]driversshared.Instruction, error) {
 	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetSequences,
-		driversshared.ReplaceRules(
-			func(sequence *MySQLSequence) string {
+		driversshared.DiffRules[*MySQLSequence]{
+			Key: func(sequence *MySQLSequence) string {
 				return sequence.Name
 			},
-			func(desired *MySQLSequence, current *MySQLSequence) bool {
-				return desired.Equal(current)
+			Create: func(sequence *MySQLSequence) []driversshared.Instruction {
+				return []driversshared.Instruction{sequence.CreateInstruction()}
 			},
-			func(sequence *MySQLSequence) driversshared.Instruction {
-				return sequence.CreateInstruction()
+			Change: func(desired *MySQLSequence, current *MySQLSequence) ([]driversshared.Instruction, error) {
+				return desired.Diff(current), nil
 			},
-			func(sequence *MySQLSequence) driversshared.Instruction {
-				return &MySQLDropSequenceInstruction{
+			Drop: func(sequence *MySQLSequence) []driversshared.Instruction {
+				return []driversshared.Instruction{&MySQLDropSequenceInstruction{
 					Name: sequence.Name,
-				}
+				}}
 			},
-		))
+		})
 	if err != nil {
 		return nil, err
 	}

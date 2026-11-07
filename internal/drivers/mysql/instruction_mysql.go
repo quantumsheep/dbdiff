@@ -1,6 +1,7 @@
 package driversmysql
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -352,6 +353,55 @@ func (i *MySQLCreateSequenceInstruction) String() string {
 
 func (i *MySQLCreateSequenceInstruction) Comment() string {
 	return driversshared.ObjectComment("Create", "sequence", i.Name)
+}
+
+type MySQLAlterSequenceInstruction struct {
+	Name      string
+	Start     sql.NullInt64
+	Minimum   sql.NullInt64
+	Maximum   sql.NullInt64
+	Increment sql.NullInt64
+	Cache     sql.NullInt64
+	Cycle     sql.NullBool
+}
+
+func (i *MySQLAlterSequenceInstruction) String() string {
+	var clauses []string
+
+	if i.Start.Valid {
+		clauses = append(clauses, fmt.Sprintf("START WITH %d", i.Start.Int64))
+	}
+
+	if i.Minimum.Valid {
+		clauses = append(clauses, fmt.Sprintf("MINVALUE %d", i.Minimum.Int64))
+	}
+
+	if i.Maximum.Valid {
+		clauses = append(clauses, fmt.Sprintf("MAXVALUE %d", i.Maximum.Int64))
+	}
+
+	if i.Increment.Valid {
+		clauses = append(clauses, fmt.Sprintf("INCREMENT BY %d", i.Increment.Int64))
+	}
+
+	if i.Cache.Valid {
+		clauses = append(clauses, fmt.Sprintf("CACHE %d", i.Cache.Int64))
+	}
+
+	if i.Cycle.Valid {
+		cycle := "NOCYCLE"
+		if i.Cycle.Bool {
+			cycle = "CYCLE"
+		}
+
+		clauses = append(clauses, cycle)
+	}
+
+	return fmt.Sprintf("ALTER SEQUENCE %s %s;", QuoteIdentifier(i.Name), strings.Join(clauses, " "))
+}
+
+func (i *MySQLAlterSequenceInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "sequence", i.Name)
 }
 
 type MySQLDropSequenceInstruction struct {
