@@ -68,6 +68,50 @@ func (i *PostgresDropTypeInstruction) Comment() string {
 	return driversshared.ObjectComment("Drop", "type", i.Name)
 }
 
+// ObjectType is TYPE or DOMAIN, because PostgreSQL refuses ALTER TYPE on a domain.
+type PostgresRenameTypeInstruction struct {
+	ObjectType string
+	Name       string
+	NewName    string
+}
+
+func (i *PostgresRenameTypeInstruction) String() string {
+	return fmt.Sprintf("ALTER %s %s RENAME TO %s;",
+		i.ObjectType, driversshared.QuoteIdentifier(i.Name), driversshared.QuoteIdentifier(i.NewName))
+}
+
+func (i *PostgresRenameTypeInstruction) Comment() string {
+	return driversshared.ObjectComment("Rename", strings.ToLower(i.ObjectType), i.Name)
+}
+
+type PostgresAlterTypeAddAttributeInstruction struct {
+	Name      string
+	Attribute *PostgresCompositeTypeAttribute
+}
+
+func (i *PostgresAlterTypeAddAttributeInstruction) String() string {
+	return fmt.Sprintf("ALTER TYPE %s ADD ATTRIBUTE %s %s;",
+		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteIdentifier(i.Attribute.Name), i.Attribute.Type)
+}
+
+func (i *PostgresAlterTypeAddAttributeInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "type", i.Name)
+}
+
+type PostgresAlterTypeDropAttributeInstruction struct {
+	Name          string
+	AttributeName string
+}
+
+func (i *PostgresAlterTypeDropAttributeInstruction) String() string {
+	return fmt.Sprintf("ALTER TYPE %s DROP ATTRIBUTE %s;",
+		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteIdentifier(i.AttributeName))
+}
+
+func (i *PostgresAlterTypeDropAttributeInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "type", i.Name)
+}
+
 type PostgresCreateCompositeTypeInstruction struct {
 	Name       string
 	Attributes []*PostgresCompositeTypeAttribute

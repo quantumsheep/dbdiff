@@ -40,32 +40,109 @@ func (t *PostgresCompositeType) DropInstruction() *PostgresDropTypeInstruction {
 	return &PostgresDropTypeInstruction{Name: t.Name}
 }
 
-// One ALTER TYPE statement changes one attribute only, and the order of the attributes
-// stays fixed. A recreation gives the wanted attribute list in every case.
-func (t *PostgresCompositeType) Diff(other *PostgresCompositeType) []driversshared.Instruction {
-	if t.Equal(other) {
-		return nil
+// ADD ATTRIBUTE puts the attribute at the end. PostgreSQL refuses ALTER ATTRIBUTE TYPE
+// while a column uses the type. Thus only the removals and the additions at the end can
+// keep the type. The result is false if another change is necessary.
+func (t *PostgresCompositeType) attributeChanges(other *PostgresCompositeType) ([]driversshared.Instruction, bool) {
+	var instructions []driversshared.Instruction
+	var keptAttributes []*PostgresCompositeTypeAttribute
+
+	for _, currentAttribute := range other.Attributes {
+		desiredAttribute, found := lo.Find(t.Attributes, func(attribute *PostgresCompositeTypeAttribute) bool {
+			return attribute.Name == currentAttribute.Name
+		})
+		if !found {
+			instructions = append(instructions, &PostgresAlterTypeDropAttributeInstruction{
+				Name:          t.Name,
+				AttributeName: currentAttribute.Name,
+			})
+
+			continue
+		}
+
+		if desiredAttribute.Type != currentAttribute.Type {
+			return nil, false
+		}
+
+		keptAttributes = append(keptAttributes, currentAttribute)
 	}
 
-	return []driversshared.Instruction{other.DropInstruction(), t.CreateInstruction()}
+	if !slices.EqualFunc(keptAttributes, t.Attributes[:len(keptAttributes)], func(first, second *PostgresCompositeTypeAttribute) bool {
+		return *first == *second
+	}) {
+		return nil, false
+	}
+
+	for _, attribute := range t.Attributes[len(keptAttributes):] {
+		instructions = append(instructions, &PostgresAlterTypeAddAttributeInstruction{
+			Name:      t.Name,
+			Attribute: attribute,
+		})
+	}
+
+	return instructions, true
+}
+
+// If only relations use the type, a recreation gives the wanted attribute list in every case.
+func (d *PostgresDriver) diffCompositeType(
+	ctx context.Context,
+	desired *PostgresCompositeType,
+	current *PostgresCompositeType,
+) ([]driversshared.Instruction, error) {
+	if desired.Equal(current) {
+		return nil, nil
+	}
+
+	dependents, err := getTypeDependents(ctx, d.CurrentDatabaseConnection, current.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	// DiffViewsAndMaterializedViews drops each marked relation before this section and
+	// creates it again after the tables.
+	onlyRelations := lo.EveryBy(dependents, func(dependent *PostgresTypeDependent) bool {
+		return dependent.Kind == "relation"
+	})
+	if onlyRelations {
+		for _, dependent := range dependents {
+			d.markRecreated(dependent.TableName)
+		}
+
+		return []driversshared.Instruction{current.DropInstruction(), desired.CreateInstruction()}, nil
+	}
+
+	instructions, possible := desired.attributeChanges(current)
+	if !possible {
+		return nil, typeDependentError(dependents[0].Name, current.Name)
+	}
+
+	return instructions, nil
 }
 
 func (d *PostgresDriver) DiffCompositeTypes(ctx context.Context) (*SectionDiff, error) {
-	return diffSection(ctx, d, sectionRules[*PostgresCompositeType]{
-		Get: d.GetCompositeTypes,
-		Key: func(compositeType *PostgresCompositeType) string {
-			return compositeType.Name
-		},
-		Create: func(compositeType *PostgresCompositeType) []driversshared.Instruction {
-			return []driversshared.Instruction{compositeType.CreateInstruction()}
-		},
-		Change: func(desired *PostgresCompositeType, current *PostgresCompositeType) []driversshared.Instruction {
-			return desired.Diff(current)
-		},
-		Drop: func(current *PostgresCompositeType) driversshared.Instruction {
-			return current.DropInstruction()
-		},
-	})
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection,
+		d.GetCompositeTypes, driversshared.DiffRules[*PostgresCompositeType]{
+			Key: func(compositeType *PostgresCompositeType) string {
+				return compositeType.Name
+			},
+			Create: func(compositeType *PostgresCompositeType) []driversshared.Instruction {
+				return []driversshared.Instruction{compositeType.CreateInstruction()}
+			},
+			Change: func(desired *PostgresCompositeType, current *PostgresCompositeType) ([]driversshared.Instruction, error) {
+				return d.diffCompositeType(ctx, desired, current)
+			},
+			Drop: func(current *PostgresCompositeType) []driversshared.Instruction {
+				return []driversshared.Instruction{current.DropInstruction()}
+			},
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	return &SectionDiff{
+		Additions: additions,
+		Removals:  removals,
+	}, nil
 }
 
 func (d *PostgresDriver) GetCompositeTypes(ctx context.Context, db *sql.DB) ([]*PostgresCompositeType, error) {

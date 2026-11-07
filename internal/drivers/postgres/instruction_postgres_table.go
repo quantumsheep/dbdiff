@@ -43,11 +43,13 @@ func (a *PostgresAddColumnAction) TableActionClause() string {
 	return "ADD COLUMN " + a.Column.Definition()
 }
 
+// PostgreSQL holds no cast between two enum types, so a cast to text can come first.
 type PostgresAlterColumnTypeAction struct {
-	ColumnName string
-	DataType   string
-	Collation  string
-	UsingCast  bool
+	ColumnName       string
+	DataType         string
+	Collation        string
+	UsingCast        bool
+	IntermediateType string
 }
 
 func (a *PostgresAlterColumnTypeAction) TableActionClause() string {
@@ -58,7 +60,10 @@ func (a *PostgresAlterColumnTypeAction) TableActionClause() string {
 		clause += " COLLATE " + driversshared.QuoteIdentifier(a.Collation)
 	}
 
-	if a.UsingCast {
+	if a.UsingCast && a.IntermediateType != "" {
+		clause += fmt.Sprintf(" USING %s::%s::%s",
+			driversshared.QuoteIdentifier(a.ColumnName), a.IntermediateType, a.DataType)
+	} else if a.UsingCast {
 		clause += fmt.Sprintf(" USING %s::%s", driversshared.QuoteIdentifier(a.ColumnName), a.DataType)
 	}
 

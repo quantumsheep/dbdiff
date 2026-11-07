@@ -94,21 +94,36 @@ func (t *PostgresEnumType) Diff(other *PostgresEnumType) []driversshared.Instruc
 }
 
 func (d *PostgresDriver) DiffEnumTypes(ctx context.Context) (*SectionDiff, error) {
-	return diffSection(ctx, d, sectionRules[*PostgresEnumType]{
-		Get: d.GetEnumTypes,
-		Key: func(enumType *PostgresEnumType) string {
-			return enumType.Name
-		},
-		Create: func(enumType *PostgresEnumType) []driversshared.Instruction {
-			return enumType.Instructions()
-		},
-		Change: func(desired *PostgresEnumType, current *PostgresEnumType) []driversshared.Instruction {
-			return desired.Diff(current)
-		},
-		Drop: func(current *PostgresEnumType) driversshared.Instruction {
-			return &PostgresDropTypeInstruction{Name: current.Name}
-		},
-	})
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection,
+		d.GetEnumTypes, driversshared.DiffRules[*PostgresEnumType]{
+			Key: func(enumType *PostgresEnumType) string {
+				return enumType.Name
+			},
+			Create: func(enumType *PostgresEnumType) []driversshared.Instruction {
+				return enumType.Instructions()
+			},
+			Change: func(desired *PostgresEnumType, current *PostgresEnumType) ([]driversshared.Instruction, error) {
+				if !desired.KeepsOrderOf(current) {
+					instructions, err := d.replaceUsedType(ctx, "TYPE", desired.Name, desired.Instructions(), "text")
+					if err != nil || instructions != nil {
+						return instructions, err
+					}
+				}
+
+				return desired.Diff(current), nil
+			},
+			Drop: func(current *PostgresEnumType) []driversshared.Instruction {
+				return []driversshared.Instruction{&PostgresDropTypeInstruction{Name: current.Name}}
+			},
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	return &SectionDiff{
+		Additions: additions,
+		Removals:  removals,
+	}, nil
 }
 
 func (d *PostgresDriver) GetEnumTypes(ctx context.Context, db *sql.DB) ([]*PostgresEnumType, error) {

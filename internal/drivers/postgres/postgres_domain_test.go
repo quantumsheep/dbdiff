@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPostgresDomain(t *testing.T) {
@@ -68,6 +69,73 @@ func TestPostgresDomain(t *testing.T) {
 				BaseType: "character varying(10)",
 			},
 		})
+	})
+
+	t.Run("ChangeTheBaseTypeOfADomainThatAColumnUses", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE DOMAIN amount AS integer CHECK (VALUE >= 0);
+			CREATE TABLE payments (id INT, value amount DEFAULT 0);
+			INSERT INTO payments VALUES (1, 5);
+		`)
+		driver.ExecOnDesired(`
+			CREATE DOMAIN amount AS bigint CHECK (VALUE >= 0);
+			CREATE TABLE payments (id INT, value amount DEFAULT 0);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresRenameTypeInstruction{
+				ObjectType: "DOMAIN",
+				Name:       "amount",
+				NewName:    "dbdiff_old_amount",
+			},
+			&PostgresCreateDomainInstruction{
+				Name:     "amount",
+				BaseType: "bigint",
+				Constraints: []*PostgresDomainConstraint{
+					{
+						Name: "amount_check",
+						Def:  "CHECK ((VALUE >= 0))",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropDefaultAction{
+						ColumnName: "value",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value",
+						DataType:   `"amount"`,
+						UsingCast:  true,
+					},
+				},
+			},
+			&PostgresDropDomainInstruction{
+				Name: "dbdiff_old_amount",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "value",
+						Expression: "0",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("payments", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "value": int64(5)},
+		}, rows)
 	})
 
 	t.Run("DropDomain", func(t *testing.T) {

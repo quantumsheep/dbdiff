@@ -971,6 +971,15 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		return nil, err
 	}
 
+	for _, currentTable := range currentTables {
+		for _, columnName := range d.droppedColumnDefaults[currentTable.Name] {
+			currentColumn, found := currentTable.ColumnByName(columnName)
+			if found {
+				currentColumn.Default = sql.NullString{}
+			}
+		}
+	}
+
 	// The action of a rule can name a second table, so every rule comes after every table.
 	var ruleInstructions []driversshared.Instruction
 

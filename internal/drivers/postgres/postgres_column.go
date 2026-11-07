@@ -344,3 +344,189 @@ func getColumnDependents(
 		return dependent, err
 	}, driversshared.QuoteIdentifier(tableName), columnNames)
 }
+
+type PostgresTypeDependent struct {
+	Kind       string
+	TableName  string
+	ColumnName string
+	IsArray    bool
+	Name       string
+}
+
+// The kind blocker names an object that the diff cannot change. A column of a child table
+// takes the type change of its parent, so the query skips it. The array type of the type
+// and the constraints of a domain go with the type, so the query skips them too.
+func getTypeDependents(ctx context.Context, db *sql.DB, typeName string) ([]*PostgresTypeDependent, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT DISTINCT kind, table_name, column_name, is_array, name
+		FROM (
+			SELECT
+				CASE
+					WHEN d.deptype IN ('i', 'a') THEN NULL
+					WHEN column_class.relkind IN ('v', 'm')
+						AND column_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+					WHEN column_class.relkind IN ('r', 'p')
+						AND column_class.relnamespace = current_schema()::regnamespace THEN
+						CASE WHEN column_attribute.attinhcount = 0 THEN 'column' END
+					WHEN default_class.relnamespace = current_schema()::regnamespace THEN 'default'
+					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
+						AND rule_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+					ELSE 'blocker'
+				END AS kind,
+				coalesce(column_class.relname, default_class.relname, rule_class.relname, '') AS table_name,
+				coalesce(column_attribute.attname, default_attribute.attname, '') AS column_name,
+				d.refobjid = t.typarray AS is_array,
+				pg_describe_object(d.classid, d.objid, d.objsubid) AS name
+			FROM pg_type t
+			JOIN pg_depend d ON d.refclassid = 'pg_type'::regclass AND d.refobjid IN (t.oid, t.typarray)
+			LEFT JOIN pg_class column_class ON d.classid = 'pg_class'::regclass
+				AND d.objsubid > 0
+				AND column_class.oid = d.objid
+			LEFT JOIN pg_attribute column_attribute ON column_attribute.attrelid = column_class.oid
+				AND column_attribute.attnum = d.objsubid
+			LEFT JOIN pg_attrdef column_default ON d.classid = 'pg_attrdef'::regclass
+				AND column_default.oid = d.objid
+			LEFT JOIN pg_class default_class ON default_class.oid = column_default.adrelid
+			LEFT JOIN pg_attribute default_attribute ON default_attribute.attrelid = column_default.adrelid
+				AND default_attribute.attnum = column_default.adnum
+			LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
+			LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
+			WHERE t.typnamespace = current_schema()::regnamespace
+			AND t.typname = $1
+		) dependents
+		WHERE kind IS NOT NULL
+		ORDER BY kind, table_name, column_name, name
+	`, func(rows *sql.Rows) (*PostgresTypeDependent, error) {
+		dependent := &PostgresTypeDependent{}
+
+		err := rows.Scan(&dependent.Kind, &dependent.TableName, &dependent.ColumnName,
+			&dependent.IsArray, &dependent.Name)
+
+		return dependent, err
+	}, typeName)
+}
+
+func typeDependentError(objectName string, typeName string) error {
+	return fmt.Errorf(
+		"the %s uses the type %q. dbdiff must drop and create this type again, "+
+			"and it cannot drop and create this object again",
+		objectName, typeName)
+}
+
+// PostgreSQL refuses to drop a type while a column uses it. The diff renames the current
+// type, creates the new type, and converts each column to the new type. The conversion keeps
+// the rows. An intermediate type, for example text, carries the values when PostgreSQL holds
+// no cast between the two types. If no object uses the type, the result is empty.
+func (d *PostgresDriver) replaceUsedType(
+	ctx context.Context,
+	objectType string,
+	typeName string,
+	createInstructions []driversshared.Instruction,
+	intermediateType string,
+) ([]driversshared.Instruction, error) {
+	dependents, err := getTypeDependents(ctx, d.CurrentDatabaseConnection, typeName)
+	if err != nil || len(dependents) == 0 {
+		return nil, err
+	}
+
+	oldName := "dbdiff_old_" + typeName
+	instructions := []driversshared.Instruction{&PostgresRenameTypeInstruction{
+		ObjectType: objectType,
+		Name:       typeName,
+		NewName:    oldName,
+	}}
+	instructions = append(instructions, createInstructions...)
+
+	// A default of the old type cannot take the new type, so every default goes first.
+	var conversions []driversshared.Instruction
+
+	for _, dependent := range dependents {
+		switch dependent.Kind {
+		case "default":
+			if d.droppedColumnDefaults == nil {
+				d.droppedColumnDefaults = map[string][]string{}
+			}
+
+			d.droppedColumnDefaults[dependent.TableName] = append(
+				d.droppedColumnDefaults[dependent.TableName], dependent.ColumnName)
+			instructions = append(instructions, &PostgresAlterTableInstruction{
+				Name: dependent.TableName,
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropDefaultAction{
+						ColumnName: dependent.ColumnName,
+					},
+				},
+			})
+		case "column":
+			conversion, err := d.columnTypeConversion(ctx, dependent, typeName, intermediateType)
+			if err != nil {
+				return nil, err
+			}
+
+			conversions = append(conversions, conversion)
+		case "relation":
+			d.markRecreated(dependent.TableName)
+		default:
+			return nil, typeDependentError(dependent.Name, typeName)
+		}
+	}
+
+	instructions = append(instructions, conversions...)
+
+	if objectType == "DOMAIN" {
+		return append(instructions, &PostgresDropDomainInstruction{
+			Name: oldName,
+		}), nil
+	}
+
+	return append(instructions, &PostgresDropTypeInstruction{
+		Name: oldName,
+	}), nil
+}
+
+// PostgreSQL rebuilds the indexes and the constraints of the column, and it refuses the
+// change while a policy, a trigger, or a rule uses the column.
+func (d *PostgresDriver) columnTypeConversion(
+	ctx context.Context,
+	dependent *PostgresTypeDependent,
+	typeName string,
+	intermediateType string,
+) (driversshared.Instruction, error) {
+	columnDependents, err := getColumnDependents(ctx, d.CurrentDatabaseConnection,
+		dependent.TableName, []string{dependent.ColumnName})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, columnDependent := range columnDependents {
+		switch columnDependent.Kind {
+		case "index", "constraint":
+		case "relation":
+			d.markRecreated(columnDependent.Name)
+		default:
+			return nil, typeDependentError(columnDependent.Kind+" "+columnDependent.Name, typeName)
+		}
+	}
+
+	dataType := driversshared.QuoteIdentifier(typeName)
+
+	if dependent.IsArray {
+		dataType += "[]"
+
+		if intermediateType != "" {
+			intermediateType += "[]"
+		}
+	}
+
+	return &PostgresAlterTableInstruction{
+		Name: dependent.TableName,
+		Actions: []driversshared.AlterTableAction{
+			&PostgresAlterColumnTypeAction{
+				ColumnName:       dependent.ColumnName,
+				DataType:         dataType,
+				UsingCast:        true,
+				IntermediateType: intermediateType,
+			},
+		},
+	}, nil
+}

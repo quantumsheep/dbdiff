@@ -129,21 +129,37 @@ func (d *PostgresDomain) Diff(other *PostgresDomain) []driversshared.Instruction
 }
 
 func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) {
-	return diffSection(ctx, d, sectionRules[*PostgresDomain]{
-		Get: d.GetDomains,
-		Key: func(domain *PostgresDomain) string {
-			return domain.Name
-		},
-		Create: func(domain *PostgresDomain) []driversshared.Instruction {
-			return []driversshared.Instruction{domain.CreateInstruction()}
-		},
-		Change: func(desired *PostgresDomain, current *PostgresDomain) []driversshared.Instruction {
-			return desired.Diff(current)
-		},
-		Drop: func(current *PostgresDomain) driversshared.Instruction {
-			return current.DropInstruction()
-		},
-	})
+	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection,
+		d.GetDomains, driversshared.DiffRules[*PostgresDomain]{
+			Key: func(domain *PostgresDomain) string {
+				return domain.Name
+			},
+			Create: func(domain *PostgresDomain) []driversshared.Instruction {
+				return []driversshared.Instruction{domain.CreateInstruction()}
+			},
+			Change: func(desired *PostgresDomain, current *PostgresDomain) ([]driversshared.Instruction, error) {
+				if desired.BaseType != current.BaseType {
+					instructions, err := d.replaceUsedType(ctx, "DOMAIN", desired.Name,
+						[]driversshared.Instruction{desired.CreateInstruction()}, "")
+					if err != nil || instructions != nil {
+						return instructions, err
+					}
+				}
+
+				return desired.Diff(current), nil
+			},
+			Drop: func(current *PostgresDomain) []driversshared.Instruction {
+				return []driversshared.Instruction{current.DropInstruction()}
+			},
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	return &SectionDiff{
+		Additions: additions,
+		Removals:  removals,
+	}, nil
 }
 
 func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*PostgresDomain, error) {
