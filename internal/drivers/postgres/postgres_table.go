@@ -1120,9 +1120,8 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 				switch dependent.Kind {
 				case "blocker":
 					return nil, fmt.Errorf(
-						"the %s uses the column %q of the table %q. dbdiff must drop and add this column, "+
-							"and it cannot drop and create this object again",
-						dependent.Name, dependent.ColumnName, currentTable.Name)
+						"the %s uses the column %q of the table %q. dbdiff must drop and add this column. %s",
+						dependent.Name, dependent.ColumnName, currentTable.Name, blockerAdvice)
 				case "relation":
 					d.markRecreated(dependent.Name)
 				case "foreign key":
