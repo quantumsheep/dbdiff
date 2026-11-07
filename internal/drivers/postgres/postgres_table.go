@@ -316,6 +316,15 @@ func (t *PostgresTable) DiffTable(
 		typeChanged := desiredColumn.Type != currentColumn.Type ||
 			desiredColumn.Collation != currentColumn.Collation
 
+		// PostgreSQL casts the default in the TYPE action and refuses a default that it cannot
+		// cast automatically, so the default block below sets the default again.
+		defaultDroppedForType := typeChanged && currentColumn.Default.Valid
+		if defaultDroppedForType {
+			instructions = append(instructions, alterColumn(&PostgresDropDefaultAction{
+				ColumnName: desiredColumn.Name,
+			}))
+		}
+
 		// PostgreSQL changes a collation through the TYPE action.
 		if typeChanged {
 			usingCast, err := columnUsingClause(desiredColumn, currentColumn, hasAutomaticCast)
@@ -352,13 +361,13 @@ func (t *PostgresTable) DiffTable(
 		serialRemoved := desiredColumn.Serial == "" && currentColumn.Serial != "" &&
 			desiredColumn.Default != currentColumn.Default
 
-		if desiredColumn.Default != currentColumn.Default && !serialAdded {
+		if (desiredColumn.Default != currentColumn.Default || defaultDroppedForType) && !serialAdded {
 			if desiredColumn.Default.Valid {
 				instructions = append(instructions, alterColumn(&PostgresSetDefaultAction{
 					ColumnName: desiredColumn.Name,
 					Expression: desiredColumn.Default.String,
 				}))
-			} else {
+			} else if !defaultDroppedForType {
 				instructions = append(instructions,
 					alterColumn(&PostgresDropDefaultAction{ColumnName: desiredColumn.Name}))
 			}

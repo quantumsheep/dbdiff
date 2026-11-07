@@ -115,6 +115,52 @@ func TestPostgresColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("AlterColumnTypeWithADefault", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT, score TEXT DEFAULT '0');`)
+		driver.ExecOnCurrent(`INSERT INTO users (id, score) VALUES (1, '42');`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT, score INT DEFAULT 0);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropDefaultAction{
+						ColumnName: "score",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "score",
+						DataType:   "integer",
+						UsingCast:  true,
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "score",
+						Expression: "0",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnCurrent(`INSERT INTO users (id) VALUES (2);`)
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "score": int64(42)},
+			{"id": int64(2), "score": int64(0)},
+		}, rows)
+	})
+
 	t.Run("AlterColumnTypeToArray", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
