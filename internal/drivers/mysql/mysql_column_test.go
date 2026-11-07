@@ -360,6 +360,282 @@ func TestMySQLColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", "ORDER BY user_id"))
 	})
 
+	t.Run("DropTheAutoIncrementPrimaryKeyColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (uid bigint NOT NULL, a int, PRIMARY KEY (uid));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL AUTO_INCREMENT, a int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5, 1);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name:   "t",
+				Action: &MySQLDropPrimaryKeyAction{},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "id",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:    "uid",
+						Type:    "bigint",
+						NotNull: true,
+					},
+					First: true,
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddPrimaryKeyAction{
+					Columns: []string{"uid"},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"uid": int64(0), "a": int64(1)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY uid"))
+	})
+
+	t.Run("MoveAutoIncrementToAnotherColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (uid int NOT NULL AUTO_INCREMENT, PRIMARY KEY (uid));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL AUTO_INCREMENT, uid int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5, 1), (9, 2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name:   "t",
+				Action: &MySQLDropPrimaryKeyAction{},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "id",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddPrimaryKeyAction{
+					Columns: []string{"uid"},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:          "uid",
+						Type:          "int",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"uid": int64(1)},
+			{"uid": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY uid"))
+	})
+
+	t.Run("AddAnAutoIncrementColumnToACompositePrimaryKey", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, uid bigint NOT NULL AUTO_INCREMENT, a int, " +
+			"PRIMARY KEY (id, uid), KEY k (uid));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL AUTO_INCREMENT, a int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5, 1), (9, 2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name:   "t",
+				Action: &MySQLDropPrimaryKeyAction{},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:    "uid",
+						Type:    "bigint",
+						NotNull: true,
+					},
+					After: "id",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddPrimaryKeyAction{
+					Columns: []string{"id", "uid"},
+				},
+			},
+			&MySQLCreateIndexInstruction{
+				Name:      "k",
+				TableName: "t",
+				Keys:      []string{"`uid`"},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:          "uid",
+						Type:          "bigint",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(5), "uid": int64(1), "a": int64(1)},
+			{"id": int64(9), "uid": int64(2), "a": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("AddAnAutoIncrementColumnWithAUniqueKey", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, seq bigint NOT NULL AUTO_INCREMENT, " +
+			"PRIMARY KEY (id), UNIQUE KEY u (seq));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5), (9);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "seq",
+						Type: "bigint",
+					},
+				},
+			},
+			&MySQLCreateIndexInstruction{
+				Kind:      "UNIQUE",
+				Name:      "u",
+				TableName: "t",
+				Keys:      []string{"`seq`"},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:          "seq",
+						Type:          "bigint",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(5), "seq": int64(1)},
+			{"id": int64(9), "seq": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("RemoveAutoIncrementFromAColumnWithAUniqueKey", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, a int);")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL AUTO_INCREMENT, a int, UNIQUE KEY u (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5, 1), (9, 2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+				},
+			},
+			&MySQLDropIndexInstruction{
+				Name:      "u",
+				TableName: "t",
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(5), "a": int64(1)},
+			{"id": int64(9), "a": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("AddAutoIncrementToAColumnWithANewUniqueKey", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, seq bigint NOT NULL AUTO_INCREMENT, " +
+			"PRIMARY KEY (id), UNIQUE KEY u (seq));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, seq bigint NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5, 10), (9, 20);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateIndexInstruction{
+				Kind:      "UNIQUE",
+				Name:      "u",
+				TableName: "t",
+				Keys:      []string{"`seq`"},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:          "seq",
+						Type:          "bigint",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(5), "seq": int64(10)},
+			{"id": int64(9), "seq": int64(20)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
 	t.Run("RenameAColumnThatAGeneratedColumnReads", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 

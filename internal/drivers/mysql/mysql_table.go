@@ -319,6 +319,8 @@ func (t *MySQLTable) DiffTable(
 
 	var addInstructions []driversshared.Instruction
 
+	var autoIncrementAdditions []driversshared.Instruction
+
 	for _, columnName := range columnsDiff.Added {
 		position := slices.IndexFunc(t.Columns, func(column *MySQLColumn) bool {
 			return column.Name == columnName
@@ -333,6 +335,23 @@ func (t *MySQLTable) DiffTable(
 			PrimaryKey: primaryKeyChanged && column.AutoIncrement && slices.Equal(t.PrimaryKey, []string{columnName}),
 		}
 		primaryKeyAddedWithColumn = primaryKeyAddedWithColumn || action.PrimaryKey
+
+		// The key of any other new AUTO_INCREMENT column does not exist yet. So the column
+		// comes without the keyword, and a MODIFY action after the index additions adds the
+		// keyword and numbers the rows. A nullable column lets a unique key accept the rows.
+		if column.AutoIncrement && !action.PrimaryKey {
+			columnWithoutAutoIncrement := *column
+			columnWithoutAutoIncrement.AutoIncrement = false
+			columnWithoutAutoIncrement.NotNull = column.NotNull && slices.Contains(t.PrimaryKey, columnName)
+			action.Column = &columnWithoutAutoIncrement
+
+			autoIncrementAdditions = append(autoIncrementAdditions, &MySQLAlterTableInstruction{
+				Name: t.Name,
+				Action: &MySQLModifyColumnAction{
+					Column: column,
+				},
+			})
+		}
 
 		action.First, action.After, columnOrder = placeColumn(columnOrder, t.Columns, position)
 
@@ -436,11 +455,26 @@ func (t *MySQLTable) DiffTable(
 	var instructions []driversshared.Instruction
 
 	instructions = append(instructions, triggerRemovals...)
-	instructions = append(instructions, indexRemovals...)
 
-	// MySQL refuses AUTO_INCREMENT on a column outside of every key, so the change that
-	// removes the keyword comes before the removal of the primary key, and the other
+	// MySQL refuses the removal of the keys of an AUTO_INCREMENT column, so a column loses
+	// the keyword before the removals of the indexes and of the primary key. The other
 	// changes come after the addition of the primary key.
+	for _, currentColumn := range other.Columns {
+		if !currentColumn.AutoIncrement || !slices.Contains(columnsDiff.Removed, currentColumn.Name) {
+			continue
+		}
+
+		columnWithoutAutoIncrement := *currentColumn
+		columnWithoutAutoIncrement.AutoIncrement = false
+
+		instructions = append(instructions, &MySQLAlterTableInstruction{
+			Name: t.Name,
+			Action: &MySQLModifyColumnAction{
+				Column: &columnWithoutAutoIncrement,
+			},
+		})
+	}
+
 	for _, columnName := range columnsDiff.Modified {
 		column, found := t.ColumnByName(columnName)
 		if !found {
@@ -459,8 +493,22 @@ func (t *MySQLTable) DiffTable(
 			continue
 		}
 
+		gainsAutoIncrement := column.AutoIncrement && foundInCurrent && !currentColumn.AutoIncrement
+		if gainsAutoIncrement && !slices.Contains(movedColumnNames, columnName) && !t.keepsKeyOf(columnName, indexAdditions) {
+			autoIncrementAdditions = append(autoIncrementAdditions, &MySQLAlterTableInstruction{
+				Name: t.Name,
+				Action: &MySQLModifyColumnAction{
+					Column: column,
+				},
+			})
+
+			continue
+		}
+
 		lateModifications = append(lateModifications, column)
 	}
+
+	instructions = append(instructions, indexRemovals...)
 
 	// The drop of the last column of the primary key drops the key, so the drop of the key
 	// comes before the drops of the columns.
@@ -577,6 +625,7 @@ func (t *MySQLTable) DiffTable(
 	}
 
 	instructions = append(instructions, indexAdditions...)
+	instructions = append(instructions, autoIncrementAdditions...)
 	instructions = append(instructions, checkAdditions...)
 	instructions = append(instructions, triggerAdditions...)
 
@@ -597,6 +646,23 @@ func equalAndKept[T interface{ UsesColumn(columnName string) bool }](
 	return func(desired T, current T) bool {
 		return equal(desired, current) && !lo.SomeBy(recreatedColumns, current.UsesColumn)
 	}
+}
+
+// The primary key and the kept indexes exist before the late column changes. An added
+// index exists only after them.
+func (t *MySQLTable) keepsKeyOf(columnName string, indexAdditions []driversshared.Instruction) bool {
+	if len(t.PrimaryKey) > 0 && t.PrimaryKey[0] == columnName {
+		return true
+	}
+
+	return lo.SomeBy(t.Indexes, func(index *MySQLIndex) bool {
+		added := lo.SomeBy(indexAdditions, func(instruction driversshared.Instruction) bool {
+			createInstruction, isCreate := instruction.(*MySQLCreateIndexInstruction)
+			return isCreate && createInstruction.Name == index.Name
+		})
+
+		return index.Keys[0] == QuoteIdentifier(columnName) && !added
+	})
 }
 
 // MariaDB names a column check after its column. A rename of the column keeps the old name
