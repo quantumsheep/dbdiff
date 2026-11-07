@@ -32,6 +32,10 @@ type PostgresTable struct {
 
 	References []string
 
+	// The key is the name of a stored generated column, and the value holds the names of the
+	// columns that its expression reads.
+	GeneratedColumnReads map[string][]string
+
 	Comment string
 
 	Unlogged bool
@@ -236,8 +240,33 @@ func (t *PostgresTable) DiffTable(
 		}
 	}
 
+	// PostgreSQL refuses the TYPE action of a column that a generated column reads, so the
+	// change of each such generated column comes before the column loop. A column that the
+	// desired table holds as a generated column comes back after the loop.
+	earlyDroppedColumnNames, earlyDroppedExpressionColumnNames := t.generatedColumnsBeforeTypeChanges(other, serverVersion)
+
+	for _, columnName := range earlyDroppedColumnNames {
+		instructions = append(instructions,
+			alterTable(&driversshared.SQLDropColumnAction{ColumnName: columnName}))
+	}
+
+	for _, columnName := range earlyDroppedExpressionColumnNames {
+		instructions = append(instructions,
+			alterTable(&PostgresDropExpressionAction{ColumnName: columnName}))
+	}
+
 	for _, desiredColumn := range t.Columns {
+		if slices.Contains(earlyDroppedColumnNames, desiredColumn.Name) {
+			continue
+		}
+
 		currentColumn, found := other.ColumnByName(desiredColumn.Name)
+
+		if slices.Contains(earlyDroppedExpressionColumnNames, desiredColumn.Name) {
+			columnCopy := *currentColumn
+			columnCopy.GeneratedExpression = ""
+			currentColumn = &columnCopy
+		}
 
 		// The parent gives the definition of an inherited column, so the child diff compares
 		// only the attributes that the child keeps.
@@ -458,6 +487,17 @@ func (t *PostgresTable) DiffTable(
 		}
 	}
 
+	for _, columnName := range earlyDroppedColumnNames {
+		desiredColumn, found := t.ColumnByName(columnName)
+		if !found {
+			continue
+		}
+
+		instructions = append(instructions, alterTable(&PostgresAddColumnAction{Column: desiredColumn}))
+		instructions = append(instructions, desiredColumn.StorageInstructions(t.Name)...)
+		instructions = append(instructions, desiredColumn.StatisticsInstructions(t.Name)...)
+	}
+
 	if t.Unlogged != other.Unlogged {
 		persistence := "LOGGED"
 		if t.Unlogged {
@@ -530,7 +570,7 @@ func (t *PostgresTable) DiffTable(
 
 	for _, currentColumn := range other.Columns {
 		_, found := t.ColumnByName(currentColumn.Name)
-		if !found && !currentColumn.Inherited {
+		if !found && !currentColumn.Inherited && !slices.Contains(earlyDroppedColumnNames, currentColumn.Name) {
 			instructions = append(instructions,
 				alterTable(&driversshared.SQLDropColumnAction{ColumnName: currentColumn.Name}))
 		}
@@ -1579,16 +1619,58 @@ func (t *PostgresTable) creationStateOfChild(desiredTables []*PostgresTable) *Po
 }
 
 func (t *PostgresTable) RebuiltColumnNames(other *PostgresTable, serverVersion int) []string {
-	var names []string
+	names, _ := t.generatedColumnsBeforeTypeChanges(other, serverVersion)
 
 	for _, desiredColumn := range t.Columns {
 		currentColumn, found := other.ColumnByName(desiredColumn.Name)
-		if found && desiredColumn.NeedsRebuild(currentColumn, serverVersion) {
+		if found && desiredColumn.NeedsRebuild(currentColumn, serverVersion) &&
+			!slices.Contains(names, desiredColumn.Name) {
 			names = append(names, desiredColumn.Name)
 		}
 	}
 
 	return names
+}
+
+// Each current generated column that reads a column with a new type or a new collation goes
+// into one of the two results. The first result holds the columns that DiffTable drops. The
+// second result holds the columns that keep their data as plain columns.
+func (t *PostgresTable) generatedColumnsBeforeTypeChanges(
+	other *PostgresTable,
+	serverVersion int,
+) ([]string, []string) {
+	var droppedColumnNames []string
+	var droppedExpressionColumnNames []string
+
+	for _, currentColumn := range other.Columns {
+		if currentColumn.Inherited || currentColumn.GeneratedExpression == "" {
+			continue
+		}
+
+		readsRetypedColumn := slices.ContainsFunc(other.GeneratedColumnReads[currentColumn.Name], func(readName string) bool {
+			desiredReadColumn, desiredFound := t.ColumnByName(readName)
+			currentReadColumn, currentFound := other.ColumnByName(readName)
+
+			return desiredFound && currentFound && (desiredReadColumn.Type != currentReadColumn.Type ||
+				desiredReadColumn.Collation != currentReadColumn.Collation)
+		})
+		if !readsRetypedColumn {
+			continue
+		}
+
+		desiredColumn, found := t.ColumnByName(currentColumn.Name)
+
+		switch {
+		case found && desiredColumn.Inherited:
+			continue
+		case found && desiredColumn.GeneratedExpression == "" && !desiredColumn.NeedsRebuild(currentColumn, serverVersion):
+			droppedExpressionColumnNames = append(droppedExpressionColumnNames, currentColumn.Name)
+		default:
+			droppedColumnNames = append(droppedColumnNames, currentColumn.Name)
+		}
+	}
+
+	return droppedColumnNames, droppedExpressionColumnNames
 }
 
 // A DROP COLUMN statement removes the comment, the indexes, and the constraints of the

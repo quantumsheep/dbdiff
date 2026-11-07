@@ -3,6 +3,7 @@ package driverspostgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"slices"
 
@@ -213,7 +214,18 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 					END
 				ELSE '' END,
 				coalesce(serial_sequence.relname, ''),
-				NOT a.attislocal
+				NOT a.attislocal,
+				CASE WHEN a.attgenerated = 's' THEN coalesce((
+					SELECT json_agg(read_column.attname ORDER BY read_column.attnum)::text
+					FROM pg_depend dep
+					JOIN pg_attribute read_column ON read_column.attrelid = dep.refobjid
+						AND read_column.attnum = dep.refobjsubid
+					WHERE dep.classid = 'pg_attrdef'::regclass
+					AND dep.objid = d.oid
+					AND dep.refclassid = 'pg_class'::regclass
+					AND dep.refobjid = a.attrelid
+					AND dep.refobjsubid <> a.attnum
+				), '') ELSE '' END
 			FROM pg_attribute a
 			LEFT JOIN LATERAL (
 				SELECT sequence_class.relname
@@ -239,16 +251,31 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 			ORDER BY a.attnum
 		`, func(rows *sql.Rows) (*PostgresColumn, error) {
 		var columnName, columnType, identity, generatedExpression, collation, comment string
-		var identityOptions, storage, serial, serialSequenceName string
+		var identityOptions, storage, serial, serialSequenceName, readColumnNames string
 		var notNull, inherited bool
 		var columnDefault sql.NullString
 		var statisticsTarget sql.NullInt64
 
 		err := rows.Scan(&columnName, &columnType, &notNull, &columnDefault,
 			&identity, &generatedExpression, &collation, &comment, &storage,
-			&statisticsTarget, &identityOptions, &serial, &serialSequenceName, &inherited)
+			&statisticsTarget, &identityOptions, &serial, &serialSequenceName, &inherited, &readColumnNames)
 		if err != nil {
 			return nil, err
+		}
+
+		if readColumnNames != "" {
+			var names []string
+
+			err := json.Unmarshal([]byte(readColumnNames), &names)
+			if err != nil {
+				return nil, err
+			}
+
+			if table.GeneratedColumnReads == nil {
+				table.GeneratedColumnReads = map[string][]string{}
+			}
+
+			table.GeneratedColumnReads[columnName] = names
 		}
 
 		return &PostgresColumn{

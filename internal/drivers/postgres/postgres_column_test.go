@@ -706,6 +706,312 @@ func TestPostgresColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ChangeTheTypeOfAColumnThatAGeneratedColumnReads", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, tripled INT GENERATED ALWAYS AS (value * 3) STORED);
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value BIGINT, tripled INT GENERATED ALWAYS AS (value * 3) STORED);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "tripled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value",
+						DataType:   "bigint",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "tripled",
+							Type:                "integer",
+							GeneratedExpression: "(value * 3)",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":   int64(5),
+				"tripled": int64(15),
+			},
+		}, rows)
+	})
+
+	t.Run("ChangeTheTypeOfAColumnThatAGeneratedColumnWithAnIndexAndAViewReads", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		dependents := `
+			CREATE INDEX measures_tripled ON measures (tripled);
+			CREATE VIEW tripled_measures AS SELECT tripled FROM measures;
+			COMMENT ON COLUMN measures.tripled IS 'Three times the value';
+		`
+		driver.ExecOnCurrent(`CREATE TABLE measures (value INT, tripled INT GENERATED ALWAYS AS (value * 3) STORED);` +
+			dependents + `INSERT INTO measures (value) VALUES (5);`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value BIGINT, tripled INT GENERATED ALWAYS AS (value * 3) STORED);` +
+			dependents)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "tripled_measures"},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "tripled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value",
+						DataType:   "bigint",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "tripled",
+							Type:                "integer",
+							GeneratedExpression: "(value * 3)",
+							Comment:             "Three times the value",
+						},
+					},
+				},
+			},
+			&PostgresCommentOnColumnInstruction{
+				TableName:  "measures",
+				ColumnName: "tripled",
+				Text:       "Three times the value",
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX measures_tripled ON measures USING btree (tripled)",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "tripled_measures",
+				Query: " SELECT tripled\n   FROM measures;",
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("tripled_measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"tripled": int64(15),
+			},
+		}, rows)
+	})
+
+	t.Run("ChangeTheTypeOfAColumnThatTwoGeneratedColumnsRead", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (
+				doubled INT GENERATED ALWAYS AS (value * 2) STORED,
+				value INT,
+				tripled INT GENERATED ALWAYS AS (value * 3) STORED
+			);
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE measures (
+				doubled INT GENERATED ALWAYS AS (value * 2) STORED,
+				value BIGINT,
+				tripled INT GENERATED ALWAYS AS (value * 3) STORED
+			);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "doubled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "tripled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value",
+						DataType:   "bigint",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "doubled",
+							Type:                "integer",
+							GeneratedExpression: "(value * 2)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "tripled",
+							Type:                "integer",
+							GeneratedExpression: "(value * 3)",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"doubled": int64(10),
+				"value":   int64(5),
+				"tripled": int64(15),
+			},
+		}, rows)
+	})
+
+	t.Run("DropAGeneratedColumnThatReadsAColumnWithANewType", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, tripled INT GENERATED ALWAYS AS (value * 3) STORED);
+			CREATE INDEX measures_tripled ON measures (tripled);
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value BIGINT);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "tripled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value",
+						DataType:   "bigint",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value": int64(5),
+			},
+		}, rows)
+	})
+
+	t.Run("DropTheExpressionOfAGeneratedColumnThatReadsAColumnWithANewType", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, tripled INT GENERATED ALWAYS AS (value * 3) STORED);
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value BIGINT, tripled INT);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropExpressionAction{ColumnName: "tripled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value",
+						DataType:   "bigint",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":   int64(5),
+				"tripled": int64(15),
+			},
+		}, rows)
+	})
+
+	t.Run("ChangeTheTypeOfAColumnWithACommaInItsNameThatAGeneratedColumnReads", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures ("value, raw" INT, tripled INT GENERATED ALWAYS AS ("value, raw" * 3) STORED);
+			INSERT INTO measures ("value, raw") VALUES (5);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE measures ("value, raw" BIGINT, tripled INT GENERATED ALWAYS AS ("value, raw" * 3) STORED);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "tripled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value, raw",
+						DataType:   "bigint",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "tripled",
+							Type:                "integer",
+							GeneratedExpression: "(\"value, raw\" * 3)",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value, raw": int64(5),
+				"tripled":    int64(15),
+			},
+		}, rows)
+	})
+
 	t.Run("RebuiltColumnWithAPolicyAndATrigger", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
