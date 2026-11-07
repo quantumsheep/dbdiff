@@ -197,7 +197,7 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 			coalesce(obj_description(t.oid, 'pg_type'), '')
 		FROM pg_type t
 		LEFT JOIN pg_constraint c ON c.contypid = t.oid AND c.contype = 'c'
-		WHERE t.typnamespace = current_schema()::regnamespace
+		WHERE t.typnamespace = quote_ident(current_schema())::regnamespace
 		AND t.typtype = 'd'
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e'

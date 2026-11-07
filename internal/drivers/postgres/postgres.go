@@ -311,3 +311,7 @@ func isRoutineCreation(instruction driversshared.Instruction) bool {
 		return false
 	}
 }
+
+// The name of a schema can hold a character that a regular expression reads as an operator,
+// so the pattern puts a backslash before each character that is not a letter or a digit.
+const currentSchemaPrefixPattern = `regexp_replace(quote_ident(current_schema()), '([^[:alnum:]_])', '\\\1', 'g') || '\.'`

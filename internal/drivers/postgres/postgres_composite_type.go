@@ -181,7 +181,7 @@ func (d *PostgresDriver) GetCompositeTypes(ctx context.Context, db *sql.DB) ([]*
 		FROM pg_type t
 		JOIN pg_class c ON c.oid = t.typrelid AND c.relkind = 'c'
 		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
-		WHERE t.typnamespace = current_schema()::regnamespace
+		WHERE t.typnamespace = quote_ident(current_schema())::regnamespace
 		AND t.typtype = 'c'
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e'

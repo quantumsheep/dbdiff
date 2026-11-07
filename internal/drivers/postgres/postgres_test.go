@@ -419,4 +419,51 @@ func TestPostgresDriver(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("SchemaNameWithRegularExpressionCharacters", func(t *testing.T) {
+		harness := NewTestPostgresDriver(t)
+
+		id := time.Now().UnixNano()
+		desiredSchema := fmt.Sprintf("dbdiff.desired+$%d", id)
+		currentSchema := fmt.Sprintf("dbdiff.current+$%d", id)
+		schema := `
+			CREATE TYPE mood AS ENUM ('sad', 'happy');
+			CREATE TABLE people (id INT, current_mood mood);
+			CREATE INDEX people_id ON people (id);
+			CREATE STATISTICS people_statistics ON id, current_mood FROM people;
+			CREATE FUNCTION touch() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
+			CREATE TRIGGER people_touch BEFORE INSERT ON people FOR EACH ROW EXECUTE FUNCTION touch();
+			CREATE RULE people_guard AS ON DELETE TO people DO INSTEAD NOTHING;
+			CREATE MATERIALIZED VIEW people_ids AS SELECT id FROM people;
+			CREATE INDEX people_ids_id ON people_ids (id);
+		`
+
+		for _, name := range []string{desiredSchema, currentSchema} {
+			_, err := harness.conn.ExecContext(t.Context(), "CREATE SCHEMA "+driversshared.QuoteIdentifier(name))
+			require.NoError(t, err)
+
+			t.Cleanup(func() {
+				_, err := harness.conn.ExecContext(context.Background(),
+					"DROP SCHEMA "+driversshared.QuoteIdentifier(name)+" CASCADE")
+				require.NoError(t, err)
+			})
+
+			connection, err := OpenPostgresConnection(postgresTestConnectionString, name)
+			require.NoError(t, err)
+
+			_, err = connection.ExecContext(t.Context(), schema)
+			require.NoError(t, err)
+			require.NoError(t, connection.Close())
+		}
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{})
+		driver.DesiredSchema = desiredSchema
+		driver.CurrentSchema = currentSchema
+
+		source := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+
+		instructions, err := driver.Diff(t.Context(), source, source, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Empty(t, instructions)
+	})
 }

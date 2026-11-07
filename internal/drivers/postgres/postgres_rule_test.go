@@ -1,6 +1,7 @@
 package driverspostgres
 
 import (
+	"fmt"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -107,6 +108,23 @@ func TestPostgresRule(t *testing.T) {
 			},
 			&PostgresCreateRuleInstruction{
 				Definition: "CREATE RULE log_insert AS\n    ON INSERT TO base DO  INSERT INTO zlog (a)\n  VALUES (new.a);",
+			},
+		})
+	})
+
+	t.Run("KeepTheSchemaNameInAStringLiteral", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE base (a INT, note TEXT);`)
+
+		driver.ExecOnDesired(`CREATE TABLE base (a INT, note TEXT);`)
+		driver.ExecOnDesired(fmt.Sprintf(
+			`CREATE RULE add_note AS ON INSERT TO base DO ALSO UPDATE base SET note = '%s.base' WHERE a = 0;`,
+			driver.desiredSchema))
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateRuleInstruction{
+				Definition: fmt.Sprintf("CREATE RULE add_note AS\n    ON INSERT TO base DO  UPDATE base SET note = '%s.base'::text\n  WHERE (base.a = 0);",
+					driver.desiredSchema),
 			},
 		})
 	})

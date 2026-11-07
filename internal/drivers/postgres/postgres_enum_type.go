@@ -131,7 +131,7 @@ func (d *PostgresDriver) GetEnumTypes(ctx context.Context, db *sql.DB) ([]*Postg
 		SELECT t.typname, e.enumlabel, coalesce(obj_description(t.oid, 'pg_type'), '')
 		FROM pg_type t
 		JOIN pg_enum e ON e.enumtypid = t.oid
-		WHERE t.typnamespace = current_schema()::regnamespace
+		WHERE t.typnamespace = quote_ident(current_schema())::regnamespace
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e'
 		)

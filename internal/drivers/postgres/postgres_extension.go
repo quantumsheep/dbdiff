@@ -53,7 +53,7 @@ func (d *PostgresDriver) GetExtensions(ctx context.Context, db *sql.DB) ([]*Post
 	return driversshared.QueryAll(ctx, db, `
 		SELECT extname, extversion
 		FROM pg_extension
-		WHERE extnamespace = current_schema()::regnamespace
+		WHERE extnamespace = quote_ident(current_schema())::regnamespace
 		ORDER BY extname
 	`, func(rows *sql.Rows) (*PostgresExtension, error) {
 		extension := &PostgresExtension{}

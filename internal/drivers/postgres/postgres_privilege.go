@@ -183,7 +183,7 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 	rows, err := db.QueryContext(ctx, `
 		SELECT c.relname, c.relkind, pg_get_userbyid(c.relowner)
 		FROM pg_class c
-		WHERE c.relnamespace = current_schema()::regnamespace
+		WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
 		AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
 		AND NOT c.relispartition
 		AND NOT EXISTS (
@@ -238,7 +238,7 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
 			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
 		FROM pg_class c, aclexplode(c.relacl) acl
-		WHERE c.relnamespace = current_schema()::regnamespace
+		WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
 		AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
 		AND acl.grantee <> c.relowner
 		AND NOT EXISTS (

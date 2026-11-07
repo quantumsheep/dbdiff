@@ -65,7 +65,7 @@ func (d *PostgresDriver) GetMaterializedViews(ctx context.Context, db *sql.DB) (
 			coalesce(obj_description(c.oid, 'pg_class'), '')
 		FROM pg_matviews m
 		JOIN pg_class c ON c.relname = m.matviewname
-			AND c.relnamespace = current_schema()::regnamespace
+			AND c.relnamespace = quote_ident(current_schema())::regnamespace
 		WHERE m.schemaname = current_schema()
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d
@@ -121,13 +121,13 @@ func (d *PostgresDriver) GetMaterializedViewIndexes(
 			indexname,
 			regexp_replace(
 				indexdef,
-				' ON (ONLY )?' || quote_ident(current_schema()) || '\.',
+				' ON (ONLY )?' || `+currentSchemaPrefixPattern+`,
 				' ON '
 			),
 			coalesce((
 				SELECT obj_description(c.oid, 'pg_class')
 				FROM pg_class c
-				WHERE c.relnamespace = current_schema()::regnamespace
+				WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
 				AND c.relname = pg_indexes.indexname
 			), '')
 		FROM pg_indexes

@@ -39,13 +39,13 @@ func getTableIndexes(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 				indexname,
 				regexp_replace(
 					indexdef,
-					' ON (ONLY )?' || quote_ident(current_schema()) || '\.',
+					' ON (ONLY )?' || `+currentSchemaPrefixPattern+`,
 					' ON '
 				),
 				coalesce((
 					SELECT obj_description(c.oid, 'pg_class')
 					FROM pg_class c
-					WHERE c.relnamespace = current_schema()::regnamespace
+					WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
 					AND c.relname = pg_indexes.indexname
 				), '')
 			FROM pg_indexes
@@ -58,7 +58,7 @@ func getTableIndexes(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 				FROM pg_inherits i
 				JOIN pg_class child ON child.oid = i.inhrelid
 				WHERE child.relname = pg_indexes.indexname
-				AND child.relnamespace = current_schema()::regnamespace
+				AND child.relnamespace = quote_ident(current_schema())::regnamespace
 			)
 			ORDER BY indexname
 		`, func(rows *sql.Rows) (*PostgresIndex, error) {

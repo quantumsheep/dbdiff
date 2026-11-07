@@ -168,12 +168,12 @@ func (d *PostgresDriver) recreateFunctionDependents(ctx context.Context, functio
 		SELECT DISTINCT
 			CASE
 				WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
-					AND rule_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+					AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
 				ELSE 'blocker'
 			END AS kind,
 			CASE
 				WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
-					AND rule_class.relnamespace = current_schema()::regnamespace THEN rule_class.relname::text
+					AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN rule_class.relname::text
 				ELSE pg_describe_object(d.classid, d.objid, d.objsubid)
 			END AS name
 		FROM pg_depend d
@@ -182,7 +182,7 @@ func (d *PostgresDriver) recreateFunctionDependents(ctx context.Context, functio
 		LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
 		WHERE d.refclassid = 'pg_proc'::regclass
 		AND d.deptype IN ('n', 'a')
-		AND p.pronamespace = current_schema()::regnamespace
+		AND p.pronamespace = quote_ident(current_schema())::regnamespace
 		AND p.proname = $1
 		AND oidvectortypes(p.proargtypes) = $2
 		ORDER BY kind, name
@@ -224,7 +224,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
 			regexp_replace(
 				pg_get_functiondef(p.oid),
-				'^CREATE OR REPLACE (FUNCTION|PROCEDURE) ' || quote_ident(current_schema()) || '\.',
+				'^CREATE OR REPLACE (FUNCTION|PROCEDURE) ' || `+currentSchemaPrefixPattern+`,
 				'CREATE OR REPLACE \1 '
 			),
 			coalesce(obj_description(p.oid, 'pg_proc'), ''),
@@ -237,7 +237,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 				AND c.relkind IN ('r', 'p', 'f')
 			)
 		FROM pg_proc p
-		WHERE p.pronamespace = current_schema()::regnamespace
+		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
 		AND p.prokind IN ('f', 'p')
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'

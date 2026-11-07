@@ -168,7 +168,7 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 				a.attname,
 				regexp_replace(
 					format_type(a.atttypid, a.atttypmod),
-					'^' || quote_ident(current_schema()) || '\.',
+					'^' || `+currentSchemaPrefixPattern+`,
 					''
 				),
 				a.attnotnull,
@@ -300,24 +300,24 @@ func getColumnDependents(
 				CASE
 					WHEN index_class.oid IS NOT NULL THEN 'index'
 					WHEN table_constraint.oid IS NOT NULL THEN 'constraint'
-					WHEN foreign_key_class.relnamespace = current_schema()::regnamespace THEN 'foreign key'
+					WHEN foreign_key_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'foreign key'
 					WHEN foreign_key.oid IS NOT NULL THEN 'blocker'
 					WHEN table_trigger.oid IS NOT NULL THEN 'trigger'
 					WHEN table_policy.polrelid = d.refobjid THEN 'policy'
 					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
-						AND rule_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+						AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
 					WHEN table_policy.oid IS NOT NULL OR r.oid IS NOT NULL THEN 'blocker'
 				END AS kind,
 				CASE
 					WHEN index_class.oid IS NOT NULL THEN index_class.relname
 					WHEN table_constraint.oid IS NOT NULL THEN table_constraint.conname
-					WHEN foreign_key_class.relnamespace = current_schema()::regnamespace THEN foreign_key.conname
+					WHEN foreign_key_class.relnamespace = quote_ident(current_schema())::regnamespace THEN foreign_key.conname
 					WHEN foreign_key.oid IS NOT NULL THEN
 						format('constraint %I on %s', foreign_key.conname, foreign_key.conrelid::regclass)
 					WHEN table_trigger.oid IS NOT NULL THEN table_trigger.tgname
 					WHEN table_policy.polrelid = d.refobjid THEN table_policy.polname
 					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
-						AND rule_class.relnamespace = current_schema()::regnamespace THEN rule_class.relname
+						AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN rule_class.relname
 					WHEN table_policy.oid IS NOT NULL THEN
 						format('policy %I on %s', table_policy.polname, table_policy.polrelid::regclass)
 					WHEN r.rulename = '_RETURN' THEN format('view %s', r.ev_class::regclass)
@@ -377,13 +377,13 @@ func getTypeDependents(ctx context.Context, db *sql.DB, typeName string) ([]*Pos
 				CASE
 					WHEN d.deptype IN ('i', 'a') THEN NULL
 					WHEN column_class.relkind IN ('v', 'm')
-						AND column_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+						AND column_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
 					WHEN column_class.relkind IN ('r', 'p')
-						AND column_class.relnamespace = current_schema()::regnamespace THEN
+						AND column_class.relnamespace = quote_ident(current_schema())::regnamespace THEN
 						CASE WHEN column_attribute.attinhcount = 0 THEN 'column' END
-					WHEN default_class.relnamespace = current_schema()::regnamespace THEN 'default'
+					WHEN default_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'default'
 					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
-						AND rule_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+						AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
 					ELSE 'blocker'
 				END AS kind,
 				coalesce(column_class.relname, default_class.relname, rule_class.relname, '') AS table_name,
@@ -404,7 +404,7 @@ func getTypeDependents(ctx context.Context, db *sql.DB, typeName string) ([]*Pos
 				AND default_attribute.attnum = column_default.adnum
 			LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
 			LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
-			WHERE t.typnamespace = current_schema()::regnamespace
+			WHERE t.typnamespace = quote_ident(current_schema())::regnamespace
 			AND t.typname = $1
 		) dependents
 		WHERE kind IS NOT NULL

@@ -1394,7 +1394,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 				WHERE i.inhparent = c.oid AND NOT child.relispartition
 			)
 		FROM pg_class c
-		WHERE c.relnamespace = current_schema()::regnamespace
+		WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
 		AND c.relkind IN ('r', 'p')
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d

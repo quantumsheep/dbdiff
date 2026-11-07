@@ -44,7 +44,7 @@ func getTableTriggers(ctx context.Context, db *sql.DB, table *PostgresTable) err
 				tgname,
 				regexp_replace(
 					pg_get_triggerdef(oid),
-					' ON ' || quote_ident(current_schema()) || '\.',
+					' ON ' || `+currentSchemaPrefixPattern+`,
 					' ON '
 				),
 				CASE tgenabled

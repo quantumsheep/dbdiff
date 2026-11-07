@@ -27,15 +27,16 @@ func (r *PostgresRule) DropInstruction() *PostgresDropRuleInstruction {
 }
 
 // pg_rules reports no _RETURN rule, which is the implicit rule of a view.
+// The current schema comes first in the search path, so pg_rules writes the schema name only
+// before the table of the event. A replacement in the whole text also changes a string literal.
 func (d *PostgresDriver) GetTableRules(ctx context.Context, db *sql.DB, tableName string) ([]*PostgresRule, error) {
 	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			rulename,
 			regexp_replace(
 				definition,
-				'\m' || quote_ident(current_schema()) || '\.',
-				'',
-				'g'
+				'(\sON [A-Z]+ TO )' || `+currentSchemaPrefixPattern+`,
+				'\1'
 			)
 		FROM pg_rules
 		WHERE schemaname = current_schema() AND tablename = $1

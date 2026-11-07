@@ -258,7 +258,7 @@ func (d *PostgresDriver) GetSequences(ctx context.Context, db *sql.DB) ([]*Postg
 		FROM pg_sequences s
 		JOIN pg_class sequence_class ON sequence_class.relname = s.sequencename
 			AND sequence_class.relkind = 'S'
-			AND sequence_class.relnamespace = current_schema()::regnamespace
+			AND sequence_class.relnamespace = quote_ident(current_schema())::regnamespace
 		JOIN pg_sequence sequence_options ON sequence_options.seqrelid = sequence_class.oid
 		LEFT JOIN pg_depend owner ON owner.classid = 'pg_class'::regclass
 			AND owner.objid = sequence_class.oid

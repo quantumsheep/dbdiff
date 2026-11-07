@@ -137,7 +137,7 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 			CASE WHEN p.proparallel <> 'u' THEN p.proparallel::text ELSE '' END
 		FROM pg_aggregate a
 		JOIN pg_proc p ON p.oid = a.aggfnoid
-		WHERE p.pronamespace = current_schema()::regnamespace
+		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
 		)

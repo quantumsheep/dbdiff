@@ -67,7 +67,7 @@ func (m *TestingPostgresMigrator) TableNames() []string {
 	rows, err := m.Connection.QueryContext(m.tb.Context(), `
 		SELECT relname
 		FROM pg_class
-		WHERE relnamespace = current_schema()::regnamespace AND relkind = 'r'
+		WHERE relnamespace = quote_ident(current_schema())::regnamespace AND relkind = 'r'
 		ORDER BY relname;
 	`)
 	require.NoError(m.tb, err)

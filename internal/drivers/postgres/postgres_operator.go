@@ -102,7 +102,7 @@ func (d *PostgresDriver) GetOperators(ctx context.Context, db *sql.DB) ([]*Postg
 			o.oprcanhash,
 			o.oprcanmerge
 		FROM pg_operator o
-		WHERE o.oprnamespace = current_schema()::regnamespace
+		WHERE o.oprnamespace = quote_ident(current_schema())::regnamespace
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = o.oid AND d.deptype = 'e'
 		)

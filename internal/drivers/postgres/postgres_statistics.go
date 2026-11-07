@@ -53,12 +53,11 @@ func (d *PostgresDriver) GetStatistics(ctx context.Context, db *sql.DB) ([]*Post
 			stxname,
 			regexp_replace(
 				pg_get_statisticsobjdef(oid),
-				'\m' || quote_ident(current_schema()) || '\.',
-				'',
-				'g'
+				'^CREATE STATISTICS ' || `+currentSchemaPrefixPattern+`,
+				'CREATE STATISTICS '
 			)
 		FROM pg_statistic_ext
-		WHERE stxnamespace = current_schema()::regnamespace
+		WHERE stxnamespace = quote_ident(current_schema())::regnamespace
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d
 			WHERE d.objid = pg_statistic_ext.oid AND d.deptype = 'e'

@@ -151,7 +151,7 @@ func (d *PostgresDriver) GetViews(ctx context.Context, db *sql.DB) ([]*PostgresV
 			coalesce(obj_description(c.oid, 'pg_class'), '')
 		FROM pg_class c
 		WHERE c.relkind = 'v'
-		AND c.relnamespace = current_schema()::regnamespace
+		AND c.relnamespace = quote_ident(current_schema())::regnamespace
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d
 			WHERE d.objid = c.oid AND d.deptype = 'e'
@@ -204,7 +204,7 @@ func (d *PostgresDriver) GetViewColumns(
 		WHERE d.classid = 'pg_rewrite'::regclass
 		AND d.refclassid = 'pg_class'::regclass
 		AND d.refobjsubid > 0
-		AND view_class.relnamespace = current_schema()::regnamespace
+		AND view_class.relnamespace = quote_ident(current_schema())::regnamespace
 		AND view_class.relname = $1
 		AND view_class.oid <> d.refobjid
 		ORDER BY source_class.relname, source_attribute.attname
@@ -228,7 +228,7 @@ func (d *PostgresDriver) GetViewDependencyNames(ctx context.Context, db *sql.DB,
 		JOIN pg_class source_class ON source_class.oid = d.refobjid
 		WHERE d.classid = 'pg_rewrite'::regclass
 		AND d.refclassid = 'pg_class'::regclass
-		AND view_class.relnamespace = current_schema()::regnamespace
+		AND view_class.relnamespace = quote_ident(current_schema())::regnamespace
 		AND view_class.relname = $1
 		AND view_class.oid <> d.refobjid
 		ORDER BY source_class.relname

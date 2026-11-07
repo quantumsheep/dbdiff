@@ -32,7 +32,7 @@ var postgresHistoryDialect = internalmigrations.SQLDialect{
 	HistoryTableExistsQuery: `
 		SELECT EXISTS (
 			SELECT 1 FROM pg_class
-			WHERE relnamespace = current_schema()::regnamespace
+			WHERE relnamespace = quote_ident(current_schema())::regnamespace
 			AND relkind = 'r' AND relname = $1
 		);
 	`,
@@ -40,7 +40,7 @@ var postgresHistoryDialect = internalmigrations.SQLDialect{
 		SELECT EXISTS (
 			SELECT 1 FROM pg_attribute a
 			JOIN pg_class c ON c.oid = a.attrelid
-			WHERE c.relnamespace = current_schema()::regnamespace
+			WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
 			AND c.relname = $1
 			AND a.attname = 'dirty' AND NOT a.attisdropped
 		);

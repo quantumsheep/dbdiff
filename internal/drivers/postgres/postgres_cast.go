@@ -142,8 +142,8 @@ func (d *PostgresDriver) GetCasts(ctx context.Context, db *sql.DB) ([]*PostgresC
 		LEFT JOIN pg_type source_type ON source_type.oid = c.castsource
 		LEFT JOIN pg_type target_type ON target_type.oid = c.casttarget
 		WHERE c.oid >= 16384
-		AND (source_type.typnamespace = current_schema()::regnamespace
-			OR target_type.typnamespace = current_schema()::regnamespace)
+		AND (source_type.typnamespace = quote_ident(current_schema())::regnamespace
+			OR target_type.typnamespace = quote_ident(current_schema())::regnamespace)
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e'
 		)
