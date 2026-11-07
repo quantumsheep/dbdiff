@@ -49,6 +49,95 @@ func TestSQLiteColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CreateTableWithExpressionDefaults", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE t (
+				id INTEGER PRIMARY KEY,
+				sum INTEGER DEFAULT (1+1),
+				lowered TEXT DEFAULT (lower('A')),
+				negative INTEGER DEFAULT -1,
+				parenthesized INTEGER DEFAULT (2),
+				quoted TEXT DEFAULT 'it''s',
+				created TEXT DEFAULT CURRENT_TIMESTAMP
+			);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "t",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "sum",
+						Type: "INTEGER",
+						Default: sql.NullString{
+							String: "(1+1)",
+							Valid:  true,
+						},
+					},
+					{
+						Name: "lowered",
+						Type: "TEXT",
+						Default: sql.NullString{
+							String: "(lower('A'))",
+							Valid:  true,
+						},
+					},
+					{
+						Name: "negative",
+						Type: "INTEGER",
+						Default: sql.NullString{
+							String: "-1",
+							Valid:  true,
+						},
+					},
+					{
+						Name: "parenthesized",
+						Type: "INTEGER",
+						Default: sql.NullString{
+							String: "2",
+							Valid:  true,
+						},
+					},
+					{
+						Name: "quoted",
+						Type: "TEXT",
+						Default: sql.NullString{
+							String: "'it''s'",
+							Valid:  true,
+						},
+					},
+					{
+						Name: "created",
+						Type: "TEXT",
+						Default: sql.NullString{
+							String: "CURRENT_TIMESTAMP",
+							Valid:  true,
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnCurrent(`INSERT INTO t (id) VALUES (1);`)
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Len(t, rows, 1)
+		require.NotNil(t, rows[0]["created"])
+
+		delete(rows[0], "created")
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "sum": int64(2), "lowered": "a", "negative": int64(-1), "parenthesized": int64(2), "quoted": "it's"},
+		}, rows)
+	})
+
 	t.Run("RemoveColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

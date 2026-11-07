@@ -3,6 +3,7 @@ package driverssqlite
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
@@ -97,4 +98,25 @@ func (c *SQLiteColumn) Definition() string {
 	}
 
 	return value
+}
+
+// SQLite accepts a double-quoted string as a literal default, but it refuses it inside
+// parentheses as a value that is not constant.
+var literalDefaultPattern = regexp.MustCompile(`(?i)^(?:` +
+	`'(?:[^']|'')*'|"(?:[^"]|"")*"|x'[0-9a-f]*'|` +
+	`[+-]?(?:0x[0-9a-f]+|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]+)?)|` +
+	`null|true|false|current_time|current_date|current_timestamp` +
+	`)$`)
+
+// PRAGMA table_xinfo removes the parentheses around an expression default, but the
+// DEFAULT clause accepts an expression in parentheses only.
+func normalizedDefault(value sql.NullString) sql.NullString {
+	if !value.Valid || literalDefaultPattern.MatchString(value.String) {
+		return value
+	}
+
+	return sql.NullString{
+		String: "(" + value.String + ")",
+		Valid:  true,
+	}
 }

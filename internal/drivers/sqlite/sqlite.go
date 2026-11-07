@@ -421,7 +421,7 @@ func (d *SQLiteDriver) GetTableColumns(
 			Name:            name,
 			Type:            columnType,
 			NotNull:         isNotNull == 1,
-			Default:         defaultValue,
+			Default:         normalizedDefault(defaultValue),
 			GeneratedStored: hidden == storedGeneratedColumn,
 		}
 
