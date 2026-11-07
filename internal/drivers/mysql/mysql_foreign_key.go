@@ -30,10 +30,6 @@ func sameReferentialAction(rule string, otherRule string) bool {
 	return rule == otherRule || !withReferentialAction(rule) && !withReferentialAction(otherRule)
 }
 
-func (k *MySQLForeignKey) UsesColumn(columnName string) bool {
-	return slices.Contains(k.Columns, columnName)
-}
-
 func (k *MySQLForeignKey) Clause() string {
 	clause := fmt.Sprintf("CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)",
 		QuoteIdentifier(k.Name),

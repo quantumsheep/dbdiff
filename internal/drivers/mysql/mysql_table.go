@@ -3,6 +3,7 @@ package driversmysql
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/samber/lo"
@@ -99,6 +100,10 @@ type MySQLTableColumnsDiff struct {
 
 	// A recreated column is in Removed and in Added.
 	Recreated []string
+
+	// MySQL refuses a change of the type or of the collation of a column that a foreign key
+	// names. A retyped column is also in Modified.
+	Retyped []string
 }
 
 func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
@@ -124,8 +129,9 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 		}
 
 		// MySQL refuses a MODIFY COLUMN action that turns a plain column into a generated
-		// column, or that changes the storage of a generated column.
-		if generatedKindChanged(desiredColumn, currentColumn) {
+		// column, or that changes the storage of a generated column. MySQL also refuses the
+		// rename of a column that a generated column reads.
+		if generatedKindChanged(desiredColumn, currentColumn) || readsRenamedColumn(currentColumn, diff.RenamedFrom) {
 			diff.Removed = append(diff.Removed, currentColumn.Name)
 			diff.Added = append(diff.Added, desiredColumn.Name)
 			diff.Recreated = append(diff.Recreated, desiredColumn.Name)
@@ -134,6 +140,10 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 		}
 
 		diff.Modified = append(diff.Modified, desiredColumn.Name)
+
+		if desiredColumn.Type != currentColumn.Type || desiredColumn.Collation != currentColumn.Collation {
+			diff.Retyped = append(diff.Retyped, desiredColumn.Name)
+		}
 	}
 
 	for _, currentColumn := range other.Columns {
@@ -147,6 +157,52 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 	return diff
 }
 
+func readsRenamedColumn(column *MySQLColumn, renamedFrom map[string]string) bool {
+	return column.IsGenerated() && lo.SomeBy(lo.Values(renamedFrom), func(oldName string) bool {
+		return strings.Contains(column.GeneratedExpression, QuoteIdentifier(oldName))
+	})
+}
+
+func (d *MySQLTableColumnsDiff) changesColumn(name string) bool {
+	if d == nil {
+		return false
+	}
+
+	return slices.Contains(d.Retyped, name) || slices.Contains(d.Recreated, name)
+}
+
+func (d *MySQLTableColumnsDiff) newNames(names []string) []string {
+	if d == nil {
+		return names
+	}
+
+	newNameByOldName := lo.Invert(d.RenamedFrom)
+
+	return lo.Map(names, func(name string, _ int) string {
+		return lo.ValueOr(newNameByOldName, name, name)
+	})
+}
+
+func (d *MySQLTableColumnsDiff) renameInKeys(keys []string) []string {
+	var replacements []string
+
+	for newName, oldName := range d.RenamedFrom {
+		replacements = append(replacements, QuoteIdentifier(oldName), QuoteIdentifier(newName))
+	}
+
+	replacer := strings.NewReplacer(replacements...)
+
+	// MySQL refuses the rename of a column that an expression key reads, so the diff keeps
+	// the old text of an expression key and the index changes.
+	return lo.Map(keys, func(key string, _ int) string {
+		if strings.HasPrefix(key, "(") {
+			return key
+		}
+
+		return replacer.Replace(key)
+	})
+}
+
 func columnName(column *MySQLColumn) string {
 	return column.Name
 }
@@ -156,13 +212,83 @@ func generatedKindChanged(desired *MySQLColumn, current *MySQLColumn) bool {
 		desired.GeneratedStored != current.GeneratedStored
 }
 
-// MySQL refuses the removal of a column while a foreign key, a check constraint, or an
-// explicit index names the column, so those removals come before the column actions. The
+// A foreign key ties two tables, so the diff of all tables runs every DropDependents
+// instruction before every Alter instruction, and every AddDependents instruction after.
+type MySQLTableDiff struct {
+	DropDependents []driversshared.Instruction
+	Alter          []driversshared.Instruction
+	AddDependents  []driversshared.Instruction
+}
+
+// MySQL refuses the removal or the rename of a column while a foreign key, a check
+// constraint, an expression key, or a generated column reads the column, so those removals
+// come before the column actions. The constraint names are unique in the schema, so the
+// removals of the foreign keys and of the check constraints come before every creation. The
 // additions of the keys come last, so a new key reads the new columns.
-func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, error) {
-	columnsDiff := t.DiffColumns(other)
+func (t *MySQLTable) DiffTable(
+	other *MySQLTable,
+	columnsDiffs map[string]*MySQLTableColumnsDiff,
+) (*MySQLTableDiff, error) {
+	columnsDiff := columnsDiffs[t.Name]
+
+	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other, columnsDiffs)
+	checkAdditions, checkRemovals := t.checkConstraintChanges(other, columnsDiff.Recreated)
+	indexAdditions, indexRemovals := t.indexChanges(other, columnsDiff)
+
+	triggerAdditions, triggerRemovals, err := driversshared.DiffByKey(t.Triggers, other.Triggers, diffTriggerRules())
+	if err != nil {
+		return nil, err
+	}
 
 	var instructions []driversshared.Instruction
+
+	instructions = append(instructions, triggerRemovals...)
+	instructions = append(instructions, indexRemovals...)
+
+	// MySQL refuses AUTO_INCREMENT on a column outside of every key, so the change that
+	// removes the keyword comes before the removal of the primary key, and the other
+	// changes come after the addition of the primary key.
+	var lateModifications []*MySQLColumn
+
+	for _, columnName := range columnsDiff.Modified {
+		column, found := t.ColumnByName(columnName)
+		if !found {
+			return nil, fmt.Errorf("internal error: modified column %s not found in table %s", columnName, t.Name)
+		}
+
+		currentColumn, foundInCurrent := other.ColumnByName(columnName)
+		if !column.AutoIncrement && foundInCurrent && currentColumn.AutoIncrement {
+			instructions = append(instructions, &MySQLAlterTableInstruction{
+				Name: t.Name,
+				Action: &MySQLModifyColumnAction{
+					Column: column,
+				},
+			})
+
+			continue
+		}
+
+		lateModifications = append(lateModifications, column)
+	}
+
+	// The drop of the last column of the primary key drops the key, so the drop of the key
+	// comes before the drops of the columns.
+	primaryKeyChanged := !slices.Equal(t.PrimaryKey, columnsDiff.newNames(other.PrimaryKey))
+	if primaryKeyChanged && len(other.PrimaryKey) > 0 {
+		instructions = append(instructions, &MySQLAlterTableInstruction{
+			Name:   t.Name,
+			Action: &MySQLDropPrimaryKeyAction{},
+		})
+	}
+
+	for _, columnName := range columnsDiff.Removed {
+		instructions = append(instructions, &MySQLAlterTableInstruction{
+			Name: t.Name,
+			Action: &MySQLDropColumnAction{
+				ColumnName: columnName,
+			},
+		})
+	}
 
 	// The map gives no stable order. The loop walks the desired columns instead, so the
 	// rename statements follow the shape of the desired table on every run.
@@ -180,20 +306,6 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 			},
 		})
 	}
-
-	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other, columnsDiff.Recreated)
-	checkAdditions, checkRemovals := t.checkConstraintChanges(other, columnsDiff.Recreated)
-	indexAdditions, indexRemovals := t.indexChanges(other, columnsDiff.Recreated)
-
-	triggerAdditions, triggerRemovals, err := driversshared.DiffByKey(t.Triggers, other.Triggers, diffTriggerRules())
-	if err != nil {
-		return nil, err
-	}
-
-	instructions = append(instructions, triggerRemovals...)
-	instructions = append(instructions, foreignKeyRemovals...)
-	instructions = append(instructions, checkRemovals...)
-	instructions = append(instructions, indexRemovals...)
 
 	enginesEqual := (t.EngineIsDefault && other.EngineIsDefault) || t.Engine == other.Engine
 	if !enginesEqual {
@@ -230,8 +342,10 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 			}
 
 			instructions = append(instructions, &MySQLAlterTableInstruction{
-				Name:   t.Name,
-				Action: &MySQLModifyColumnAction{Column: column},
+				Name: t.Name,
+				Action: &MySQLModifyColumnAction{
+					Column: column,
+				},
 			})
 		}
 	}
@@ -251,13 +365,6 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 		})
 	}
 
-	for _, columnName := range columnsDiff.Removed {
-		instructions = append(instructions, &MySQLAlterTableInstruction{
-			Name:   t.Name,
-			Action: &MySQLDropColumnAction{ColumnName: columnName},
-		})
-	}
-
 	for _, columnName := range columnsDiff.Added {
 		column, found := t.ColumnByName(columnName)
 		if !found {
@@ -270,66 +377,38 @@ func (t *MySQLTable) DiffTable(other *MySQLTable) ([]driversshared.Instruction, 
 		})
 	}
 
-	// MySQL refuses AUTO_INCREMENT on a column outside of every key, so the change that
-	// removes the keyword comes before the removal of the primary key, and the other
-	// changes come after the addition of the primary key.
-	var lateModifications []*MySQLColumn
-
-	for _, columnName := range columnsDiff.Modified {
-		column, found := t.ColumnByName(columnName)
-		if !found {
-			return nil, fmt.Errorf("internal error: modified column %s not found in table %s", columnName, t.Name)
-		}
-
-		currentColumn, foundInCurrent := other.ColumnByName(columnName)
-		if !column.AutoIncrement && foundInCurrent && currentColumn.AutoIncrement {
-			instructions = append(instructions, &MySQLAlterTableInstruction{
-				Name:   t.Name,
-				Action: &MySQLModifyColumnAction{Column: column},
-			})
-
-			continue
-		}
-
-		lateModifications = append(lateModifications, column)
-	}
-
-	if !slices.Equal(t.PrimaryKey, other.PrimaryKey) {
-		if len(other.PrimaryKey) > 0 {
-			instructions = append(instructions, &MySQLAlterTableInstruction{
-				Name:   t.Name,
-				Action: &MySQLDropPrimaryKeyAction{},
-			})
-		}
-
-		if len(t.PrimaryKey) > 0 {
-			instructions = append(instructions, &MySQLAlterTableInstruction{
-				Name: t.Name,
-				Action: &MySQLAddPrimaryKeyAction{
-					Columns: t.PrimaryKey,
-				},
-			})
-		}
+	if primaryKeyChanged && len(t.PrimaryKey) > 0 {
+		instructions = append(instructions, &MySQLAlterTableInstruction{
+			Name: t.Name,
+			Action: &MySQLAddPrimaryKeyAction{
+				Columns: t.PrimaryKey,
+			},
+		})
 	}
 
 	for _, column := range lateModifications {
 		instructions = append(instructions, &MySQLAlterTableInstruction{
-			Name:   t.Name,
-			Action: &MySQLModifyColumnAction{Column: column},
+			Name: t.Name,
+			Action: &MySQLModifyColumnAction{
+				Column: column,
+			},
 		})
 	}
 
 	instructions = append(instructions, indexAdditions...)
 	instructions = append(instructions, checkAdditions...)
-	instructions = append(instructions, foreignKeyAdditions...)
 	instructions = append(instructions, triggerAdditions...)
 
-	return instructions, nil
+	return &MySQLTableDiff{
+		DropDependents: append(foreignKeyRemovals, checkRemovals...),
+		Alter:          instructions,
+		AddDependents:  foreignKeyAdditions,
+	}, nil
 }
 
 // The drop of a column drops its index, and MySQL refuses the drop of a column that a check
-// constraint or a foreign key names. So the diff drops every object that uses a recreated
-// column before the drop of the column, and adds the object again after the column.
+// constraint names. So the diff drops every object that uses a recreated column before the
+// drop of the column, and adds the object again after the column.
 func equalAndKept[T interface{ UsesColumn(columnName string) bool }](
 	equal func(T, T) bool,
 	recreatedColumns []string,
@@ -339,15 +418,29 @@ func equalAndKept[T interface{ UsesColumn(columnName string) bool }](
 	}
 }
 
+// MySQL renames the columns of a foreign key with the columns. MySQL refuses a change of a
+// column type while a foreign key names the column, on either side of the key.
 func (t *MySQLTable) foreignKeyChanges(
 	other *MySQLTable,
-	recreatedColumns []string,
+	columnsDiffs map[string]*MySQLTableColumnsDiff,
 ) ([]driversshared.Instruction, []driversshared.Instruction) {
+	columnsDiff := columnsDiffs[t.Name]
+
 	return driversshared.ReplaceByKey(t.ForeignKeys, other.ForeignKeys,
 		func(foreignKey *MySQLForeignKey) string {
 			return foreignKey.Name
 		},
-		equalAndKept((*MySQLForeignKey).Equal, recreatedColumns),
+		func(desired *MySQLForeignKey, current *MySQLForeignKey) bool {
+			referencedColumnsDiff := columnsDiffs[desired.ReferencedTable]
+
+			renamed := *current
+			renamed.Columns = columnsDiff.newNames(current.Columns)
+			renamed.ReferencedColumns = referencedColumnsDiff.newNames(current.ReferencedColumns)
+
+			return desired.Equal(&renamed) &&
+				!slices.ContainsFunc(desired.Columns, columnsDiff.changesColumn) &&
+				!slices.ContainsFunc(desired.ReferencedColumns, referencedColumnsDiff.changesColumn)
+		},
 		func(foreignKey *MySQLForeignKey) driversshared.Instruction {
 			return &MySQLAlterTableInstruction{
 				Name:   t.Name,
@@ -385,9 +478,10 @@ func (t *MySQLTable) checkConstraintChanges(
 		})
 }
 
+// MySQL renames the keys of an index with the columns.
 func (t *MySQLTable) indexChanges(
 	other *MySQLTable,
-	recreatedColumns []string,
+	columnsDiff *MySQLTableColumnsDiff,
 ) ([]driversshared.Instruction, []driversshared.Instruction) {
 	// The ADD of a foreign key builds the index of the key by itself, like the CREATE
 	// TABLE path of IndexInstructions. The current schema does not hold such an index, so the
@@ -405,7 +499,12 @@ func (t *MySQLTable) indexChanges(
 		func(index *MySQLIndex) string {
 			return index.Name
 		},
-		equalAndKept((*MySQLIndex).Equal, recreatedColumns),
+		equalAndKept(func(desired *MySQLIndex, current *MySQLIndex) bool {
+			renamed := *current
+			renamed.Keys = columnsDiff.renameInKeys(current.Keys)
+
+			return desired.Equal(&renamed)
+		}, columnsDiff.Recreated),
 		func(index *MySQLIndex) driversshared.Instruction {
 			return index.CreateInstruction()
 		},

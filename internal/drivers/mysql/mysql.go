@@ -227,6 +227,31 @@ func (d *MySQLDriver) DiffTables(
 	desiredTables []*MySQLTable,
 	currentTables []*MySQLTable,
 ) ([]driversshared.Instruction, error) {
+	columnsDiffs := map[string]*MySQLTableColumnsDiff{}
+
+	for _, desiredTable := range desiredTables {
+		currentTable, found := lo.Find(currentTables, func(table *MySQLTable) bool {
+			return table.Name == desiredTable.Name
+		})
+		if found {
+			columnsDiffs[desiredTable.Name] = desiredTable.DiffColumns(currentTable)
+		}
+	}
+
+	var dropDependents []driversshared.Instruction
+	var addDependents []driversshared.Instruction
+
+	desiredForeignKeyNames := lo.FlatMap(desiredTables, func(table *MySQLTable, _ int) []string {
+		return lo.Map(table.ForeignKeys, func(foreignKey *MySQLForeignKey, _ int) string {
+			return foreignKey.Name
+		})
+	})
+	desiredCheckNames := lo.FlatMap(desiredTables, func(table *MySQLTable, _ int) []string {
+		return lo.Map(table.CheckConstraints, func(check *MySQLCheckConstraint, _ int) string {
+			return check.Name
+		})
+	})
+
 	additions, removals, err := driversshared.DiffByKey(desiredTables, currentTables, driversshared.DiffRules[*MySQLTable]{
 		Key: func(table *MySQLTable) string {
 			return table.Name
@@ -235,9 +260,41 @@ func (d *MySQLDriver) DiffTables(
 			return table.Instructions()
 		},
 		Change: func(desired *MySQLTable, current *MySQLTable) ([]driversshared.Instruction, error) {
-			return desired.DiffTable(current)
+			tableDiff, err := desired.DiffTable(current, columnsDiffs)
+			if err != nil {
+				return nil, err
+			}
+
+			dropDependents = append(dropDependents, tableDiff.DropDependents...)
+			addDependents = append(addDependents, tableDiff.AddDependents...)
+
+			return tableDiff.Alter, nil
 		},
+		// The constraint names are unique in the schema, and the table drops come last. So a
+		// name that a desired table takes again must be free before the creations.
 		Drop: func(table *MySQLTable) []driversshared.Instruction {
+			for _, foreignKey := range table.ForeignKeys {
+				if slices.Contains(desiredForeignKeyNames, foreignKey.Name) {
+					dropDependents = append(dropDependents, &MySQLAlterTableInstruction{
+						Name: table.Name,
+						Action: &MySQLDropForeignKeyAction{
+							Name: foreignKey.Name,
+						},
+					})
+				}
+			}
+
+			for _, check := range table.CheckConstraints {
+				if slices.Contains(desiredCheckNames, check.Name) {
+					dropDependents = append(dropDependents, &MySQLAlterTableInstruction{
+						Name: table.Name,
+						Action: &MySQLDropCheckConstraintAction{
+							Name: check.Name,
+						},
+					})
+				}
+			}
+
 			return []driversshared.Instruction{&MySQLDropTableInstruction{
 				Name: table.Name,
 			}}
@@ -247,7 +304,10 @@ func (d *MySQLDriver) DiffTables(
 		return nil, err
 	}
 
-	return append(additions, removals...), nil
+	instructions := append(dropDependents, additions...)
+	instructions = append(instructions, addDependents...)
+
+	return append(instructions, removals...), nil
 }
 
 // The creation order and the removal order of the tables read no dependency, so a foreign
@@ -265,7 +325,8 @@ func needsForeignKeyChecksOff(desiredTables []*MySQLTable, currentTables []*MySQ
 			return true
 		}
 
-		// A kept table can gain a key to a table that another instruction creates later.
+		// A kept table can gain a key to a new table. The new table holds no row before the
+		// data diff, so a check of the current rows can fail.
 		for _, foreignKey := range desiredTable.ForeignKeys {
 			_, referencedExists := tableByName(currentTables, foreignKey.ReferencedTable)
 			if !referencedExists {

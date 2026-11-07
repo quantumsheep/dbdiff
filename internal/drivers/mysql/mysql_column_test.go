@@ -91,6 +91,133 @@ func TestMySQLColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", ""))
 	})
 
+	t.Run("RenameColumnWithACheckAndAnIndex", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE orders (
+				id int NOT NULL,
+				quantity int,
+				PRIMARY KEY (id),
+				KEY idx_quantity (quantity),
+				CONSTRAINT quantity_positive CHECK (quantity > 0)
+			);
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE orders (
+				id int NOT NULL,
+				qty int,
+				PRIMARY KEY (id),
+				KEY idx_quantity (qty),
+				CONSTRAINT quantity_positive CHECK (qty > 0)
+			);
+			INSERT INTO orders VALUES (1, 3);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "orders",
+				Action: &MySQLDropCheckConstraintAction{
+					Name: "quantity_positive",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "orders",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "qty",
+					NewColumnName: "quantity",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "orders",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:       "quantity_positive",
+						Expression: "(`quantity` > 0)",
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "quantity": int64(3)},
+		}, driver.FetchAllFromCurrent("orders", "ORDER BY id"))
+	})
+
+	t.Run("RenameAnAutoIncrementPrimaryKeyColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (user_id int NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (user_id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users (name) VALUES ('Alice');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "id",
+					NewColumnName: "user_id",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"user_id": int64(1), "name": "Alice"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY user_id"))
+	})
+
+	t.Run("RenameAColumnThatAGeneratedColumnReads", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE prices (
+				id int NOT NULL,
+				net_price int,
+				gross int GENERATED ALWAYS AS (net_price * 2) VIRTUAL,
+				PRIMARY KEY (id)
+			);
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE prices (
+				id int NOT NULL,
+				net int,
+				gross int GENERATED ALWAYS AS (net * 2) VIRTUAL,
+				PRIMARY KEY (id)
+			);
+			INSERT INTO prices (id, net) VALUES (1, 5);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "gross",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "net",
+					NewColumnName: "net_price",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "prices",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:                "gross",
+						Type:                "int",
+						GeneratedExpression: "(`net_price` * 2)",
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "net_price": int64(5), "gross": int64(10)},
+		}, driver.FetchAllFromCurrent("prices", "ORDER BY id"))
+	})
+
 	t.Run("ExpressionDefaultAndOnUpdate", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -355,6 +482,59 @@ func TestMySQLColumn(t *testing.T) {
 }
 
 func TestMariaDBColumn(t *testing.T) {
+	t.Run("RenameColumnWithACheckAndAnIndex", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE orders (
+				id int NOT NULL,
+				quantity int,
+				PRIMARY KEY (id),
+				KEY idx_quantity (quantity),
+				CONSTRAINT quantity_positive CHECK (quantity > 0)
+			);
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE orders (
+				id int NOT NULL,
+				qty int,
+				PRIMARY KEY (id),
+				KEY idx_quantity (qty),
+				CONSTRAINT quantity_positive CHECK (qty > 0)
+			);
+			INSERT INTO orders VALUES (1, 3);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "orders",
+				Action: &MySQLDropCheckConstraintAction{
+					Name: "quantity_positive",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "orders",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "qty",
+					NewColumnName: "quantity",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "orders",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:       "quantity_positive",
+						Expression: "`quantity` > 0",
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "quantity": int64(3)},
+		}, driver.FetchAllFromCurrent("orders", "ORDER BY id"))
+	})
+
 	t.Run("CreateTableWithDefaults", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 

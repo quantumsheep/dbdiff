@@ -4,9 +4,41 @@ import (
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMySQLIndex(t *testing.T) {
+	t.Run("RenameColumnOfAFunctionalIndex", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, name varchar(20), PRIMARY KEY (id), KEY upper_name ((upper(name))));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, nm varchar(20), PRIMARY KEY (id), KEY upper_name ((upper(nm))));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (1, 'alice');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLDropIndexInstruction{
+				Name:      "upper_name",
+				TableName: "users",
+			},
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "nm",
+					NewColumnName: "name",
+				},
+			},
+			&MySQLCreateIndexInstruction{
+				Name:      "upper_name",
+				TableName: "users",
+				Keys:      []string{"(upper(`name`))"},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "alice"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
+	})
+
 	t.Run("CreateIndex", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
