@@ -201,6 +201,34 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, desiredPath string, currentPath
 	return testingDriver
 }
 
+func recreationPrologue() []driversshared.Instruction {
+	return []driversshared.Instruction{
+		&SQLitePragmaForeignKeysInstruction{},
+		&SQLiteSavepointInstruction{},
+	}
+}
+
+func recreationEpilogue(recreatedTableNames ...string) []driversshared.Instruction {
+	return []driversshared.Instruction{
+		&SQLiteForeignKeyCheckInstruction{
+			Step: createForeignKeyCheckTable,
+		},
+		&SQLiteForeignKeyCheckInstruction{
+			Step:                countForeignKeyViolations,
+			RecreatedTableNames: recreatedTableNames,
+		},
+		&SQLiteForeignKeyCheckInstruction{
+			Step: dropForeignKeyCheckTable,
+		},
+		&SQLiteSavepointInstruction{
+			Release: true,
+		},
+		&SQLitePragmaForeignKeysInstruction{
+			Enabled: true,
+		},
+	}
+}
+
 func recreated(tableName string, instructions ...driversshared.Instruction) []driversshared.Instruction {
 	wrapped := make([]driversshared.Instruction, len(instructions))
 

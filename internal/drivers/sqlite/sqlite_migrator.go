@@ -36,8 +36,6 @@ type SQLiteMigrator struct {
 }
 
 func NewSQLiteMigrator(path string) (*SQLiteMigrator, error) {
-	// The name holds no foreign_keys pragma. A recreation of a table drops one table
-	// and renames another table, and PRAGMA foreign_keys does nothing inside a transaction.
 	connection, err := sql.Open("sqlite", TrimSQLitePrefix(path))
 	if err != nil {
 		return nil, err
@@ -57,6 +55,20 @@ func NewSQLiteMigrator(path string) (*SQLiteMigrator, error) {
 
 func (m *SQLiteMigrator) Close() error {
 	return m.Connection.Close()
+}
+
+// A recreation of a table drops a table that other tables can name. If the enforcement of the
+// foreign keys is on, the DROP TABLE statement deletes the rows of each child table with ON
+// DELETE CASCADE. The PRAGMA statement of the file does nothing inside the transaction, and
+// the name of the database can turn the enforcement on. SetMaxOpenConns(1) makes the PRAGMA
+// statement and the transaction use one connection. A generated file checks the foreign keys.
+func (m *SQLiteMigrator) Begin(ctx context.Context) (internalmigrations.Transaction, error) {
+	err := m.Exec(ctx, "PRAGMA foreign_keys = OFF;")
+	if err != nil {
+		return nil, err
+	}
+
+	return m.SQLMigrator.Begin(ctx)
 }
 
 func (m *SQLiteMigrator) SupportsTransactionalDDL() bool {

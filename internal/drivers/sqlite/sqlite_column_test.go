@@ -368,9 +368,7 @@ func TestSQLiteColumn(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -404,9 +402,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "users"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
@@ -436,9 +432,7 @@ func TestSQLiteColumn(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -467,9 +461,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -498,9 +490,7 @@ func TestSQLiteColumn(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -530,9 +520,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "users"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
@@ -562,9 +550,7 @@ func TestSQLiteColumn(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -593,9 +579,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "users"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
@@ -651,9 +635,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (a INTEGER, id INTEGER PRIMARY KEY);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -682,9 +664,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY a")
@@ -706,9 +686,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT UNIQUE);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -738,9 +716,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -758,9 +734,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT NOT NULL);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -790,9 +764,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 	})
 
@@ -807,9 +779,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c INTEGER DEFAULT (1+1));`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -842,9 +812,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -865,9 +833,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT DEFAULT CURRENT_TIMESTAMP);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -900,9 +866,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -922,9 +886,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (c TEXT);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -948,9 +910,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "")
@@ -971,13 +931,9 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreatedTableTWithIDOnly(),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -999,13 +955,9 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreatedTableTWithIDOnly(),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -1027,13 +979,9 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreatedTableTWithIDOnly(),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -1059,13 +1007,9 @@ func TestSQLiteColumn(t *testing.T) {
 			CREATE TABLE t (id INTEGER PRIMARY KEY);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreatedTableTWithIDOnly(),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -1173,9 +1117,7 @@ func TestSQLiteColumn(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("measures",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -1205,9 +1147,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "measures"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("measures"),
 		))
 
 		rows := driver.FetchAllFromCurrent("measures", "")
@@ -1240,9 +1180,7 @@ func TestSQLiteColumn(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("measures",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -1276,9 +1214,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "measures"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("measures"),
 		))
 
 		rows := driver.FetchAllFromCurrent("measures", "")
@@ -1310,9 +1246,7 @@ func TestSQLiteColumn(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("measures",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -1342,9 +1276,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "measures"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("measures"),
 		))
 
 		rows := driver.FetchAllFromCurrent("measures", "")
@@ -1392,9 +1324,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT NOT NULL DEFAULT '');`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -1434,9 +1364,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		require.Equal(t, []map[string]any{
@@ -1463,9 +1391,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, c TEXT NOT NULL DEFAULT '');`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -1505,9 +1431,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		require.Equal(t, []map[string]any{
@@ -1530,9 +1454,7 @@ func TestSQLiteColumn(t *testing.T) {
 		`)
 		driver.ExecOnDesired(`CREATE TABLE people (name TEXT COLLATE NOCASE);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("people",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -1557,9 +1479,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("people"),
 		))
 
 		rows := driver.FetchAllFromCurrent("people", "")
@@ -1616,9 +1536,7 @@ func TestSQLiteColumn(t *testing.T) {
 		`)
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -1644,9 +1562,7 @@ func TestSQLiteColumn(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "")
@@ -1677,13 +1593,9 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreatedTableTWithIDOnly(),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -1703,13 +1615,9 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreatedTableTWithIDOnly(),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
@@ -1729,13 +1637,9 @@ func TestSQLiteColumn(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreatedTableTWithIDOnly(),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")

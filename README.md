@@ -48,9 +48,11 @@ dbdiff needs no C compiler. The SQLite driver supports the virtual table modules
 `dbdiff diff` changes no database. To apply its output, send it to the client of the engine:
 
 ```bash
-dbdiff diff current.sqlite schema.sql | sqlite3 current.sqlite
+dbdiff diff current.sqlite schema.sql | sqlite3 -bail current.sqlite
 dbdiff diff postgres://localhost:5432/current postgres://localhost:5432/desired
 ```
+
+For SQLite, use `-bail`. If a statement of a table recreation fails, `-bail` stops the script, and SQLite rolls back the recreation. Without `-bail`, the script continues after the error.
 
 > [!CAUTION]
 > Read the output before you apply it. It can drop tables, columns, and rows.

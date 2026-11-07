@@ -162,6 +162,34 @@ func TestSQLiteInstructions(t *testing.T) {
 			(&SQLitePragmaForeignKeysInstruction{Enabled: true}).String())
 	})
 
+	t.Run("SQLiteSavepoint", func(t *testing.T) {
+		require.Equal(t, `SAVEPOINT "dbdiff_recreation";`,
+			(&SQLiteSavepointInstruction{}).String())
+		require.Equal(t, `RELEASE "dbdiff_recreation";`,
+			(&SQLiteSavepointInstruction{
+				Release: true,
+			}).String())
+	})
+
+	t.Run("SQLiteForeignKeyCheck", func(t *testing.T) {
+		require.Equal(t,
+			`CREATE TEMP TABLE "dbdiff_foreign_key_check" ("violations" INTEGER CONSTRAINT "a_foreign_key_is_broken" CHECK ("violations" = 0));`,
+			(&SQLiteForeignKeyCheckInstruction{
+				Step: createForeignKeyCheckTable,
+			}).String())
+		require.Equal(t,
+			`INSERT INTO "dbdiff_foreign_key_check" ("violations") SELECT count(*) FROM pragma_foreign_key_check `+
+				`WHERE "table" COLLATE NOCASE IN ('users', 'it''s') OR "parent" COLLATE NOCASE IN ('users', 'it''s');`,
+			(&SQLiteForeignKeyCheckInstruction{
+				Step:                countForeignKeyViolations,
+				RecreatedTableNames: []string{"users", "it's"},
+			}).String())
+		require.Equal(t, `DROP TABLE "dbdiff_foreign_key_check";`,
+			(&SQLiteForeignKeyCheckInstruction{
+				Step: dropForeignKeyCheckTable,
+			}).String())
+	})
+
 	t.Run("SQLiteDeleteSequence", func(t *testing.T) {
 		require.Equal(t, `DELETE FROM sqlite_sequence WHERE name = '_it''s_temp';`,
 			(&SQLiteDeleteSequenceInstruction{TableName: "_it's_temp"}).String())
@@ -549,6 +577,22 @@ func TestSQLiteInstructionComments(t *testing.T) {
 		}
 
 		require.Equal(t, `Create the view "active_users"`, instruction.Comment())
+	})
+
+	t.Run("SQLiteSavepoint", func(t *testing.T) {
+		require.Equal(t, "Start the transaction of the recreation of the tables",
+			(&SQLiteSavepointInstruction{}).Comment())
+		require.Equal(t, "Commit the recreation of the tables",
+			(&SQLiteSavepointInstruction{
+				Release: true,
+			}).Comment())
+	})
+
+	t.Run("SQLiteForeignKeyCheck", func(t *testing.T) {
+		require.Equal(t, "Stop if a foreign key is broken",
+			(&SQLiteForeignKeyCheckInstruction{
+				Step: countForeignKeyViolations,
+			}).Comment())
 	})
 
 	t.Run("SQLiteSequence", func(t *testing.T) {

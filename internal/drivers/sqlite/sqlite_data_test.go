@@ -439,9 +439,7 @@ func TestSQLiteData(t *testing.T) {
 		driver.ExecOnDesired(`CREATE TABLE items (a INTEGER, b INTEGER PRIMARY KEY);`)
 		driver.ExecOnDesired(`INSERT INTO items (a, b) VALUES (1, 2);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("items",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -474,8 +472,8 @@ func TestSQLiteData(t *testing.T) {
 				&driversshared.SQLCommentInstruction{
 					Text: `The table "items" holds another primary key in the current schema, so dbdiff compares no row of it.`,
 				},
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
 			},
+			recreationEpilogue("items"),
 		))
 	})
 

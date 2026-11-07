@@ -72,10 +72,35 @@ func (d *SQLiteDriver) Diff(
 	}
 
 	// SQLite refuses the DROP TABLE of a recreation while another table names the
-	// dropped table and the enforcement of the foreign keys is on.
-	if holdsTableRecreation(instructions) {
-		instructions = append([]driversshared.Instruction{&SQLitePragmaForeignKeysInstruction{}}, instructions...)
-		instructions = append(instructions, &SQLitePragmaForeignKeysInstruction{Enabled: true})
+	// dropped table and the enforcement of the foreign keys is on. PRAGMA foreign_keys does
+	// nothing inside a transaction, so it comes before the savepoint. With the enforcement
+	// off, only the check finds a broken foreign key, so it comes before the release.
+	recreatedTableNames := recreatedTableNames(instructions)
+	if len(recreatedTableNames) > 0 {
+		instructions = slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+				&SQLiteSavepointInstruction{},
+			},
+			instructions,
+			[]driversshared.Instruction{
+				&SQLiteForeignKeyCheckInstruction{
+					Step: createForeignKeyCheckTable,
+				},
+				&SQLiteForeignKeyCheckInstruction{
+					Step:                countForeignKeyViolations,
+					RecreatedTableNames: recreatedTableNames,
+				},
+				&SQLiteForeignKeyCheckInstruction{
+					Step: dropForeignKeyCheckTable,
+				},
+				&SQLiteSavepointInstruction{
+					Release: true,
+				},
+				&SQLitePragmaForeignKeysInstruction{
+					Enabled: true,
+				},
+			})
 	}
 
 	return instructions, nil
@@ -126,12 +151,17 @@ func identifierKey(name string) string {
 	}, name)
 }
 
-func holdsTableRecreation(instructions []driversshared.Instruction) bool {
-	return lo.SomeBy(instructions, func(instruction driversshared.Instruction) bool {
-		_, isRecreation := instruction.(*SQLiteTableRecreationInstruction)
+func recreatedTableNames(instructions []driversshared.Instruction) []string {
+	var names []string
 
-		return isRecreation
-	})
+	for _, instruction := range instructions {
+		recreation, isRecreation := instruction.(*SQLiteTableRecreationInstruction)
+		if isRecreation && !slices.Contains(names, recreation.TableName) {
+			names = append(names, recreation.TableName)
+		}
+	}
+
+	return names
 }
 
 func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruction, error) {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 type SQLiteTableRecreationInstruction struct {
@@ -239,4 +240,76 @@ func (i *SQLiteCopySequenceInstruction) String() string {
 
 func (i *SQLiteCopySequenceInstruction) Comment() string {
 	return driversshared.ObjectComment("Modify", "AUTOINCREMENT counter of the table", i.ToTableName)
+}
+
+const recreationSavepointName = "dbdiff_recreation"
+
+// A SAVEPOINT statement outside a transaction starts a transaction, and inside a transaction
+// it nests. The statement thus works in the sqlite3 shell and in the transaction of the
+// migrate command, where a BEGIN statement fails.
+type SQLiteSavepointInstruction struct {
+	Release bool
+}
+
+func (i *SQLiteSavepointInstruction) String() string {
+	if i.Release {
+		return "RELEASE " + driversshared.QuoteIdentifier(recreationSavepointName) + ";"
+	}
+
+	return "SAVEPOINT " + driversshared.QuoteIdentifier(recreationSavepointName) + ";"
+}
+
+func (i *SQLiteSavepointInstruction) Comment() string {
+	if i.Release {
+		return "Commit the recreation of the tables"
+	}
+
+	return "Start the transaction of the recreation of the tables"
+}
+
+type foreignKeyCheckStep int
+
+const (
+	createForeignKeyCheckTable foreignKeyCheckStep = iota
+	countForeignKeyViolations
+	dropForeignKeyCheckTable
+)
+
+const (
+	foreignKeyCheckTableName      = "dbdiff_foreign_key_check"
+	foreignKeyCheckConstraintName = "a_foreign_key_is_broken"
+)
+
+// PRAGMA foreign_key_check gives the broken foreign keys as rows, and it causes no error.
+// The CHECK constraint of the temporary table turns a count that is not zero into an error,
+// which stops the script before the release of the savepoint. The count reads only the
+// foreign keys of the recreated tables, as child or as parent, so an old broken foreign key
+// of another table does not stop the script. SQLite compares table names without case.
+type SQLiteForeignKeyCheckInstruction struct {
+	Step foreignKeyCheckStep
+
+	RecreatedTableNames []string
+}
+
+func (i *SQLiteForeignKeyCheckInstruction) String() string {
+	tableName := driversshared.QuoteIdentifier(foreignKeyCheckTableName)
+
+	switch i.Step {
+	case countForeignKeyViolations:
+		names := strings.Join(lo.Map(i.RecreatedTableNames, func(name string, _ int) string {
+			return driversshared.QuoteLiteral(name)
+		}), ", ")
+
+		return fmt.Sprintf(`INSERT INTO %s ("violations") SELECT count(*) FROM pragma_foreign_key_check `+
+			`WHERE "table" COLLATE NOCASE IN (%s) OR "parent" COLLATE NOCASE IN (%s);`, tableName, names, names)
+	case dropForeignKeyCheckTable:
+		return "DROP TABLE " + tableName + ";"
+	}
+
+	return fmt.Sprintf(`CREATE TEMP TABLE %s ("violations" INTEGER CONSTRAINT %s CHECK ("violations" = 0));`,
+		tableName, driversshared.QuoteIdentifier(foreignKeyCheckConstraintName))
+}
+
+func (i *SQLiteForeignKeyCheckInstruction) Comment() string {
+	return "Stop if a foreign key is broken"
 }

@@ -30,9 +30,7 @@ func TestSQLiteTrigger(t *testing.T) {
 			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -64,9 +62,7 @@ func TestSQLiteTrigger(t *testing.T) {
 					Definition: "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END",
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		triggers, err := driver.GetTriggers(t.Context(), driver.currentConnection, "users")

@@ -63,9 +63,7 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 			CREATE TABLE people (name TEXT, CHECK (length(name) < 100));
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("people",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -92,9 +90,7 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("people"),
 		))
 
 		rows := driver.FetchAllFromCurrent("people", "")
@@ -142,9 +138,7 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 			CREATE TABLE items (id INTEGER, CONSTRAINT items_new CHECK (id > 0));
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("items",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -174,9 +168,7 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "items"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("items"),
 		))
 
 		rows := driver.FetchAllFromCurrent("items", "")
@@ -238,9 +230,7 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 
 		driver.ExecOnDesired(`CREATE TABLE people (age INTEGER CHECK (age < 200));`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("people",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -265,9 +255,7 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("people"),
 		))
 
 		rows := driver.FetchAllFromCurrent("people", "")

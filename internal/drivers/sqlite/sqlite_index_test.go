@@ -284,9 +284,7 @@ func TestSQLiteIndex(t *testing.T) {
 			CREATE INDEX idx_users_active ON users (name) WHERE active = 1;
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -327,9 +325,7 @@ func TestSQLiteIndex(t *testing.T) {
 					Where:     "active = 1",
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
@@ -360,9 +356,7 @@ func TestSQLiteIndex(t *testing.T) {
 			CREATE INDEX idx_users_age ON users (age);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -396,9 +390,7 @@ func TestSQLiteIndex(t *testing.T) {
 					Keys:      []string{`"age"`},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
@@ -428,9 +420,7 @@ func TestSQLiteIndex(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -459,9 +449,7 @@ func TestSQLiteIndex(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "users"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")

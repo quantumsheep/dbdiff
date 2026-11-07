@@ -77,9 +77,7 @@ func TestSQLiteTable(t *testing.T) {
 		`)
 		driver.ExecOnDesired(`CREATE TABLE events (id INTEGER, label TEXT) STRICT;`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("events",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -108,9 +106,7 @@ func TestSQLiteTable(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "events"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("events"),
 		))
 
 		rows := driver.FetchAllFromCurrent("events", "")
@@ -162,9 +158,7 @@ func TestSQLiteTable(t *testing.T) {
 		`)
 		driver.ExecOnDesired(`CREATE TABLE people (age INTEGER, name TEXT);`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("people",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -192,9 +186,7 @@ func TestSQLiteTable(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("people"),
 		))
 
 		rows := driver.FetchAllFromCurrent("people", "")
@@ -219,9 +211,7 @@ func TestSQLiteTable(t *testing.T) {
 			CREATE INDEX _T_TEMP2 ON _t_temp (id);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("t",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -247,9 +237,7 @@ func TestSQLiteTable(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("t"),
 		))
 
 		require.Equal(t, []map[string]any{
@@ -493,9 +481,7 @@ func TestSQLiteTable(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("memberships",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -530,9 +516,7 @@ func TestSQLiteTable(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "memberships"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("memberships"),
 		))
 
 		rows := driver.FetchAllFromCurrent("memberships", "ORDER BY team, member")
@@ -564,9 +548,7 @@ func TestSQLiteTable(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("memberships",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -598,9 +580,7 @@ func TestSQLiteTable(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "memberships"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("memberships"),
 		))
 
 		rows := driver.FetchAllFromCurrent("memberships", "ORDER BY member")
@@ -635,9 +615,7 @@ func TestSQLiteTable(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("memberships",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -673,9 +651,7 @@ func TestSQLiteTable(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "memberships"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("memberships"),
 		))
 
 		rows := driver.FetchAllFromCurrent("memberships", "ORDER BY team, member")
@@ -706,9 +682,7 @@ func TestSQLiteTable(t *testing.T) {
 			CREATE INDEX idx_users_age ON users (age);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -742,9 +716,7 @@ func TestSQLiteTable(t *testing.T) {
 					Keys:      []string{`"age"`},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY email")

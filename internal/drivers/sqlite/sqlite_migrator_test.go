@@ -1,8 +1,12 @@
 package driverssqlite
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/stretchr/testify/require"
 )
@@ -160,5 +164,49 @@ func TestSQLiteMigrator(t *testing.T) {
 		require.NoError(t, migrator.Exec(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
 
 		require.Equal(t, []string{"dbdiff_migrations", "users"}, migrator.TableNames())
+	})
+
+	t.Run("ApplyRecreatesAReferencedTableWhenTheNameTurnsTheForeignKeysOn", func(t *testing.T) {
+		directory := t.TempDir()
+		currentPath := filepath.Join(directory, "current.sqlite")
+		desiredPath := filepath.Join(directory, "desired.sql")
+
+		migrator, err := NewSQLiteMigrator(currentPath + "?_pragma=foreign_keys(1)")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			require.NoError(t, migrator.Close())
+		})
+
+		_, err = migrator.Connection.ExecContext(t.Context(), `
+			CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id) ON DELETE CASCADE);
+
+			INSERT INTO parents (id, name) VALUES (1, 'Ada');
+			INSERT INTO children (id, parent_id) VALUES (1, 1);
+		`)
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(desiredPath, []byte(`
+			CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '');
+			CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id) ON DELETE CASCADE);
+		`), 0o600))
+
+		instructions, err := NewSQLiteDriver(&SQLiteDriverConfig{}).Diff(t.Context(),
+			driversshared.ParseDataSource(currentPath), driversshared.ParseDataSource(desiredPath),
+			driversshared.DiffOptions{})
+		require.NoError(t, err)
+
+		content := internalmigrations.RenderFile("1.4.0", time.Date(2026, 8, 22, 14, 30, 0, 0, time.UTC), instructions)
+
+		transaction, err := migrator.Begin(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, transaction.Apply(t.Context(), content))
+		require.NoError(t, transaction.Commit())
+
+		var childCount int
+
+		err = migrator.Connection.QueryRowContext(t.Context(), `SELECT count(*) FROM children;`).Scan(&childCount)
+		require.NoError(t, err)
+		require.Equal(t, 1, childCount)
 	})
 }

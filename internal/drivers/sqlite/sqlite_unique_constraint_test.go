@@ -110,9 +110,7 @@ func TestSQLiteUniqueConstraint(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("users",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -146,9 +144,7 @@ func TestSQLiteUniqueConstraint(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "users"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("users"),
 		))
 
 		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
@@ -312,9 +308,7 @@ func TestSQLiteUniqueConstraint(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("members",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -352,9 +346,7 @@ func TestSQLiteUniqueConstraint(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "members"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("members"),
 		))
 
 		rows := driver.FetchAllFromCurrent("members", "ORDER BY id")
@@ -388,9 +380,7 @@ func TestSQLiteUniqueConstraint(t *testing.T) {
 			);
 		`)
 		driver.RequireDiffApplies(slices.Concat(
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{},
-			},
+			recreationPrologue(),
 			recreated("members",
 				&SQLiteCreateTableInstruction{
 					ForeignKeys: []*SQLiteForeignKey{},
@@ -431,9 +421,7 @@ func TestSQLiteUniqueConstraint(t *testing.T) {
 					Action: &driversshared.SQLRenameTableAction{NewName: "members"},
 				},
 			),
-			[]driversshared.Instruction{
-				&SQLitePragmaForeignKeysInstruction{Enabled: true},
-			},
+			recreationEpilogue("members"),
 		))
 
 		rows := driver.FetchAllFromCurrent("members", "ORDER BY id")
