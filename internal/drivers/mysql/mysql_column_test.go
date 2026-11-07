@@ -956,4 +956,87 @@ func TestMariaDBColumn(t *testing.T) {
 			{"id": int64(1), "net": int64(5), "gross": int64(10)},
 		}, driver.FetchAllFromCurrent("prices", "ORDER BY id"))
 	})
+
+	t.Run("RenameAColumnWithAColumnCheck", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, aa int CHECK (aa > 0), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int CHECK (a > 0), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1, 2);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "a",
+					NewColumnName: "aa",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "aa",
+						Type: "int(11)",
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:        "aa",
+						Expression:  "`aa` > 0",
+						ColumnLevel: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "aa": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("RenameAndMoveAColumnWithAColumnCheck", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (aa int CHECK (aa > 0), id int NOT NULL, b int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, b int, a int CHECK (a > 0), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1, 2, 3);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "a",
+					NewColumnName: "aa",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "aa",
+						Type: "int(11)",
+					},
+					First: true,
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:        "aa",
+						Expression:  "`aa` > 0",
+						ColumnLevel: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"aa": int64(3), "id": int64(1), "b": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
 }

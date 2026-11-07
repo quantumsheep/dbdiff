@@ -349,13 +349,38 @@ func (t *MySQLTable) DiffTable(
 	// MariaDB keeps a CHECK clause of a column, and the CHECK clause of the json type, with
 	// the column. A MODIFY COLUMN action or a DROP COLUMN action removes such a check, and
 	// DROP CONSTRAINT refuses it. So the diff does not drop the check, and it adds the check
-	// again as a check of the table.
-	rebuiltColumnNames := slices.Concat(columnsDiff.Modified, columnsDiff.Removed, movedColumnNames,
+	// again as a check of the table. MariaDB names such a check after its column, so the
+	// owner of the check comes from the name, and a change of the check rebuilds the owner.
+	rebuiltColumnNames := slices.Concat(columnsDiff.Modified, movedColumnNames,
 		lo.Map(reconvertedColumns, func(column *MySQLColumn, _ int) string {
 			return column.Name
 		}))
+
+	checkOwnerName := func(check *MySQLCheckConstraint) string {
+		return columnsDiff.newNames([]string{check.Name})[0]
+	}
+
+	var lateModifications []*MySQLColumn
+
+	for _, check := range other.CheckConstraints {
+		ownerName := checkOwnerName(check)
+		_, foundInCurrent := other.ColumnByName(check.Name)
+		owner, foundInDesired := t.ColumnByName(ownerName)
+		desiredCheck, kept := lo.Find(t.CheckConstraints, func(desired *MySQLCheckConstraint) bool {
+			return desired.Name == check.Name
+		})
+
+		changed := !kept || !desiredCheck.Equal(check) || ownerName != check.Name
+		if check.ColumnLevel && foundInCurrent && foundInDesired && changed &&
+			!slices.Contains(columnsDiff.Removed, check.Name) && !slices.Contains(rebuiltColumnNames, ownerName) {
+			rebuiltColumnNames = append(rebuiltColumnNames, ownerName)
+			lateModifications = append(lateModifications, owner)
+		}
+	}
+
 	keptCurrentChecks := lo.Reject(other.CheckConstraints, func(check *MySQLCheckConstraint, _ int) bool {
-		return check.ColumnLevel && slices.ContainsFunc(rebuiltColumnNames, check.UsesColumn)
+		return check.ColumnLevel && (slices.Contains(columnsDiff.Removed, check.Name) ||
+			slices.Contains(rebuiltColumnNames, checkOwnerName(check)))
 	})
 
 	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other, columnsDiffs)
@@ -375,8 +400,6 @@ func (t *MySQLTable) DiffTable(
 	// MySQL refuses AUTO_INCREMENT on a column outside of every key, so the change that
 	// removes the keyword comes before the removal of the primary key, and the other
 	// changes come after the addition of the primary key.
-	var lateModifications []*MySQLColumn
-
 	for _, columnName := range columnsDiff.Modified {
 		column, found := t.ColumnByName(columnName)
 		if !found {
