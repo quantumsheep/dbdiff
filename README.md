@@ -221,7 +221,7 @@ err = migrator.Up(ctx)
 
 | Object                        | SQLite                                          | PostgreSQL              | MySQL / MariaDB                                 |
 | ----------------------------- | ----------------------------------------------- | ----------------------- | ----------------------------------------------- |
-| Tables                        | ✅                                              | ✅                      | ✅                                              |
+| Tables                        | ✅                                              | ✅                      | ✅ (with the column order)                      |
 | Identity columns              | ➖                                              | ✅                      | ➖                                              |
 | Table options                 | ✅ (WITHOUT ROWID, STRICT)                      | ✅ (storage parameters) | ✅ (ENGINE, collation)                          |
 | Virtual tables                | ✅                                              | ➖                      | ➖                                              |

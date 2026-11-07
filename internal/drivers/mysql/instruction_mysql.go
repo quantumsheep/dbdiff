@@ -112,18 +112,34 @@ func (i *MySQLAlterTableInstruction) Comment() string {
 
 type MySQLAddColumnAction struct {
 	Column *MySQLColumn
+	First  bool
+	After  string
 }
 
 func (a *MySQLAddColumnAction) TableActionClause() string {
-	return "ADD COLUMN " + a.Column.Definition()
+	return "ADD COLUMN " + a.Column.Definition() + columnPositionClause(a.First, a.After)
 }
 
 type MySQLModifyColumnAction struct {
 	Column *MySQLColumn
+	First  bool
+	After  string
 }
 
 func (a *MySQLModifyColumnAction) TableActionClause() string {
-	return "MODIFY COLUMN " + a.Column.Definition()
+	return "MODIFY COLUMN " + a.Column.Definition() + columnPositionClause(a.First, a.After)
+}
+
+func columnPositionClause(first bool, after string) string {
+	if first {
+		return " FIRST"
+	}
+
+	if after != "" {
+		return " AFTER " + QuoteIdentifier(after)
+	}
+
+	return ""
 }
 
 type MySQLDropColumnAction struct {

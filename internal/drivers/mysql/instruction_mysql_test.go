@@ -222,6 +222,34 @@ func TestMySQLInstructions(t *testing.T) {
 		require.Equal(t, "DROP INDEX `idx_users_email` ON `users`;", instruction.String())
 	})
 
+	t.Run("MySQLColumnPosition", func(t *testing.T) {
+		column := &MySQLColumn{
+			Name: "name",
+			Type: "text",
+		}
+
+		require.Equal(t, "ADD COLUMN `name` text AFTER `id`",
+			(&MySQLAddColumnAction{
+				Column: column,
+				After:  "id",
+			}).TableActionClause())
+		require.Equal(t, "ADD COLUMN `name` text FIRST",
+			(&MySQLAddColumnAction{
+				Column: column,
+				First:  true,
+			}).TableActionClause())
+		require.Equal(t, "MODIFY COLUMN `name` text AFTER `id`",
+			(&MySQLModifyColumnAction{
+				Column: column,
+				After:  "id",
+			}).TableActionClause())
+		require.Equal(t, "MODIFY COLUMN `name` text FIRST",
+			(&MySQLModifyColumnAction{
+				Column: column,
+				First:  true,
+			}).TableActionClause())
+	})
+
 	t.Run("MySQLCreateView", func(t *testing.T) {
 		instruction := &MySQLCreateViewInstruction{
 			Name:       "adult_users",

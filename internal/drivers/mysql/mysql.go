@@ -817,7 +817,7 @@ func (d *MySQLDriver) GetTableCheckConstraints(
 	mariadb := d.detailsByConnection[db].mariadb
 	if mariadb {
 		query = `
-			SELECT CONSTRAINT_NAME, CHECK_CLAUSE
+			SELECT CONSTRAINT_NAME, CHECK_CLAUSE, LEVEL = 'Column'
 			FROM information_schema.CHECK_CONSTRAINTS
 			WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ?
 			ORDER BY CONSTRAINT_NAME;
@@ -825,21 +825,18 @@ func (d *MySQLDriver) GetTableCheckConstraints(
 	}
 
 	return driversshared.QueryAll(ctx, db, query, func(rows *sql.Rows) (*MySQLCheckConstraint, error) {
-		var name, clause string
+		check := &MySQLCheckConstraint{}
 
-		err := rows.Scan(&name, &clause)
-		if err != nil {
-			return nil, err
+		var err error
+
+		if mariadb {
+			err = rows.Scan(&check.Name, &check.Expression, &check.ColumnLevel)
+		} else {
+			err = rows.Scan(&check.Name, &check.Expression)
+			check.Expression = unescapeCatalogText(check.Expression)
 		}
 
-		if !mariadb {
-			clause = unescapeCatalogText(clause)
-		}
-
-		return &MySQLCheckConstraint{
-			Name:       name,
-			Expression: clause,
-		}, nil
+		return check, err
 	}, tableName)
 }
 

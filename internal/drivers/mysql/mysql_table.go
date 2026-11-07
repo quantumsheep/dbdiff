@@ -157,6 +157,64 @@ func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
 	return diff
 }
 
+// The result tells where the desired column at the position goes: first, or after a
+// column. The result also gives the column order after the move.
+func placeColumn(columnOrder []string, desiredColumns []*MySQLColumn, position int) (bool, string, []string) {
+	name := desiredColumns[position].Name
+
+	columnOrder = slices.DeleteFunc(slices.Clone(columnOrder), func(orderedName string) bool {
+		return orderedName == name
+	})
+
+	if position == 0 {
+		return true, "", slices.Insert(columnOrder, 0, name)
+	}
+
+	previousName := desiredColumns[position-1].Name
+
+	return false, previousName, slices.Insert(columnOrder, slices.Index(columnOrder, previousName)+1, name)
+}
+
+// The result is the longest list of the names in the column order whose desired positions
+// increase.
+func longestOrderedRun(columnOrder []string, desiredColumns []*MySQLColumn) []string {
+	desiredPositions := lo.Map(columnOrder, func(name string, _ int) int {
+		return slices.IndexFunc(desiredColumns, func(column *MySQLColumn) bool {
+			return column.Name == name
+		})
+	})
+
+	runLengths := make([]int, len(columnOrder))
+	previousIndexes := make([]int, len(columnOrder))
+	lastIndex := -1
+
+	for index := range columnOrder {
+		runLengths[index] = 1
+		previousIndexes[index] = -1
+
+		for earlierIndex := range index {
+			longer := desiredPositions[earlierIndex] < desiredPositions[index] &&
+				runLengths[earlierIndex]+1 > runLengths[index]
+			if longer {
+				runLengths[index] = runLengths[earlierIndex] + 1
+				previousIndexes[index] = earlierIndex
+			}
+		}
+
+		if lastIndex < 0 || runLengths[index] > runLengths[lastIndex] {
+			lastIndex = index
+		}
+	}
+
+	var run []string
+
+	for index := lastIndex; index >= 0; index = previousIndexes[index] {
+		run = append(run, columnOrder[index])
+	}
+
+	return run
+}
+
 func readsRenamedColumn(column *MySQLColumn, renamedFrom map[string]string) bool {
 	return column.IsGenerated() && lo.SomeBy(lo.Values(renamedFrom), func(oldName string) bool {
 		return strings.Contains(column.GeneratedExpression, QuoteIdentifier(oldName))
@@ -231,8 +289,77 @@ func (t *MySQLTable) DiffTable(
 ) (*MySQLTableDiff, error) {
 	columnsDiff := columnsDiffs[t.Name]
 
+	currentColumnNames := lo.Map(other.Columns, func(column *MySQLColumn, _ int) string {
+		return column.Name
+	})
+	columnOrder := columnsDiff.newNames(lo.Without(currentColumnNames, columnsDiff.Removed...))
+
+	var addInstructions []driversshared.Instruction
+
+	for _, columnName := range columnsDiff.Added {
+		position := slices.IndexFunc(t.Columns, func(column *MySQLColumn) bool {
+			return column.Name == columnName
+		})
+		if position < 0 {
+			return nil, fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
+		}
+
+		action := &MySQLAddColumnAction{
+			Column: t.Columns[position],
+		}
+
+		action.First, action.After, columnOrder = placeColumn(columnOrder, t.Columns, position)
+
+		// MySQL adds a column at the end by default.
+		if columnOrder[len(columnOrder)-1] == columnName {
+			action.First = false
+			action.After = ""
+		}
+
+		addInstructions = append(addInstructions, &MySQLAlterTableInstruction{
+			Name:   t.Name,
+			Action: action,
+		})
+	}
+
+	// Each move rebuilds the table, so the columns of the longest run that keeps the desired
+	// order stay in place.
+	keptColumnNames := longestOrderedRun(columnOrder, t.Columns)
+	movedColumnNames := lo.Reject(lo.Map(t.Columns, func(column *MySQLColumn, _ int) string {
+		return column.Name
+	}), func(name string, _ int) bool {
+		return slices.Contains(keptColumnNames, name)
+	})
+
+	collationsEqual := (t.CollationIsDefault && other.CollationIsDefault) || t.Collation == other.Collation
+
+	// The conversion of the table rewrites every text column to the new collation, so a
+	// column with its own collation needs its definition again.
+	var reconvertedColumns []*MySQLColumn
+
+	if !collationsEqual {
+		reconvertedColumns = lo.Filter(t.Columns, func(column *MySQLColumn, _ int) bool {
+			return column.Collation != "" &&
+				!slices.Contains(columnsDiff.Modified, column.Name) &&
+				!slices.Contains(columnsDiff.Added, column.Name) &&
+				!slices.Contains(movedColumnNames, column.Name)
+		})
+	}
+
+	// MariaDB keeps a CHECK clause of a column, and the CHECK clause of the json type, with
+	// the column. A MODIFY COLUMN action or a DROP COLUMN action removes such a check, and
+	// DROP CONSTRAINT refuses it. So the diff does not drop the check, and it adds the check
+	// again as a check of the table.
+	rebuiltColumnNames := slices.Concat(columnsDiff.Modified, columnsDiff.Removed, movedColumnNames,
+		lo.Map(reconvertedColumns, func(column *MySQLColumn, _ int) string {
+			return column.Name
+		}))
+	keptCurrentChecks := lo.Reject(other.CheckConstraints, func(check *MySQLCheckConstraint, _ int) bool {
+		return check.ColumnLevel && slices.ContainsFunc(rebuiltColumnNames, check.UsesColumn)
+	})
+
 	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other, columnsDiffs)
-	checkAdditions, checkRemovals := t.checkConstraintChanges(other, columnsDiff.Recreated)
+	checkAdditions, checkRemovals := t.checkConstraintChanges(keptCurrentChecks, columnsDiff.Recreated)
 	indexAdditions, indexRemovals := t.indexChanges(other, columnsDiff)
 
 	triggerAdditions, triggerRemovals, err := driversshared.DiffByKey(t.Triggers, other.Triggers, diffTriggerRules())
@@ -319,7 +446,6 @@ func (t *MySQLTable) DiffTable(
 
 	// The conversion runs before the column changes, so a change of a column collation
 	// lands on the new default of the table.
-	collationsEqual := (t.CollationIsDefault && other.CollationIsDefault) || t.Collation == other.Collation
 	if !collationsEqual {
 		instructions = append(instructions, &MySQLAlterTableInstruction{
 			Name: t.Name,
@@ -329,18 +455,7 @@ func (t *MySQLTable) DiffTable(
 			},
 		})
 
-		// The conversion rewrites every text column to the new collation, so a column
-		// with its own collation needs its definition again.
-		for _, column := range t.Columns {
-			if column.Collation == "" {
-				continue
-			}
-
-			if slices.Contains(columnsDiff.Modified, column.Name) ||
-				slices.Contains(columnsDiff.Added, column.Name) {
-				continue
-			}
-
+		for _, column := range reconvertedColumns {
 			instructions = append(instructions, &MySQLAlterTableInstruction{
 				Name: t.Name,
 				Action: &MySQLModifyColumnAction{
@@ -365,17 +480,7 @@ func (t *MySQLTable) DiffTable(
 		})
 	}
 
-	for _, columnName := range columnsDiff.Added {
-		column, found := t.ColumnByName(columnName)
-		if !found {
-			return nil, fmt.Errorf("internal error: added column %s not found in table %s", columnName, t.Name)
-		}
-
-		instructions = append(instructions, &MySQLAlterTableInstruction{
-			Name:   t.Name,
-			Action: &MySQLAddColumnAction{Column: column},
-		})
-	}
+	instructions = append(instructions, addInstructions...)
 
 	if primaryKeyChanged && len(t.PrimaryKey) > 0 {
 		instructions = append(instructions, &MySQLAlterTableInstruction{
@@ -386,12 +491,25 @@ func (t *MySQLTable) DiffTable(
 		})
 	}
 
-	for _, column := range lateModifications {
+	// A modified column moves in the same MODIFY action. The moves run in the desired order,
+	// so each column lands after its final predecessor.
+	for position, column := range t.Columns {
+		moved := slices.Contains(movedColumnNames, column.Name)
+		if !moved && !slices.Contains(lateModifications, column) {
+			continue
+		}
+
+		action := &MySQLModifyColumnAction{
+			Column: column,
+		}
+
+		if moved {
+			action.First, action.After, columnOrder = placeColumn(columnOrder, t.Columns, position)
+		}
+
 		instructions = append(instructions, &MySQLAlterTableInstruction{
-			Name: t.Name,
-			Action: &MySQLModifyColumnAction{
-				Column: column,
-			},
+			Name:   t.Name,
+			Action: action,
 		})
 	}
 
@@ -456,10 +574,10 @@ func (t *MySQLTable) foreignKeyChanges(
 }
 
 func (t *MySQLTable) checkConstraintChanges(
-	other *MySQLTable,
+	currentChecks []*MySQLCheckConstraint,
 	recreatedColumns []string,
 ) ([]driversshared.Instruction, []driversshared.Instruction) {
-	return driversshared.ReplaceByKey(t.CheckConstraints, other.CheckConstraints,
+	return driversshared.ReplaceByKey(t.CheckConstraints, currentChecks,
 		func(check *MySQLCheckConstraint) string {
 			return check.Name
 		},

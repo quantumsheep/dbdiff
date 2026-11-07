@@ -132,6 +132,7 @@ func TestMySQLTable(t *testing.T) {
 						Type:    "bigint",
 						NotNull: true,
 					},
+					First: true,
 				},
 			},
 			&MySQLAlterTableInstruction{

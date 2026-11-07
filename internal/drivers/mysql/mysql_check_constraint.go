@@ -10,6 +10,9 @@ type MySQLCheckConstraint struct {
 	// MySQL stores the expression with the enclosing parentheses, and MariaDB stores it
 	// without them.
 	Expression string
+
+	// MariaDB marks a CHECK clause of a column. The comparison ignores the mark.
+	ColumnLevel bool
 }
 
 func (c *MySQLCheckConstraint) Equal(other *MySQLCheckConstraint) bool {

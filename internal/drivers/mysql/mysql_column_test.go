@@ -10,6 +10,122 @@ import (
 )
 
 func TestMySQLColumn(t *testing.T) {
+	t.Run("AddColumnInTheMiddle", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, name varchar(20), email varchar(50), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, email varchar(50), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (1, 'a@b.c');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "name",
+						Type: "varchar(20)",
+					},
+					After: "id",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": nil, "email": "a@b.c"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
+	})
+
+	t.Run("AddColumnFirst", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (code int, id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "code",
+						Type: "int",
+					},
+					First: true,
+				},
+			},
+		})
+	})
+
+	t.Run("ChangeTypeAndMoveAColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, age bigint, name varchar(20), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, name varchar(20), age int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (1, 'Alice', 30);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "age",
+						Type: "bigint",
+					},
+					After: "id",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "age": int64(30), "name": "Alice"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
+	})
+
+	t.Run("MoveTheFirstColumnToTheEnd", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (a int, b int, c int, id int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, a int, b int, c int, PRIMARY KEY (id));")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+					After: "c",
+				},
+			},
+		})
+	})
+
+	t.Run("ChangeColumnOrder", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, email varchar(50), name varchar(20), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, name varchar(20), email varchar(50), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (1, 'Alice', 'a@b.c');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "email",
+						Type: "varchar(50)",
+					},
+					After: "id",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": "a@b.c", "name": "Alice"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
+	})
+
 	t.Run("AddColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -482,6 +598,127 @@ func TestMySQLColumn(t *testing.T) {
 }
 
 func TestMariaDBColumn(t *testing.T) {
+	t.Run("MoveAColumnWithAColumnCheck", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (a int CHECK (a > 0), id int NOT NULL, b int, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, b int, a int CHECK (a > 0), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1, 2, 3);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "a",
+						Type: "int(11)",
+					},
+					First: true,
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:        "a",
+						Expression:  "`a` > 0",
+						ColumnLevel: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"a": int64(3), "id": int64(1), "b": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("CommentOnAJSONColumn", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE docs (id int NOT NULL, body json COMMENT 'the body', PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE docs (id int NOT NULL, body json, PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`INSERT INTO docs VALUES (1, '{"a": 1}');`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "docs",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:      "body",
+						Type:      "longtext",
+						Collation: "utf8mb4_bin",
+						Comment:   "the body",
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "docs",
+				Action: &MySQLAddCheckConstraintAction{
+					CheckConstraint: &MySQLCheckConstraint{
+						Name:        "body",
+						Expression:  "json_valid(`body`)",
+						ColumnLevel: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "body": `{"a": 1}`},
+		}, driver.FetchAllFromCurrent("docs", "ORDER BY id"))
+	})
+
+	t.Run("AddColumnInTheMiddle", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, name varchar(20), email varchar(50), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, email varchar(50), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (1, 'a@b.c');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "name",
+						Type: "varchar(20)",
+					},
+					After: "id",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": nil, "email": "a@b.c"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
+	})
+
+	t.Run("ChangeColumnOrder", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, email varchar(50), name varchar(20), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, name varchar(20), email varchar(50), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users VALUES (1, 'Alice', 'a@b.c');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name: "email",
+						Type: "varchar(50)",
+					},
+					After: "id",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": "a@b.c", "name": "Alice"},
+		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
+	})
+
 	t.Run("RenameColumnWithACheckAndAnIndex", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
