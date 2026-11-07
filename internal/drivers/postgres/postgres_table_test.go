@@ -1452,6 +1452,371 @@ func TestPostgresTable(t *testing.T) {
 		})
 	})
 
+	t.Run("ChangeTheOwnColumnAttributesOfAPartition", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE measurements (id integer, label text, note text) PARTITION BY LIST (id);
+			CREATE TABLE measurements_two PARTITION OF measurements FOR VALUES IN (2);
+			CREATE TABLE measurements_three PARTITION OF measurements FOR VALUES IN (3);
+		`
+
+		driver.ExecOnCurrent(schema + `
+			INSERT INTO measurements VALUES (2, 'a', 'b'), (3, 'c', 'd');
+		`)
+
+		driver.ExecOnDesired(schema + `
+			ALTER TABLE measurements ALTER COLUMN label SET DEFAULT 'parent';
+			ALTER TABLE measurements ALTER COLUMN note SET STATISTICS 70;
+			ALTER TABLE measurements_two ALTER COLUMN label SET DEFAULT 'own';
+			ALTER TABLE measurements_two ALTER COLUMN note SET NOT NULL;
+			ALTER TABLE measurements_two ALTER COLUMN note SET STORAGE MAIN;
+			ALTER TABLE measurements_two ALTER COLUMN note SET STATISTICS 50;
+		`)
+
+		alterTable := func(name string, action driversshared.AlterTableAction) *PostgresAlterTableInstruction {
+			return &PostgresAlterTableInstruction{
+				Name:    name,
+				Actions: []driversshared.AlterTableAction{action},
+			}
+		}
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			alterTable("measurements", &PostgresSetDefaultAction{
+				ColumnName: "label",
+				Expression: "'parent'::text",
+			}),
+			alterTable("measurements", &PostgresSetStatisticsAction{
+				ColumnName:       "note",
+				StatisticsTarget: 70,
+			}),
+			alterTable("measurements_two", &PostgresSetDefaultAction{
+				ColumnName: "label",
+				Expression: "'own'::text",
+			}),
+			alterTable("measurements_two", &PostgresSetNotNullAction{
+				ColumnName: "note",
+			}),
+			alterTable("measurements_two", &PostgresSetStorageAction{
+				ColumnName: "note",
+				Storage:    "MAIN",
+			}),
+			alterTable("measurements_two", &PostgresSetStatisticsAction{
+				ColumnName:       "note",
+				StatisticsTarget: 50,
+			}),
+		})
+
+		require.Equal(t, []map[string]any{
+			{
+				"id":    int64(2),
+				"label": "a",
+				"note":  "b",
+			},
+			{
+				"id":    int64(3),
+				"label": "c",
+				"note":  "d",
+			},
+		}, driver.FetchAllFromCurrent("measurements", "ORDER BY id"))
+	})
+
+	t.Run("CreateAPartitionWithItsOwnColumnAttributes", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE measurements (id integer, label text DEFAULT 'parent', note text)
+				PARTITION BY LIST (id);
+		`
+
+		driver.ExecOnCurrent(schema)
+
+		driver.ExecOnDesired(schema + `
+			CREATE TABLE measurements_two PARTITION OF measurements FOR VALUES IN (2);
+			ALTER TABLE measurements_two ALTER COLUMN label SET DEFAULT 'own';
+			ALTER TABLE measurements_two ALTER COLUMN note SET NOT NULL;
+			CREATE TABLE measurements_three (id integer, label text, note text DEFAULT 'attached');
+			ALTER TABLE measurements ATTACH PARTITION measurements_three FOR VALUES IN (3);
+		`)
+
+		alterTable := func(name string, action driversshared.AlterTableAction) *PostgresAlterTableInstruction {
+			return &PostgresAlterTableInstruction{
+				Name:    name,
+				Actions: []driversshared.AlterTableAction{action},
+			}
+		}
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "measurements_three",
+				ParentName: "measurements",
+				Bound:      "FOR VALUES IN (3)",
+			},
+			alterTable("measurements_three", &PostgresDropDefaultAction{
+				ColumnName: "label",
+			}),
+			alterTable("measurements_three", &PostgresSetDefaultAction{
+				ColumnName: "note",
+				Expression: "'attached'::text",
+			}),
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "measurements_two",
+				ParentName: "measurements",
+				Bound:      "FOR VALUES IN (2)",
+			},
+			alterTable("measurements_two", &PostgresSetDefaultAction{
+				ColumnName: "label",
+				Expression: "'own'::text",
+			}),
+			alterTable("measurements_two", &PostgresSetNotNullAction{
+				ColumnName: "note",
+			}),
+		})
+	})
+
+	t.Run("MoveAPartitionToAParentWithAnotherDefault", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measurements (id integer, label text DEFAULT 'old') PARTITION BY LIST (id);
+			CREATE TABLE readings (id integer, label text DEFAULT 'readings') PARTITION BY LIST (id);
+			CREATE TABLE measurements_two PARTITION OF measurements FOR VALUES IN (2);
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE measurements (id integer, label text DEFAULT 'new') PARTITION BY LIST (id);
+			CREATE TABLE readings (id integer, label text DEFAULT 'readings') PARTITION BY LIST (id);
+			CREATE TABLE measurements_two PARTITION OF readings FOR VALUES IN (2);
+			ALTER TABLE measurements_two ALTER COLUMN label SET DEFAULT 'old';
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measurements",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "label",
+						Expression: "'new'::text",
+					},
+				},
+			},
+			&PostgresDetachPartitionInstruction{
+				ParentName:    "measurements",
+				PartitionName: "measurements_two",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measurements_two",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "label",
+						Expression: "'old'::text",
+					},
+				},
+			},
+			&PostgresAttachPartitionInstruction{
+				ParentName:    "readings",
+				PartitionName: "measurements_two",
+				Bound:         "FOR VALUES IN (2)",
+			},
+		})
+
+		driver.ExecOnCurrent(`INSERT INTO measurements_two (id) VALUES (2);`)
+
+		require.Equal(t, []map[string]any{
+			{
+				"id":    int64(2),
+				"label": "old",
+			},
+		}, driver.FetchAllFromCurrent("readings", "ORDER BY id"))
+	})
+
+	t.Run("ChangeTheDefaultOfAParentAboveTwoPartitionLevels", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		partitions := `
+			CREATE TABLE measurements_three PARTITION OF measurements FOR VALUES IN (3)
+				PARTITION BY LIST (kind);
+			CREATE TABLE measurements_three_one PARTITION OF measurements_three FOR VALUES IN (1);
+		`
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measurements (id integer, kind integer, label text) PARTITION BY LIST (id);
+		` + partitions)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE measurements (id integer, kind integer, label text NOT NULL DEFAULT 'parent')
+				PARTITION BY LIST (id);
+		` + partitions)
+
+		alterTable := func(action driversshared.AlterTableAction) *PostgresAlterTableInstruction {
+			return &PostgresAlterTableInstruction{
+				Name:    "measurements",
+				Actions: []driversshared.AlterTableAction{action},
+			}
+		}
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			alterTable(&PostgresSetNotNullAction{
+				ColumnName: "label",
+			}),
+			alterTable(&PostgresSetDefaultAction{
+				ColumnName: "label",
+				Expression: "'parent'::text",
+			}),
+		})
+
+		driver.ExecOnCurrent(`INSERT INTO measurements_three_one (id, kind) VALUES (3, 1);`)
+
+		require.Equal(t, []map[string]any{
+			{
+				"id":    int64(3),
+				"kind":  int64(1),
+				"label": "parent",
+			},
+		}, driver.FetchAllFromCurrent("measurements", "ORDER BY id"))
+	})
+
+	t.Run("ChangeTheTypeOfAColumnWithADefaultOfAPartitionOrAChild", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measurements (id integer, amount text) PARTITION BY LIST (id);
+			CREATE TABLE measurements_two PARTITION OF measurements FOR VALUES IN (2);
+			ALTER TABLE measurements_two ALTER COLUMN amount SET DEFAULT 'none';
+			CREATE TABLE readings (id integer, amount text DEFAULT 'none');
+			CREATE TABLE readings_child () INHERITS (readings);
+			ALTER TABLE readings_child ALTER COLUMN amount SET DEFAULT 'child';
+			INSERT INTO measurements VALUES (2, '5');
+			INSERT INTO readings_child VALUES (1, '6');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE measurements (id integer, amount integer) PARTITION BY LIST (id);
+			CREATE TABLE measurements_two PARTITION OF measurements FOR VALUES IN (2);
+			ALTER TABLE measurements_two ALTER COLUMN amount SET DEFAULT 7;
+			CREATE TABLE readings (id integer, amount integer DEFAULT 1);
+			CREATE TABLE readings_child () INHERITS (readings);
+			ALTER TABLE readings_child ALTER COLUMN amount SET DEFAULT 8;
+		`)
+
+		alterTable := func(name string, only bool, action driversshared.AlterTableAction) *PostgresAlterTableInstruction {
+			return &PostgresAlterTableInstruction{
+				Name:    name,
+				Only:    only,
+				Actions: []driversshared.AlterTableAction{action},
+			}
+		}
+
+		typeAction := &PostgresAlterColumnTypeAction{
+			ColumnName: "amount",
+			DataType:   "integer",
+			UsingCast:  true,
+		}
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			alterTable("measurements_two", false, &PostgresDropDefaultAction{
+				ColumnName: "amount",
+			}),
+			alterTable("measurements", false, typeAction),
+			alterTable("measurements_two", false, &PostgresSetDefaultAction{
+				ColumnName: "amount",
+				Expression: "7",
+			}),
+			alterTable("readings_child", false, &PostgresDropDefaultAction{
+				ColumnName: "amount",
+			}),
+			alterTable("readings", true, &PostgresDropDefaultAction{
+				ColumnName: "amount",
+			}),
+			alterTable("readings", false, typeAction),
+			alterTable("readings", true, &PostgresSetDefaultAction{
+				ColumnName: "amount",
+				Expression: "1",
+			}),
+			alterTable("readings_child", false, &PostgresSetDefaultAction{
+				ColumnName: "amount",
+				Expression: "8",
+			}),
+		})
+
+		driver.ExecOnCurrent(`
+			INSERT INTO measurements_two (id) VALUES (2);
+			INSERT INTO readings_child (id) VALUES (1);
+		`)
+
+		require.Equal(t, []map[string]any{
+			{
+				"id":     int64(2),
+				"amount": int64(5),
+			},
+			{
+				"id":     int64(2),
+				"amount": int64(7),
+			},
+		}, driver.FetchAllFromCurrent("measurements", "ORDER BY amount"))
+		require.Equal(t, []map[string]any{
+			{
+				"id":     int64(1),
+				"amount": int64(6),
+			},
+			{
+				"id":     int64(1),
+				"amount": int64(8),
+			},
+		}, driver.FetchAllFromCurrent("readings", "ORDER BY amount"))
+	})
+
+	t.Run("ChangeTheTypeOfAColumnWithAnAutomaticCastAndADefaultOfAPartition", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measurements (id integer, label varchar(5)) PARTITION BY LIST (id);
+			CREATE TABLE measurements_two PARTITION OF measurements FOR VALUES IN (2);
+			ALTER TABLE measurements_two ALTER COLUMN label SET DEFAULT 'own';
+			INSERT INTO measurements VALUES (2, 'old');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE measurements (id integer, label text) PARTITION BY LIST (id);
+			CREATE TABLE measurements_two PARTITION OF measurements FOR VALUES IN (2);
+			ALTER TABLE measurements_two ALTER COLUMN label SET DEFAULT 'own';
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measurements",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "label",
+						DataType:   "text",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measurements_two",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "label",
+						Expression: "'own'::text",
+					},
+				},
+			},
+		})
+
+		driver.ExecOnCurrent(`INSERT INTO measurements_two (id) VALUES (2);`)
+
+		require.Equal(t, []map[string]any{
+			{
+				"id":    int64(2),
+				"label": "old",
+			},
+			{
+				"id":    int64(2),
+				"label": "own",
+			},
+		}, driver.FetchAllFromCurrent("measurements", "ORDER BY label"))
+	})
+
 	t.Run("ReplaceAPartitionIndexWithAParentIndex", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

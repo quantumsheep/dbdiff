@@ -172,22 +172,29 @@ func (t *PostgresTable) DiffTable(
 	}
 
 	// A partition takes the columns, the constraints, and the inherited indexes of its parent.
-	// The diff does not compare the own constraints of a partition.
+	// A partition keeps its own default, NOT NULL flag, storage mode, and statistics target of
+	// each column. The diff does not compare the own constraints of a partition.
 	// DiffTables prints the removals of the own indexes of a partition.
 	// A new bound or a new parent needs a detach and an attach, because PostgreSQL
-	// holds no action that changes a bound in place.
+	// holds no action that changes a bound in place. ATTACH PARTITION refuses a table without
+	// the NOT NULL flags of the parent, so the column changes come between the two statements.
 	if t.IsPartition() {
-		if t.PartitionParent != other.PartitionParent || t.PartitionBound != other.PartitionBound {
-			instructions = append(instructions,
-				&PostgresDetachPartitionInstruction{
-					ParentName:    other.PartitionParent,
-					PartitionName: t.Name,
-				},
-				&PostgresAttachPartitionInstruction{
-					ParentName:    t.PartitionParent,
-					PartitionName: t.Name,
-					Bound:         t.PartitionBound,
-				})
+		reattached := t.PartitionParent != other.PartitionParent || t.PartitionBound != other.PartitionBound
+		if reattached {
+			instructions = append(instructions, &PostgresDetachPartitionInstruction{
+				ParentName:    other.PartitionParent,
+				PartitionName: t.Name,
+			})
+		}
+
+		instructions = append(instructions, diffPartitionColumns(t, other)...)
+
+		if reattached {
+			instructions = append(instructions, &PostgresAttachPartitionInstruction{
+				ParentName:    t.PartitionParent,
+				PartitionName: t.Name,
+				Bound:         t.PartitionBound,
+			})
 		}
 
 		instructions = append(instructions, diffRowLevelSecurity(t, other)...)
@@ -526,6 +533,75 @@ func (t *PostgresTable) DiffTable(
 	instructions = append(instructions, diffTriggers(t, other)...)
 
 	return instructions, nil
+}
+
+func diffPartitionColumns(desiredTable *PostgresTable, currentTable *PostgresTable) []driversshared.Instruction {
+	var instructions []driversshared.Instruction
+
+	alterTable := func(action driversshared.AlterTableAction) driversshared.Instruction {
+		return &PostgresAlterTableInstruction{
+			Name:    desiredTable.Name,
+			Actions: []driversshared.AlterTableAction{action},
+		}
+	}
+
+	for _, desiredColumn := range desiredTable.Columns {
+		currentColumn, found := currentTable.ColumnByName(desiredColumn.Name)
+		if !found {
+			continue
+		}
+
+		if desiredColumn.Default != currentColumn.Default {
+			if desiredColumn.Default.Valid {
+				instructions = append(instructions, alterTable(&PostgresSetDefaultAction{
+					ColumnName: desiredColumn.Name,
+					Expression: desiredColumn.Default.String,
+				}))
+			} else {
+				instructions = append(instructions, alterTable(&PostgresDropDefaultAction{
+					ColumnName: desiredColumn.Name,
+				}))
+			}
+		}
+
+		if desiredColumn.NotNull != currentColumn.NotNull {
+			if desiredColumn.NotNull {
+				instructions = append(instructions, alterTable(&PostgresSetNotNullAction{
+					ColumnName: desiredColumn.Name,
+				}))
+			} else {
+				instructions = append(instructions, alterTable(&PostgresDropNotNullAction{
+					ColumnName: desiredColumn.Name,
+				}))
+			}
+		}
+
+		if desiredColumn.Storage != currentColumn.Storage {
+			storage := desiredColumn.Storage
+			if storage == "" {
+				storage = "DEFAULT"
+			}
+
+			instructions = append(instructions, alterTable(&PostgresSetStorageAction{
+				ColumnName: desiredColumn.Name,
+				Storage:    storage,
+			}))
+		}
+
+		if desiredColumn.StatisticsTarget != currentColumn.StatisticsTarget {
+			statisticsTarget := int64(-1)
+			if desiredColumn.StatisticsTarget.Valid {
+				statisticsTarget = desiredColumn.StatisticsTarget.Int64
+			}
+
+			instructions = append(instructions, alterTable(&PostgresSetStatisticsAction{
+				ColumnName:       desiredColumn.Name,
+				StatisticsTarget: statisticsTarget,
+			}))
+		}
+	}
+
+	return instructions
 }
 
 func diffComments(desiredTable *PostgresTable, currentTable *PostgresTable) []driversshared.Instruction {
@@ -948,6 +1024,16 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		}
 	}
 
+	descendantDefaultDrops, droppedDescendantDefaults, err := dropDescendantDefaultsForTypeChanges(
+		desiredTables,
+		currentTables,
+		hasAutomaticCast,
+		serverVersion,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	// The action of a rule can name a second table, so every rule comes after every table.
 	var ruleInstructions []driversshared.Instruction
 
@@ -969,7 +1055,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		if !found {
 			additions = append(additions, desiredTable.Instructions()...)
 
-			if len(desiredTable.Inherits) > 0 {
+			if len(desiredTable.Inherits) > 0 || desiredTable.IsPartition() {
 				attributeInstructions, err := desiredTable.DiffTable(
 					desiredTable.creationStateOfChild(desiredTables),
 					hasAutomaticCast,
@@ -993,10 +1079,30 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 			continue
 		}
 
+		currentTable = currentTable.withoutDefaults(droppedDescendantDefaults[currentTable.Name])
+
 		var preInheritInstructions []driversshared.Instruction
 
 		currentTable, preInheritInstructions = currentTable.withInheritanceChanges(desiredTable, currentTables, desiredTables)
 		additions = append(additions, preInheritInstructions...)
+
+		// The statements of each ancestor reach the partition before a DETACH PARTITION
+		// statement, so the current ancestors give the state. The root comes first, because a
+		// change of the root reaches each level below it. An ancestor that DiffTables has
+		// not walked yet changes the partition after the DETACH PARTITION statement.
+		for _, ancestor := range slices.Backward(currentAncestors(currentTable, currentTables)) {
+			currentAncestor, found := keptCurrentTables[ancestor.Name]
+			if !found {
+				continue
+			}
+
+			desiredAncestor, _ := lo.Find(desiredTables, func(table *PostgresTable) bool {
+				return table.Name == ancestor.Name
+			})
+			currentTable = currentTable.withParentColumnChanges(desiredAncestor, currentAncestor, serverVersion)
+		}
+
+		additions = append(additions, descendantDefaultDrops[desiredTable.Name]...)
 
 		rebuiltColumnNames := desiredTable.RebuiltColumnNames(currentTable, serverVersion)
 		if len(rebuiltColumnNames) > 0 {
@@ -1231,18 +1337,206 @@ func (t *PostgresTable) withInheritanceChanges(
 	return &tableCopy, preInheritInstructions
 }
 
-// CREATE TABLE INHERITS gives each inherited column the default, the NOT NULL flag, and the
-// storage mode of the parent. The returned table holds that state, so DiffTable prints the
-// attributes that the new child keeps for itself.
+func currentAncestors(table *PostgresTable, currentTables []*PostgresTable) []*PostgresTable {
+	var ancestors []*PostgresTable
+
+	parentName := table.PartitionParent
+
+	for parentName != "" {
+		parent, found := lo.Find(currentTables, func(currentTable *PostgresTable) bool {
+			return currentTable.Name == parentName
+		})
+		if !found {
+			break
+		}
+
+		ancestors = append(ancestors, parent)
+		parentName = parent.PartitionParent
+	}
+
+	return ancestors
+}
+
+// A TYPE action of a parent casts the default of each partition and each child of INHERITS,
+// and it fails on a default that it cannot cast. The returned instructions drop these
+// defaults before the TYPE action of the parent, and the diff of each partition and each
+// child sets them again. A DROP DEFAULT statement of a partitioned table without ONLY
+// removes the default of each partition, so a partitioned table with a default needs no
+// more statements. The returned map gives the columns of each table without a default after
+// these instructions.
+func dropDescendantDefaultsForTypeChanges(
+	desiredTables []*PostgresTable,
+	currentTables []*PostgresTable,
+	hasAutomaticCast AutomaticCastLookup,
+	serverVersion int,
+) (map[string][]driversshared.Instruction, map[string][]string, error) {
+	drops := map[string][]driversshared.Instruction{}
+	droppedDefaults := map[string][]string{}
+
+	descendants := func(name string) []*PostgresTable {
+		var tables []*PostgresTable
+
+		parentNames := []string{name}
+
+		for len(parentNames) > 0 {
+			parentName := parentNames[0]
+			parentNames = parentNames[1:]
+
+			for _, table := range currentTables {
+				if table.PartitionParent == parentName || slices.Contains(table.Inherits, parentName) {
+					tables = append(tables, table)
+					parentNames = append(parentNames, table.Name)
+				}
+			}
+		}
+
+		return tables
+	}
+
+	for _, currentTable := range currentTables {
+		desiredTable, found := lo.Find(desiredTables, func(table *PostgresTable) bool {
+			return table.Name == currentTable.Name
+		})
+		if !found || currentTable.IsPartition() {
+			continue
+		}
+
+		for _, currentColumn := range currentTable.Columns {
+			desiredColumn, found := desiredTable.ColumnByName(currentColumn.Name)
+			if !found || currentColumn.Inherited ||
+				(desiredColumn.Type == currentColumn.Type && desiredColumn.Collation == currentColumn.Collation) ||
+				(currentTable.PartitionKey != "" && currentColumn.Default.Valid) ||
+				desiredColumn.NeedsRebuild(currentColumn, serverVersion) {
+				continue
+			}
+
+			usingCast, err := columnUsingClause(desiredColumn, currentColumn, hasAutomaticCast)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if !usingCast {
+				continue
+			}
+
+			for _, descendant := range descendants(currentTable.Name) {
+				descendantColumn, found := descendant.ColumnByName(currentColumn.Name)
+				if !found || !descendantColumn.Default.Valid {
+					continue
+				}
+
+				drops[currentTable.Name] = append(drops[currentTable.Name], &PostgresAlterTableInstruction{
+					Name: descendant.Name,
+					Actions: []driversshared.AlterTableAction{
+						&PostgresDropDefaultAction{
+							ColumnName: descendantColumn.Name,
+						},
+					},
+				})
+				droppedDefaults[descendant.Name] = append(droppedDefaults[descendant.Name], descendantColumn.Name)
+			}
+		}
+	}
+
+	return drops, droppedDefaults, nil
+}
+
+func (t *PostgresTable) withoutDefaults(columnNames []string) *PostgresTable {
+	if len(columnNames) == 0 {
+		return t
+	}
+
+	tableCopy := *t
+
+	tableCopy.Columns = lo.Map(t.Columns, func(column *PostgresColumn, _ int) *PostgresColumn {
+		if !slices.Contains(columnNames, column.Name) {
+			return column
+		}
+
+		columnCopy := *column
+		columnCopy.Default = sql.NullString{}
+
+		return &columnCopy
+	})
+
+	return &tableCopy
+}
+
+// The current partition holds the state before the parent changes, and the copy holds the
+// state after the parent statements. A change of the parent without ONLY reaches each
+// partition, so DiffTables prints the parent statements first and the partition statements
+// then give back the own attributes of the partition.
+func (t *PostgresTable) withParentColumnChanges(
+	desiredParent *PostgresTable,
+	currentParent *PostgresTable,
+	serverVersion int,
+) *PostgresTable {
+	tableCopy := *t
+	tableCopy.Columns = nil
+
+	for _, desiredParentColumn := range desiredParent.Columns {
+		column, found := t.ColumnByName(desiredParentColumn.Name)
+		if !found {
+			continue
+		}
+
+		columnCopy := *column
+
+		currentParentColumn, found := currentParent.ColumnByName(desiredParentColumn.Name)
+		if !found || desiredParentColumn.NeedsRebuild(currentParentColumn, serverVersion) {
+			columnCopy = *desiredParentColumn
+			columnCopy.Comment = ""
+			columnCopy.Inherited = true
+			tableCopy.Columns = append(tableCopy.Columns, &columnCopy)
+
+			continue
+		}
+
+		typeChanged := desiredParentColumn.Type != currentParentColumn.Type ||
+			desiredParentColumn.Collation != currentParentColumn.Collation
+
+		// DiffTable drops the default of the parent before a TYPE action and then sets the
+		// desired default again. A TYPE action gives the storage mode of the new type.
+		if desiredParentColumn.Default != currentParentColumn.Default ||
+			(typeChanged && currentParentColumn.Default.Valid) {
+			columnCopy.Default = desiredParentColumn.Default
+		}
+
+		if desiredParentColumn.NotNull != currentParentColumn.NotNull {
+			columnCopy.NotNull = desiredParentColumn.NotNull
+		}
+
+		if typeChanged {
+			columnCopy.Storage = ""
+		}
+
+		if desiredParentColumn.Storage != currentParentColumn.Storage ||
+			(typeChanged && desiredParentColumn.Storage != "") {
+			columnCopy.Storage = desiredParentColumn.Storage
+		}
+
+		if desiredParentColumn.StatisticsTarget != currentParentColumn.StatisticsTarget {
+			columnCopy.StatisticsTarget = desiredParentColumn.StatisticsTarget
+		}
+
+		tableCopy.Columns = append(tableCopy.Columns, &columnCopy)
+	}
+
+	return &tableCopy
+}
+
+// CREATE TABLE INHERITS and CREATE TABLE PARTITION OF give each column of the parent the
+// default, the NOT NULL flag, and the storage mode of the parent. The returned table holds
+// that state, so DiffTable prints the attributes that the new child keeps for itself.
 func (t *PostgresTable) creationStateOfChild(desiredTables []*PostgresTable) *PostgresTable {
 	parents := lo.Filter(desiredTables, func(table *PostgresTable, _ int) bool {
-		return slices.Contains(t.Inherits, table.Name)
+		return slices.Contains(t.Inherits, table.Name) || table.Name == t.PartitionParent
 	})
 
 	tableCopy := *t
 
 	tableCopy.Columns = lo.Map(t.Columns, func(column *PostgresColumn, _ int) *PostgresColumn {
-		if !column.Inherited {
+		if !column.Inherited && !t.IsPartition() {
 			return column
 		}
 
