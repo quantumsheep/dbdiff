@@ -286,18 +286,60 @@ func TestPostgresEnumType(t *testing.T) {
 	t.Run("ReorderAnEnumThatAFunctionUses", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnCurrent(`
-			CREATE TYPE mood AS ENUM ('sad', 'happy');
+		schema := `
 			CREATE FUNCTION is_sad(value mood) RETURNS boolean LANGUAGE sql AS 'SELECT value = ''sad''';
-		`)
-		driver.ExecOnDesired(`
-			CREATE TYPE mood AS ENUM ('happy', 'sad');
-			CREATE FUNCTION is_sad(value mood) RETURNS boolean LANGUAGE sql AS 'SELECT value = ''sad''';
-		`)
+			CREATE TABLE people (id INT, current_mood mood);
+			CREATE VIEW sad_people AS SELECT id FROM people WHERE is_sad(current_mood);
+		`
+		driver.ExecOnCurrent(`CREATE TYPE mood AS ENUM ('sad', 'happy');` + schema)
+		driver.ExecOnCurrent(`INSERT INTO people VALUES (1, 'sad'), (2, 'happy');`)
+		driver.ExecOnDesired(`CREATE TYPE mood AS ENUM ('happy', 'sad');` + schema)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&driversshared.SQLDropViewInstruction{
+				Name: "sad_people",
+			},
+			&PostgresDropFunctionInstruction{
+				Name:      "is_sad",
+				Arguments: "value mood",
+			},
+			&PostgresRenameTypeInstruction{
+				ObjectType: "TYPE",
+				Name:       "mood",
+				NewName:    "dbdiff_old_mood",
+			},
+			&PostgresCreateEnumTypeInstruction{
+				Name:   "mood",
+				Labels: []string{"happy", "sad"},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "people",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName:       "current_mood",
+						DataType:         `"mood"`,
+						UsingCast:        true,
+						IntermediateType: "text",
+					},
+				},
+			},
+			&PostgresDropTypeInstruction{
+				Name: "dbdiff_old_mood",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION is_sad(value mood)\n RETURNS boolean\n LANGUAGE sql\nAS $function$SELECT value = 'sad'$function$",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "sad_people",
+				Query: " SELECT id\n   FROM people\n  WHERE is_sad(current_mood);",
+			},
+		})
 
-		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
-		require.EqualError(t, err, `the function is_sad(mood) uses the type "mood". `+
-			`dbdiff must drop and create this type again, and it cannot drop and create this object again`)
+		rows := driver.FetchAllFromCurrent("sad_people", "")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
 	})
 
 	t.Run("DropEnumType", func(t *testing.T) {

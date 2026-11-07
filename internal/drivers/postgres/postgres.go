@@ -37,9 +37,12 @@ type PostgresDriver struct {
 
 	recreatedObjectNames map[string]bool
 
-	// A type section drops these defaults before it changes the type of the column, and
-	// DiffTables sets them again.
-	droppedColumnDefaults map[string][]string
+	// A type section or a function section drops these objects before it changes the type
+	// of a column or drops a function. DiffTables creates the defaults and the table objects
+	// again, and diffFunctions creates the functions again.
+	droppedColumnDefaults  map[string][]string
+	droppedTableDependents map[string][]*PostgresColumnDependent
+	droppedFunctionKeys    map[string]bool
 }
 
 func NewPostgresDriver(config *PostgresDriverConfig) *PostgresDriver {
@@ -106,6 +109,8 @@ func (d *PostgresDriver) Diff(
 
 	d.recreatedObjectNames = nil
 	d.droppedColumnDefaults = nil
+	d.droppedTableDependents = nil
+	d.droppedFunctionKeys = nil
 
 	err = d.VerifySchema(ctx, d.DesiredDatabaseConnection, d.DesiredSchema, "desired")
 	if err != nil {

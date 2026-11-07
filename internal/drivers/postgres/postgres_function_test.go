@@ -154,21 +154,271 @@ func TestPostgresFunction(t *testing.T) {
 		})
 	})
 
-	t.Run("ChangeTheReturnTypeOfAFunctionThatADefaultUses", func(t *testing.T) {
+	t.Run("ChangeTheReturnTypeOfAFunctionThatADefaultAndACheckUse", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
 		driver.ExecOnCurrent(`
 			CREATE FUNCTION answer() RETURNS integer LANGUAGE sql AS 'SELECT 42';
-			CREATE TABLE answers (value bigint DEFAULT answer());
+			CREATE TABLE answers (id INT, value bigint DEFAULT answer() CHECK (value < answer() * 100));
+			INSERT INTO answers (id) VALUES (1);
 		`)
 		driver.ExecOnDesired(`
 			CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';
-			CREATE TABLE answers (value bigint DEFAULT answer());
+			CREATE TABLE answers (id INT, value bigint DEFAULT answer() CHECK (value < answer() * 100));
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&PostgresAlterTableInstruction{
+				Name: "answers",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "answers_value_check",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "answers",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropDefaultAction{
+						ColumnName: "value",
+					},
+				},
+			},
+			&PostgresDropFunctionInstruction{
+				Name: "answer",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION answer()\n RETURNS bigint\n LANGUAGE sql\nAS $function$SELECT 42$function$",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "answers",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "value",
+						Expression: "answer()",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "answers",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "answers_value_check",
+							Type: "c",
+							Def:  "CHECK ((value < (answer() * 100)))",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("answers", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "value": int64(42)},
+		}, rows)
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatTheDefaultOfAChildTableUses", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE answers (id INT, value bigint DEFAULT answer());
+			CREATE TABLE child_answers (note text) INHERITS (answers);
+		`
+		driver.ExecOnCurrent(`CREATE FUNCTION answer() RETURNS integer LANGUAGE sql AS 'SELECT 42';` + schema)
+		driver.ExecOnCurrent(`INSERT INTO child_answers (id) VALUES (1);`)
+		driver.ExecOnDesired(`CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';` + schema)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&PostgresAlterTableInstruction{
+				Name: "answers",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropDefaultAction{
+						ColumnName: "value",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "child_answers",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropDefaultAction{
+						ColumnName: "value",
+					},
+				},
+			},
+			&PostgresDropFunctionInstruction{
+				Name: "answer",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION answer()\n RETURNS bigint\n LANGUAGE sql\nAS $function$SELECT 42$function$",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "answers",
+				Only: true,
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "value",
+						Expression: "answer()",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "child_answers",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "value",
+						Expression: "answer()",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("child_answers", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "value": int64(42), "note": nil},
+		}, rows)
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatAnIndexAndAPolicyUse", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE answers (id INT, value bigint);
+			CREATE INDEX answers_distance ON answers ((value - answer()));
+			CREATE POLICY small_answers ON answers USING (value < answer() * 100);
+		`
+		driver.ExecOnCurrent(`CREATE FUNCTION answer() RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT 42';` + schema)
+		driver.ExecOnCurrent(`INSERT INTO answers VALUES (1, 40);`)
+		driver.ExecOnDesired(`CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql IMMUTABLE AS 'SELECT 42';` + schema)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&driversshared.SQLDropIndexInstruction{
+				Name: "answers_distance",
+			},
+			&PostgresDropPolicyInstruction{
+				Name:      "small_answers",
+				TableName: "answers",
+			},
+			&PostgresDropFunctionInstruction{
+				Name: "answer",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION answer()\n RETURNS bigint\n LANGUAGE sql\n IMMUTABLE\nAS $function$SELECT 42$function$",
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX answers_distance ON answers USING btree (((value - answer())))",
+			},
+			&PostgresCreatePolicyInstruction{
+				Name:       "small_answers",
+				TableName:  "answers",
+				Permissive: "PERMISSIVE",
+				Command:    "ALL",
+				Roles:      []string{"public"},
+				Using:      "(value < (answer() * 100))",
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("answers", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "value": int64(40)},
+		}, rows)
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatADomainUses", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE FUNCTION answer() RETURNS integer LANGUAGE sql AS 'SELECT 42';
+			CREATE DOMAIN small AS bigint CHECK (VALUE < answer());
+		`)
+		driver.ExecOnDesired(`
+			CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';
+			CREATE DOMAIN small AS bigint CHECK (VALUE < answer());
+		`)
+
+		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
+		require.EqualError(t, err, `the constraint small_check uses the function "answer". `+
+			`dbdiff must drop and create this function again. `+
+			`dbdiff cannot drop and create this object again. `+
+			`Drop this object and run dbdiff again. After you apply the diff, create the object again`)
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatAGeneratedColumnUses", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE FUNCTION answer() RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT 42';
+			CREATE TABLE answers (id INT, value bigint GENERATED ALWAYS AS (answer()) STORED);
+		`)
+		driver.ExecOnDesired(`
+			CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql IMMUTABLE AS 'SELECT 42';
+			CREATE TABLE answers (id INT, value bigint GENERATED ALWAYS AS (answer()) STORED);
 		`)
 
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
 		require.EqualError(t, err, `the default value for column value of table answers uses the function "answer". `+
-			`dbdiff must drop and create this function again, and it cannot drop and create this object again`)
+			`dbdiff must drop and create this function again. `+
+			`dbdiff cannot drop and create this object again. `+
+			`Drop this object and run dbdiff again. After you apply the diff, create the object again`)
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatAChildTableCheckAlsoDeclares", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE answers (id INT, value bigint CONSTRAINT small CHECK (value < answer()));
+			CREATE TABLE child_answers (value bigint CONSTRAINT small CHECK (value < answer())) INHERITS (answers);
+		`
+		driver.ExecOnCurrent(`CREATE FUNCTION answer() RETURNS integer LANGUAGE sql AS 'SELECT 42';` + schema)
+		driver.ExecOnDesired(`CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';` + schema)
+
+		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
+		require.EqualError(t, err, `the constraint small on table child_answers uses the function "answer". `+
+			`dbdiff must drop and create this function again. `+
+			`dbdiff cannot drop and create this object again. `+
+			`Drop this object and run dbdiff again. After you apply the diff, create the object again`)
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatAnIndexOfAMaterializedViewUses", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE answers (id INT, value bigint);
+			CREATE MATERIALIZED VIEW answer_values AS SELECT id, value FROM answers;
+			CREATE INDEX answer_values_distance ON answer_values ((value - answer()));
+		`
+		driver.ExecOnCurrent(`CREATE FUNCTION answer() RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT 42';` + schema)
+		driver.ExecOnCurrent(`INSERT INTO answers VALUES (1, 40); REFRESH MATERIALIZED VIEW answer_values;`)
+		driver.ExecOnDesired(`CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql IMMUTABLE AS 'SELECT 42';` + schema)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&PostgresDropMaterializedViewInstruction{
+				Name: "answer_values",
+			},
+			&PostgresDropFunctionInstruction{
+				Name: "answer",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION answer()\n RETURNS bigint\n LANGUAGE sql\n IMMUTABLE\nAS $function$SELECT 42$function$",
+			},
+			&PostgresCreateMaterializedViewInstruction{
+				Name:  "answer_values",
+				Query: " SELECT id,\n    value\n   FROM answers;",
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX answer_values_distance ON answer_values USING btree (((value - answer())))",
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("answer_values", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "value": int64(40)},
+		}, rows)
 	})
 
 	t.Run("CreateFunction", func(t *testing.T) {

@@ -122,20 +122,21 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType boo
 		}
 
 		// CREATE OR REPLACE keeps the comment, and only a DROP statement removes it.
-		dropped := false
+		dropped := d.droppedFunctionKeys[currentFunction.MatchKey()]
 
-		if desiredFunction.Def != currentFunction.Def {
-			if desiredFunction.ReturnType != currentFunction.ReturnType ||
-				desiredFunction.Arguments != currentFunction.Arguments {
-				err := d.recreateFunctionDependents(ctx, currentFunction)
-				if err != nil {
-					return nil, err
-				}
-
-				additions = append(additions, currentFunction.DropInstruction())
-				dropped = true
+		if !dropped && desiredFunction.Def != currentFunction.Def &&
+			(desiredFunction.ReturnType != currentFunction.ReturnType ||
+				desiredFunction.Arguments != currentFunction.Arguments) {
+			dropInstructions, err := d.dropFunction(ctx, currentFunction)
+			if err != nil {
+				return nil, err
 			}
 
+			additions = append(additions, dropInstructions...)
+			dropped = true
+		}
+
+		if dropped || desiredFunction.Def != currentFunction.Def {
 			additions = append(additions, desiredFunction.CreateInstruction())
 		}
 
@@ -149,7 +150,7 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType boo
 		_, found := lo.Find(desiredFunctions, func(function *PostgresFunction) bool {
 			return function.MatchKey() == currentFunction.MatchKey()
 		})
-		if !found {
+		if !found && !d.droppedFunctionKeys[currentFunction.MatchKey()] {
 			removals = append(removals, currentFunction.DropInstruction())
 		}
 	}
@@ -160,55 +161,153 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType boo
 	}, nil
 }
 
-// PostgreSQL refuses to drop a function while another object uses it. DiffViewsAndMaterializedViews
-// drops and creates again each relation that this function marks. The kind blocker names an
-// object that the diff cannot drop and create again.
-func (d *PostgresDriver) recreateFunctionDependents(ctx context.Context, function *PostgresFunction) error {
+// diffFunctions creates each dropped function again. If an earlier section dropped the
+// function, the result is empty.
+func (d *PostgresDriver) dropFunction(
+	ctx context.Context,
+	function *PostgresFunction,
+) ([]driversshared.Instruction, error) {
+	if d.droppedFunctionKeys[function.MatchKey()] {
+		return nil, nil
+	}
+
+	instructions, err := d.dropFunctionDependents(ctx, function)
+	if err != nil {
+		return nil, err
+	}
+
+	if d.droppedFunctionKeys == nil {
+		d.droppedFunctionKeys = map[string]bool{}
+	}
+
+	d.droppedFunctionKeys[function.MatchKey()] = true
+
+	return append(instructions, function.DropInstruction()), nil
+}
+
+// PostgreSQL refuses to drop a function while another object uses it. The returned instructions
+// drop each default, check constraint, index, and policy that uses the function, and DiffTables
+// creates them again. DiffViewsAndMaterializedViews drops and creates again each relation that
+// this function marks. The kind blocker names an object that the diff cannot drop and create
+// again. A table object of a function that uses a table row type is a blocker, because
+// DiffTables runs before the section of that function. A parent statement reaches an inherited
+// check constraint, but a child table that also declares the constraint keeps it, so that
+// constraint is a blocker.
+func (d *PostgresDriver) dropFunctionDependents(
+	ctx context.Context,
+	function *PostgresFunction,
+) ([]driversshared.Instruction, error) {
 	dependents, err := driversshared.QueryAll(ctx, d.CurrentDatabaseConnection, `
 		SELECT DISTINCT
+			kind,
+			table_name,
+			column_name,
 			CASE
-				WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
-					AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
-				ELSE 'blocker'
-			END AS kind,
-			CASE
-				WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
-					AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN rule_class.relname::text
-				ELSE pg_describe_object(d.classid, d.objid, d.objsubid)
+				WHEN kind = 'relation' THEN table_name
+				WHEN kind IN ('constraint', 'index', 'policy') THEN object_name
+				ELSE description
 			END AS name
-		FROM pg_depend d
-		JOIN pg_proc p ON p.oid = d.refobjid
-		LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
-		LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
-		WHERE d.refclassid = 'pg_proc'::regclass
-		AND d.deptype IN ('n', 'a')
-		AND p.pronamespace = quote_ident(current_schema())::regnamespace
-		AND p.proname = $1
-		AND oidvectortypes(p.proargtypes) = $2
-		ORDER BY kind, name
+		FROM (
+			SELECT
+				CASE
+					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
+						AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
+					WHEN table_class.relkind = 'm'
+						AND table_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
+					WHEN $3 OR table_class.relnamespace <> quote_ident(current_schema())::regnamespace THEN 'blocker'
+					WHEN column_default.oid IS NOT NULL AND default_attribute.attgenerated = '' THEN 'default'
+					WHEN table_constraint.contype = 'c' AND table_constraint.coninhcount = 0 THEN 'constraint'
+					WHEN table_constraint.contype = 'c' AND NOT table_constraint.conislocal THEN NULL
+					WHEN table_index.indexrelid IS NOT NULL AND NOT EXISTS (
+						SELECT 1 FROM pg_constraint index_constraint WHERE index_constraint.conindid = table_index.indexrelid
+					) THEN
+						CASE WHEN NOT index_class.relispartition THEN 'index' END
+					WHEN table_policy.oid IS NOT NULL THEN 'policy'
+					ELSE 'blocker'
+				END AS kind,
+				coalesce(rule_class.relname, table_class.relname, '') AS table_name,
+				coalesce(default_attribute.attname, '') AS column_name,
+				coalesce(table_constraint.conname, index_class.relname, table_policy.polname) AS object_name,
+				pg_describe_object(d.classid, d.objid, d.objsubid) AS description
+			FROM pg_depend d
+			JOIN pg_proc p ON p.oid = d.refobjid
+			LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
+			LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
+			LEFT JOIN pg_attrdef column_default ON d.classid = 'pg_attrdef'::regclass
+				AND column_default.oid = d.objid
+			LEFT JOIN pg_attribute default_attribute ON default_attribute.attrelid = column_default.adrelid
+				AND default_attribute.attnum = column_default.adnum
+			LEFT JOIN pg_constraint table_constraint ON d.classid = 'pg_constraint'::regclass
+				AND table_constraint.oid = d.objid
+				AND table_constraint.conrelid <> 0
+			LEFT JOIN pg_index table_index ON d.classid = 'pg_class'::regclass
+				AND table_index.indexrelid = d.objid
+			LEFT JOIN pg_class index_class ON index_class.oid = table_index.indexrelid
+			LEFT JOIN pg_policy table_policy ON d.classid = 'pg_policy'::regclass
+				AND table_policy.oid = d.objid
+			LEFT JOIN pg_class table_class ON table_class.oid = coalesce(
+				column_default.adrelid, table_constraint.conrelid, table_index.indrelid, table_policy.polrelid)
+			WHERE d.refclassid = 'pg_proc'::regclass
+			AND d.deptype IN ('n', 'a')
+			AND p.pronamespace = quote_ident(current_schema())::regnamespace
+			AND p.proname = $1
+			AND oidvectortypes(p.proargtypes) = $2
+		) dependents
+		WHERE kind IS NOT NULL
+		ORDER BY kind, table_name, column_name, name
 	`, func(rows *sql.Rows) (*PostgresColumnDependent, error) {
 		dependent := &PostgresColumnDependent{}
 
-		err := rows.Scan(&dependent.Kind, &dependent.Name)
+		err := rows.Scan(&dependent.Kind, &dependent.TableName, &dependent.ColumnName, &dependent.Name)
 
 		return dependent, err
-	}, function.Name, function.ArgumentTypes)
+	}, function.Name, function.ArgumentTypes, function.UsesTableRowType)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	var instructions []driversshared.Instruction
 
 	for _, dependent := range dependents {
-		if dependent.Kind == "blocker" {
-			return fmt.Errorf(
-				"the %s uses the function %q. dbdiff must drop and create this function again, "+
-					"and it cannot drop and create this object again",
-				dependent.Name, function.Name)
+		switch dependent.Kind {
+		case "blocker":
+			return nil, fmt.Errorf("the %s uses the function %q. dbdiff must drop and create this function again. %s",
+				dependent.Name, function.Name, blockerAdvice)
+		case "relation":
+			d.markRecreated(dependent.TableName)
+		case "default":
+			instructions = append(instructions, d.dropColumnDefault(dependent.TableName, dependent.ColumnName)...)
+		case "constraint":
+			instructions = append(instructions, &PostgresAlterTableInstruction{
+				Name: dependent.TableName,
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: dependent.Name,
+					},
+				},
+			})
+		case "index":
+			instructions = append(instructions, &driversshared.SQLDropIndexInstruction{
+				Name: dependent.Name,
+			})
+		case "policy":
+			instructions = append(instructions, &PostgresDropPolicyInstruction{
+				Name:      dependent.Name,
+				TableName: dependent.TableName,
+			})
 		}
 
-		d.markRecreated(dependent.Name)
+		if dependent.Kind != "relation" && dependent.Kind != "default" {
+			if d.droppedTableDependents == nil {
+				d.droppedTableDependents = map[string][]*PostgresColumnDependent{}
+			}
+
+			d.droppedTableDependents[dependent.TableName] = append(
+				d.droppedTableDependents[dependent.TableName], dependent)
+		}
 	}
 
-	return nil
+	return instructions, nil
 }
 
 func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*PostgresFunction, error) {

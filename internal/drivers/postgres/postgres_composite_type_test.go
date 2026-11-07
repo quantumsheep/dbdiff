@@ -192,7 +192,9 @@ func TestPostgresCompositeType(t *testing.T) {
 
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
 		require.EqualError(t, err, `the column value of table points uses the type "pair". `+
-			`dbdiff must drop and create this type again, and it cannot drop and create this object again`)
+			`dbdiff must drop and create this type again. `+
+			`dbdiff cannot drop and create this object again. `+
+			`Drop this object and run dbdiff again. After you apply the diff, create the object again`)
 	})
 
 	t.Run("DropCompositeType", func(t *testing.T) {

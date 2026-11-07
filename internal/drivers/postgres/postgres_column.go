@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 type PostgresColumn struct {
@@ -358,12 +360,14 @@ func getColumnDependents(
 	}, driversshared.QuoteIdentifier(tableName), columnNames)
 }
 
+// FunctionKey holds the match key of a function that uses the type.
 type PostgresTypeDependent struct {
-	Kind       string
-	TableName  string
-	ColumnName string
-	IsArray    bool
-	Name       string
+	Kind        string
+	TableName   string
+	ColumnName  string
+	IsArray     bool
+	Name        string
+	FunctionKey string
 }
 
 // The kind blocker names an object that the diff cannot change. A column of a child table
@@ -371,7 +375,7 @@ type PostgresTypeDependent struct {
 // and the constraints of a domain go with the type, so the query skips them too.
 func getTypeDependents(ctx context.Context, db *sql.DB, typeName string) ([]*PostgresTypeDependent, error) {
 	return driversshared.QueryAll(ctx, db, `
-		SELECT DISTINCT kind, table_name, column_name, is_array, name
+		SELECT DISTINCT kind, table_name, column_name, is_array, name, function_key
 		FROM (
 			SELECT
 				CASE
@@ -384,12 +388,16 @@ func getTypeDependents(ctx context.Context, db *sql.DB, typeName string) ([]*Pos
 					WHEN default_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'default'
 					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
 						AND rule_class.relnamespace = quote_ident(current_schema())::regnamespace THEN 'relation'
+					WHEN routine.prokind IN ('f', 'p')
+						AND routine.pronamespace = quote_ident(current_schema())::regnamespace THEN 'function'
 					ELSE 'blocker'
 				END AS kind,
 				coalesce(column_class.relname, default_class.relname, rule_class.relname, '') AS table_name,
 				coalesce(column_attribute.attname, default_attribute.attname, '') AS column_name,
 				d.refobjid = t.typarray AS is_array,
-				pg_describe_object(d.classid, d.objid, d.objsubid) AS name
+				pg_describe_object(d.classid, d.objid, d.objsubid) AS name,
+				coalesce(format('%s %s(%s)', CASE routine.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+					routine.proname, oidvectortypes(routine.proargtypes)), '') AS function_key
 			FROM pg_type t
 			JOIN pg_depend d ON d.refclassid = 'pg_type'::regclass AND d.refobjid IN (t.oid, t.typarray)
 			LEFT JOIN pg_class column_class ON d.classid = 'pg_class'::regclass
@@ -404,6 +412,7 @@ func getTypeDependents(ctx context.Context, db *sql.DB, typeName string) ([]*Pos
 				AND default_attribute.attnum = column_default.adnum
 			LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
 			LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
+			LEFT JOIN pg_proc routine ON d.classid = 'pg_proc'::regclass AND routine.oid = d.objid
 			WHERE t.typnamespace = quote_ident(current_schema())::regnamespace
 			AND t.typname = $1
 		) dependents
@@ -413,17 +422,18 @@ func getTypeDependents(ctx context.Context, db *sql.DB, typeName string) ([]*Pos
 		dependent := &PostgresTypeDependent{}
 
 		err := rows.Scan(&dependent.Kind, &dependent.TableName, &dependent.ColumnName,
-			&dependent.IsArray, &dependent.Name)
+			&dependent.IsArray, &dependent.Name, &dependent.FunctionKey)
 
 		return dependent, err
 	}, typeName)
 }
 
+const blockerAdvice = "dbdiff cannot drop and create this object again. " +
+	"Drop this object and run dbdiff again. After you apply the diff, create the object again"
+
 func typeDependentError(objectName string, typeName string) error {
-	return fmt.Errorf(
-		"the %s uses the type %q. dbdiff must drop and create this type again, "+
-			"and it cannot drop and create this object again",
-		objectName, typeName)
+	return fmt.Errorf("the %s uses the type %q. dbdiff must drop and create this type again. %s",
+		objectName, typeName, blockerAdvice)
 }
 
 // PostgreSQL refuses to drop a type while a column uses it. The diff renames the current
@@ -442,12 +452,46 @@ func (d *PostgresDriver) replaceUsedType(
 		return nil, err
 	}
 
+	var instructions []driversshared.Instruction
+	var currentFunctions []*PostgresFunction
+
+	usesFunction := lo.ContainsBy(dependents, func(dependent *PostgresTypeDependent) bool {
+		return dependent.Kind == "function"
+	})
+	if usesFunction {
+		currentFunctions, err = d.GetFunctions(ctx, d.CurrentDatabaseConnection)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// A DROP FUNCTION statement names the types of the arguments, so it comes before the rename.
+	for _, dependent := range dependents {
+		if dependent.Kind != "function" {
+			continue
+		}
+
+		function, found := lo.Find(currentFunctions, func(function *PostgresFunction) bool {
+			return function.MatchKey() == dependent.FunctionKey
+		})
+		if !found {
+			return nil, typeDependentError(dependent.Name, typeName)
+		}
+
+		dropInstructions, err := d.dropFunction(ctx, function)
+		if err != nil {
+			return nil, err
+		}
+
+		instructions = append(instructions, dropInstructions...)
+	}
+
 	oldName := "dbdiff_old_" + typeName
-	instructions := []driversshared.Instruction{&PostgresRenameTypeInstruction{
+	instructions = append(instructions, &PostgresRenameTypeInstruction{
 		ObjectType: objectType,
 		Name:       typeName,
 		NewName:    oldName,
-	}}
+	})
 	instructions = append(instructions, createInstructions...)
 
 	// A default of the old type cannot take the new type, so every default goes first.
@@ -456,20 +500,8 @@ func (d *PostgresDriver) replaceUsedType(
 	for _, dependent := range dependents {
 		switch dependent.Kind {
 		case "default":
-			if d.droppedColumnDefaults == nil {
-				d.droppedColumnDefaults = map[string][]string{}
-			}
-
-			d.droppedColumnDefaults[dependent.TableName] = append(
-				d.droppedColumnDefaults[dependent.TableName], dependent.ColumnName)
-			instructions = append(instructions, &PostgresAlterTableInstruction{
-				Name: dependent.TableName,
-				Actions: []driversshared.AlterTableAction{
-					&PostgresDropDefaultAction{
-						ColumnName: dependent.ColumnName,
-					},
-				},
-			})
+			instructions = append(instructions, d.dropColumnDefault(dependent.TableName, dependent.ColumnName)...)
+		case "function":
 		case "column":
 			conversion, err := d.columnTypeConversion(ctx, dependent, typeName, intermediateType)
 			if err != nil {
@@ -495,6 +527,28 @@ func (d *PostgresDriver) replaceUsedType(
 	return append(instructions, &PostgresDropTypeInstruction{
 		Name: oldName,
 	}), nil
+}
+
+// DiffTables sets the default again. If the diff dropped the default before, the result is empty.
+func (d *PostgresDriver) dropColumnDefault(tableName string, columnName string) []driversshared.Instruction {
+	if slices.Contains(d.droppedColumnDefaults[tableName], columnName) {
+		return nil
+	}
+
+	if d.droppedColumnDefaults == nil {
+		d.droppedColumnDefaults = map[string][]string{}
+	}
+
+	d.droppedColumnDefaults[tableName] = append(d.droppedColumnDefaults[tableName], columnName)
+
+	return []driversshared.Instruction{&PostgresAlterTableInstruction{
+		Name: tableName,
+		Actions: []driversshared.AlterTableAction{
+			&PostgresDropDefaultAction{
+				ColumnName: columnName,
+			},
+		},
+	}}
 }
 
 // PostgreSQL rebuilds the indexes and the constraints of the column, and it refuses the

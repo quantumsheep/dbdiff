@@ -205,6 +205,96 @@ func TestPostgresDomain(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ChangeTheBaseTypeOfADomainThatAFunctionReturns", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE FUNCTION double_amount(value amount) RETURNS amount LANGUAGE sql AS 'SELECT value * 2';
+			CREATE TABLE payments (
+				id INT,
+				value amount DEFAULT double_amount(1) CHECK (double_amount(value) < 1000)
+			);
+		`
+		driver.ExecOnCurrent(`CREATE DOMAIN amount AS integer;` + schema)
+		driver.ExecOnCurrent(`INSERT INTO payments VALUES (1, 5);`)
+		driver.ExecOnDesired(`CREATE DOMAIN amount AS bigint;` + schema)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "payments_value_check",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropDefaultAction{
+						ColumnName: "value",
+					},
+				},
+			},
+			&PostgresDropFunctionInstruction{
+				Name:      "double_amount",
+				Arguments: "value amount",
+			},
+			&PostgresRenameTypeInstruction{
+				ObjectType: "DOMAIN",
+				Name:       "amount",
+				NewName:    "dbdiff_old_amount",
+			},
+			&PostgresCreateDomainInstruction{
+				Name:     "amount",
+				BaseType: "bigint",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAlterColumnTypeAction{
+						ColumnName: "value",
+						DataType:   `"amount"`,
+						UsingCast:  true,
+					},
+				},
+			},
+			&PostgresDropDomainInstruction{
+				Name: "dbdiff_old_amount",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION double_amount(value amount)\n RETURNS amount\n LANGUAGE sql\nAS $function$SELECT value * 2$function$",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "value",
+						Expression: "double_amount((1)::amount)",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "payments",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "payments_value_check",
+							Type: "c",
+							Def:  "CHECK (((double_amount(value))::bigint < 1000))",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("payments", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "value": int64(5)},
+		}, rows)
+	})
+
 	t.Run("DropDomain", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
