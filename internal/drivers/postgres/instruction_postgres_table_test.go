@@ -275,6 +275,28 @@ func TestPostgresTableInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresCommentOnConstraint", func(t *testing.T) {
+		instruction := &PostgresCommentOnConstraintInstruction{
+			TableName: "users",
+			Name:      "positive_age",
+			Text:      "the age must be positive",
+		}
+
+		require.Equal(t,
+			`COMMENT ON CONSTRAINT "positive_age" ON "users" IS 'the age must be positive';`,
+			instruction.String())
+	})
+
+	t.Run("PostgresRemoveTheCommentOfAConstraint", func(t *testing.T) {
+		instruction := &PostgresCommentOnConstraintInstruction{
+			TableName: "users",
+			Name:      "positive_age",
+			Text:      "",
+		}
+
+		require.Equal(t, `COMMENT ON CONSTRAINT "positive_age" ON "users" IS NULL;`, instruction.String())
+	})
+
 	t.Run("PostgresCommentWithAQuote", func(t *testing.T) {
 		instruction := &PostgresCommentOnTableInstruction{
 			Name: "users",

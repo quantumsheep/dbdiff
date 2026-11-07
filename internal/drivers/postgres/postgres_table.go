@@ -494,6 +494,7 @@ func (t *PostgresTable) DiffTable(
 		if !found {
 			instructions = append(instructions,
 				alterTable(&PostgresAddConstraintAction{Constraint: desiredConstraint}))
+			instructions = append(instructions, desiredConstraint.CommentInstructions(t.Name, nil)...)
 
 			continue
 		}
@@ -502,7 +503,12 @@ func (t *PostgresTable) DiffTable(
 			instructions = append(instructions,
 				alterTable(&PostgresDropConstraintAction{ConstraintName: currentConstraint.Name}),
 				alterTable(&PostgresAddConstraintAction{Constraint: desiredConstraint}))
+			instructions = append(instructions, desiredConstraint.CommentInstructions(t.Name, nil)...)
+
+			continue
 		}
+
+		instructions = append(instructions, desiredConstraint.CommentInstructions(t.Name, currentConstraint)...)
 	}
 
 	instructions = append(instructions, dropNotNullInstructions...)
@@ -932,6 +938,7 @@ func (t *PostgresTable) ForeignKeyInstructions() []driversshared.Instruction {
 				&PostgresAddConstraintAction{Constraint: constraint},
 			},
 		})
+		instructions = append(instructions, constraint.CommentInstructions(t.Name, nil)...)
 	}
 
 	return instructions
@@ -963,7 +970,8 @@ func (t *PostgresTable) Instructions() []driversshared.Instruction {
 		return instructions
 	}
 
-	instructions := []driversshared.Instruction{t.CreateTableInstruction()}
+	createTableInstruction := t.CreateTableInstruction()
+	instructions := []driversshared.Instruction{createTableInstruction}
 
 	for _, column := range t.Columns {
 		instructions = append(instructions, column.StorageInstructions(t.Name)...)
@@ -971,6 +979,11 @@ func (t *PostgresTable) Instructions() []driversshared.Instruction {
 	}
 
 	instructions = append(instructions, t.CommentInstructions()...)
+
+	for _, constraint := range createTableInstruction.Constraints {
+		instructions = append(instructions, constraint.CommentInstructions(t.Name, nil)...)
+	}
+
 	instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 
 	for _, index := range t.Indexes {
@@ -1331,6 +1344,7 @@ func (t *PostgresTable) withInheritanceChanges(
 
 			constraintCopy := *parentConstraint
 			constraintCopy.Inherited = false
+			constraintCopy.Comment = ""
 			preInheritInstructions = append(preInheritInstructions, alterTable(&PostgresAddConstraintAction{
 				Constraint: &constraintCopy,
 			}))
@@ -1859,13 +1873,15 @@ func diffForeignKeys(
 			}
 		}
 
+		keeps := func(desired *PostgresConstraint, current *PostgresConstraint) bool {
+			return desired.Def == current.Def && !mustRecreate(currentTable.Name, current)
+		}
+
 		tableAdditions, tableDrops := driversshared.ReplaceByKey(desiredForeignKeys, foreignKeys(currentTable),
 			func(constraint *PostgresConstraint) string {
 				return constraint.Name
 			},
-			func(desired *PostgresConstraint, current *PostgresConstraint) bool {
-				return desired.Def == current.Def && !mustRecreate(currentTable.Name, current)
-			},
+			keeps,
 			func(constraint *PostgresConstraint) driversshared.Instruction {
 				return alterTable(&PostgresAddConstraintAction{
 					Constraint: constraint,
@@ -1879,6 +1895,15 @@ func diffForeignKeys(
 
 		if found {
 			additions = append(additions, tableAdditions...)
+
+			for _, desiredForeignKey := range desiredForeignKeys {
+				currentForeignKey, exists := currentTable.ConstraintByName(desiredForeignKey.Name)
+				if exists && !keeps(desiredForeignKey, currentForeignKey) {
+					currentForeignKey = nil
+				}
+
+				additions = append(additions, desiredForeignKey.CommentInstructions(currentTable.Name, currentForeignKey)...)
+			}
 		}
 
 		drops = append(drops, tableDrops...)

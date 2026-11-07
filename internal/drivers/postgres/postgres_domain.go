@@ -9,8 +9,9 @@ import (
 )
 
 type PostgresDomainConstraint struct {
-	Name string
-	Def  string
+	Name    string
+	Def     string
+	Comment string
 }
 
 type PostgresDomain struct {
@@ -53,7 +54,36 @@ func (d *PostgresDomain) Instructions() []driversshared.Instruction {
 		})
 	}
 
+	for _, constraint := range d.Constraints {
+		instructions = append(instructions, d.constraintCommentInstructions(constraint, nil)...)
+	}
+
 	return instructions
+}
+
+// An ADD CONSTRAINT statement creates a constraint with no comment. If the diff adds the
+// constraint, current is nil.
+func (d *PostgresDomain) constraintCommentInstructions(
+	constraint *PostgresDomainConstraint,
+	current *PostgresDomainConstraint,
+) []driversshared.Instruction {
+	currentComment := ""
+
+	if current != nil {
+		currentComment = current.Comment
+	}
+
+	if constraint.Comment == currentComment {
+		return nil
+	}
+
+	return []driversshared.Instruction{
+		&PostgresCommentOnDomainConstraintInstruction{
+			DomainName: d.Name,
+			Name:       constraint.Name,
+			Text:       constraint.Comment,
+		},
+	}
 }
 
 func (d *PostgresDomain) DropInstruction() *PostgresDropDomainInstruction {
@@ -113,6 +143,7 @@ func (d *PostgresDomain) Diff(other *PostgresDomain) []driversshared.Instruction
 					Definition:     desiredConstraint.Def,
 				},
 			})
+			instructions = append(instructions, d.constraintCommentInstructions(desiredConstraint, nil)...)
 
 			continue
 		}
@@ -132,7 +163,12 @@ func (d *PostgresDomain) Diff(other *PostgresDomain) []driversshared.Instruction
 						Definition:     desiredConstraint.Def,
 					},
 				})
+			instructions = append(instructions, d.constraintCommentInstructions(desiredConstraint, nil)...)
+
+			continue
 		}
+
+		instructions = append(instructions, d.constraintCommentInstructions(desiredConstraint, currentConstraint)...)
 	}
 
 	for _, currentConstraint := range other.Constraints {
@@ -194,7 +230,8 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 			t.typdefault,
 			c.conname,
 			pg_get_constraintdef(c.oid),
-			coalesce(obj_description(t.oid, 'pg_type'), '')
+			coalesce(obj_description(t.oid, 'pg_type'), ''),
+			coalesce(obj_description(c.oid, 'pg_constraint'), '')
 		FROM pg_type t
 		LEFT JOIN pg_constraint c ON c.contypid = t.oid AND c.contype = 'c'
 		WHERE t.typnamespace = quote_ident(current_schema())::regnamespace
@@ -216,9 +253,10 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 		var domainName, baseType string
 		var notNull bool
 		var defaultValue, constraintName, constraintDef sql.NullString
-		var comment string
+		var comment, constraintComment string
 
-		err := rows.Scan(&domainName, &baseType, &notNull, &defaultValue, &constraintName, &constraintDef, &comment)
+		err := rows.Scan(&domainName, &baseType, &notNull, &defaultValue, &constraintName, &constraintDef, &comment,
+			&constraintComment)
 		if err != nil {
 			return nil, err
 		}
@@ -237,8 +275,9 @@ func (d *PostgresDriver) GetDomains(ctx context.Context, db *sql.DB) ([]*Postgre
 
 		if constraintName.Valid {
 			constraint := &PostgresDomainConstraint{
-				Name: constraintName.String,
-				Def:  constraintDef.String,
+				Name:    constraintName.String,
+				Def:     constraintDef.String,
+				Comment: constraintComment,
 			}
 			lastDomain.Constraints = append(lastDomain.Constraints, constraint)
 		}

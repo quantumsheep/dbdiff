@@ -13,6 +13,7 @@ type PostgresConstraint struct {
 	Type            string
 	Def             string
 	ReferencedTable string
+	Comment         string
 
 	// The parent of a table of INHERITS holds this constraint, and each change of the parent
 	// reaches the child.
@@ -27,6 +28,31 @@ func (c *PostgresConstraint) Clause() string {
 	return fmt.Sprintf("CONSTRAINT %s %s", driversshared.QuoteIdentifier(c.Name), c.Def)
 }
 
+// An ADD CONSTRAINT statement creates a constraint with no comment. If the diff adds the
+// constraint, current is nil.
+func (c *PostgresConstraint) CommentInstructions(
+	tableName string,
+	current *PostgresConstraint,
+) []driversshared.Instruction {
+	currentComment := ""
+
+	if current != nil {
+		currentComment = current.Comment
+	}
+
+	if c.Comment == currentComment {
+		return nil
+	}
+
+	return []driversshared.Instruction{
+		&PostgresCommentOnConstraintInstruction{
+			TableName: tableName,
+			Name:      c.Name,
+			Text:      c.Comment,
+		},
+	}
+}
+
 func getTableConstraints(ctx context.Context, db *sql.DB, table *PostgresTable) error {
 	// PostgreSQL 18 keeps the NOT NULL flag of a column in pg_constraint too, and the column
 	// holds that flag already. Without this filter a renamed column names one flag with two
@@ -37,7 +63,8 @@ func getTableConstraints(ctx context.Context, db *sql.DB, table *PostgresTable) 
 				contype,
 				pg_get_constraintdef(oid),
 				coalesce((SELECT relname FROM pg_class WHERE oid = confrelid), ''),
-				NOT conislocal
+				NOT conislocal,
+				coalesce(obj_description(oid, 'pg_constraint'), '')
 			FROM pg_constraint
 			WHERE conrelid = $1::regclass
 			AND contype <> 'n'
@@ -47,7 +74,8 @@ func getTableConstraints(ctx context.Context, db *sql.DB, table *PostgresTable) 
 
 		var referencedTable string
 
-		err := rows.Scan(&constraint.Name, &constraint.Type, &constraint.Def, &referencedTable, &constraint.Inherited)
+		err := rows.Scan(&constraint.Name, &constraint.Type, &constraint.Def, &referencedTable, &constraint.Inherited,
+			&constraint.Comment)
 		if err != nil {
 			return nil, err
 		}

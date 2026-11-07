@@ -304,4 +304,81 @@ func TestPostgresDomain(t *testing.T) {
 			&PostgresDropDomainInstruction{Name: "positive_int"},
 		})
 	})
+
+	t.Run("ChangeADomainConstraintComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE DOMAIN age AS INT CONSTRAINT positive_age CHECK (VALUE > 0);`)
+		driver.ExecOnDesired(`
+			CREATE DOMAIN age AS INT CONSTRAINT positive_age CHECK (VALUE > 0);
+			COMMENT ON CONSTRAINT positive_age ON DOMAIN age IS 'The age must be positive';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnDomainConstraintInstruction{
+				DomainName: "age",
+				Name:       "positive_age",
+				Text:       "The age must be positive",
+			},
+		})
+	})
+
+	t.Run("AChangedDomainConstraintKeepsItsComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE DOMAIN age AS INT CONSTRAINT positive_age CHECK (VALUE > 0);
+			COMMENT ON CONSTRAINT positive_age ON DOMAIN age IS 'The age must be valid';
+		`)
+		driver.ExecOnDesired(`
+			CREATE DOMAIN age AS INT CONSTRAINT positive_age CHECK (VALUE > 1);
+			COMMENT ON CONSTRAINT positive_age ON DOMAIN age IS 'The age must be valid';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterDomainInstruction{
+				Name: "age",
+				Action: &PostgresDropDomainConstraintAction{
+					ConstraintName: "positive_age",
+				},
+			},
+			&PostgresAlterDomainInstruction{
+				Name: "age",
+				Action: &PostgresAddDomainConstraintAction{
+					ConstraintName: "positive_age",
+					Definition:     "CHECK ((VALUE > 1))",
+				},
+			},
+			&PostgresCommentOnDomainConstraintInstruction{
+				DomainName: "age",
+				Name:       "positive_age",
+				Text:       "The age must be valid",
+			},
+		})
+	})
+
+	t.Run("CreateADomainWithAConstraintComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE DOMAIN age AS INT CONSTRAINT positive_age CHECK (VALUE > 0);
+			COMMENT ON CONSTRAINT positive_age ON DOMAIN age IS 'The age must be positive';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateDomainInstruction{
+				Name:     "age",
+				BaseType: "integer",
+				Constraints: []*PostgresDomainConstraint{
+					{
+						Name:    "positive_age",
+						Def:     "CHECK ((VALUE > 0))",
+						Comment: "The age must be positive",
+					},
+				},
+			},
+			&PostgresCommentOnDomainConstraintInstruction{
+				DomainName: "age",
+				Name:       "positive_age",
+				Text:       "The age must be positive",
+			},
+		})
+	})
 }

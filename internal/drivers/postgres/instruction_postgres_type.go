@@ -262,3 +262,19 @@ func (i *PostgresCommentOnDomainInstruction) String() string {
 func (i *PostgresCommentOnDomainInstruction) Comment() string {
 	return driversshared.ObjectComment("Modify", "domain", i.Name)
 }
+
+type PostgresCommentOnDomainConstraintInstruction struct {
+	DomainName string
+	Name       string
+	Text       string
+}
+
+func (i *PostgresCommentOnDomainConstraintInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON CONSTRAINT %s ON DOMAIN %s IS %s;",
+		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteIdentifier(i.DomainName),
+		commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnDomainConstraintInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "domain", i.DomainName)
+}

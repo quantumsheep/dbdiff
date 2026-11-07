@@ -481,4 +481,255 @@ func TestPostgresConstraint(t *testing.T) {
 			{"id": int64(2)},
 		}, rows)
 	})
+
+	t.Run("AddAConstraintComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 0));`)
+		driver.ExecOnDesired(`
+			CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			COMMENT ON CONSTRAINT positive_age ON users IS 'The age must be positive';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "users",
+				Name:      "positive_age",
+				Text:      "The age must be positive",
+			},
+		})
+	})
+
+	t.Run("ChangeAConstraintComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			COMMENT ON CONSTRAINT positive_age ON users IS 'Old text';
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			COMMENT ON CONSTRAINT positive_age ON users IS 'New text';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "users",
+				Name:      "positive_age",
+				Text:      "New text",
+			},
+		})
+	})
+
+	t.Run("RemoveAConstraintComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			COMMENT ON CONSTRAINT positive_age ON users IS 'Old text';
+		`)
+		driver.ExecOnDesired(`CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 0));`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "users",
+				Name:      "positive_age",
+				Text:      "",
+			},
+		})
+	})
+
+	t.Run("AChangedConstraintKeepsItsComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			COMMENT ON CONSTRAINT positive_age ON users IS 'The age must be valid';
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE users (age INT, CONSTRAINT positive_age CHECK (age > 1));
+			COMMENT ON CONSTRAINT positive_age ON users IS 'The age must be valid';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "positive_age",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:    "positive_age",
+							Type:    "c",
+							Def:     "CHECK ((age > 1))",
+							Comment: "The age must be valid",
+						},
+					},
+				},
+			},
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "users",
+				Name:      "positive_age",
+				Text:      "The age must be valid",
+			},
+		})
+	})
+
+	t.Run("ChangeAForeignKeyComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE roles (id INT PRIMARY KEY);
+			CREATE TABLE users (role_id INT, CONSTRAINT fk_role FOREIGN KEY (role_id) REFERENCES roles (id));
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE roles (id INT PRIMARY KEY);
+			CREATE TABLE users (role_id INT, CONSTRAINT fk_role FOREIGN KEY (role_id) REFERENCES roles (id));
+			COMMENT ON CONSTRAINT fk_role ON users IS 'The role of the user';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "users",
+				Name:      "fk_role",
+				Text:      "The role of the user",
+			},
+		})
+	})
+
+	t.Run("AReAddedForeignKeyKeepsItsComment", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE accounts (id INT, region TEXT NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE orders (account_id INT REFERENCES accounts (id));
+			COMMENT ON CONSTRAINT orders_account_id_fkey ON orders IS 'The account of the order';
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE accounts (id INT, region TEXT NOT NULL, PRIMARY KEY (id, region), UNIQUE (id));
+			CREATE TABLE orders (account_id INT REFERENCES accounts (id));
+			COMMENT ON CONSTRAINT orders_account_id_fkey ON orders IS 'The account of the order';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "orders_account_id_fkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "accounts_id_key",
+							Type: "u",
+							Def:  "UNIQUE (id)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "accounts_pkey",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "accounts",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "accounts_pkey",
+							Type: "p",
+							Def:  "PRIMARY KEY (id, region)",
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "orders",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:            "orders_account_id_fkey",
+							Type:            "f",
+							Def:             "FOREIGN KEY (account_id) REFERENCES accounts(id)",
+							ReferencedTable: "accounts",
+							Comment:         "The account of the order",
+						},
+					},
+				},
+			},
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "orders",
+				Name:      "orders_account_id_fkey",
+				Text:      "The account of the order",
+			},
+		})
+	})
+
+	t.Run("CreateATableWithConstraintComments", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE roles (id INT PRIMARY KEY);`)
+		driver.ExecOnDesired(`
+			CREATE TABLE roles (id INT PRIMARY KEY);
+			CREATE TABLE users (
+				role_id INT,
+				CONSTRAINT positive_role CHECK (role_id > 0),
+				CONSTRAINT fk_role FOREIGN KEY (role_id) REFERENCES roles (id)
+			);
+			COMMENT ON CONSTRAINT positive_role ON users IS 'The role must be positive';
+			COMMENT ON CONSTRAINT fk_role ON users IS 'The role of the user';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name: "role_id",
+						Type: "integer",
+					},
+				},
+				Constraints: []*PostgresConstraint{
+					{
+						Name:    "positive_role",
+						Type:    "c",
+						Def:     "CHECK ((role_id > 0))",
+						Comment: "The role must be positive",
+					},
+				},
+			},
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "users",
+				Name:      "positive_role",
+				Text:      "The role must be positive",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name:            "fk_role",
+							Type:            "f",
+							Def:             "FOREIGN KEY (role_id) REFERENCES roles(id)",
+							ReferencedTable: "roles",
+							Comment:         "The role of the user",
+						},
+					},
+				},
+			},
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "users",
+				Name:      "fk_role",
+				Text:      "The role of the user",
+			},
+		})
+	})
 }

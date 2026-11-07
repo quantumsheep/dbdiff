@@ -555,6 +555,22 @@ func (i *PostgresCommentOnTableInstruction) Comment() string {
 	return driversshared.ObjectComment("Modify", "table", i.Name)
 }
 
+type PostgresCommentOnConstraintInstruction struct {
+	TableName string
+	Name      string
+	Text      string
+}
+
+func (i *PostgresCommentOnConstraintInstruction) String() string {
+	return fmt.Sprintf("COMMENT ON CONSTRAINT %s ON %s IS %s;",
+		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteIdentifier(i.TableName),
+		commentLiteral(i.Text))
+}
+
+func (i *PostgresCommentOnConstraintInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify", "table", i.TableName)
+}
+
 type PostgresCommentOnColumnInstruction struct {
 	TableName  string
 	ColumnName string
