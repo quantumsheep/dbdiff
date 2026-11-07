@@ -3,6 +3,7 @@ package drivers
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,32 @@ func TestNewDriverAndDiff(t *testing.T) {
 		require.Len(t, statements, 1)
 		require.Contains(t, statements[0].SQL, "CREATE TABLE")
 		require.Contains(t, statements[0].Comment, "users")
+	})
+
+	t.Run("ConcurrentDiffsOfOneDriver", func(t *testing.T) {
+		current := writeSchema(t, "current.sql", "")
+		desired := writeSchema(t, "desired.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		driver, err := NewDriver(SQLiteDriverName)
+		require.NoError(t, err)
+
+		results := make([]Statements, 4)
+		errs := make([]error, len(results))
+
+		var group sync.WaitGroup
+
+		for index := range results {
+			group.Go(func() {
+				results[index], errs[index] = driver.Diff(t.Context(), current, desired)
+			})
+		}
+
+		group.Wait()
+
+		for index := range results {
+			require.NoError(t, errs[index])
+			require.Equal(t, "CREATE TABLE \"users\" (\n\t\"id\" INTEGER PRIMARY KEY\n);", results[index].String())
+		}
 	})
 
 	t.Run("StatementsRenderAsOneText", func(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -122,8 +123,12 @@ func WithIgnoreTables(tables ...string) Option {
 	}
 }
 
-// A Driver diffs two data sources. A driver value runs one diff at a time.
+// A Driver diffs two data sources. Two Diff calls on one driver value run one after the
+// other.
 type Driver struct {
+	// The inner driver keeps the connections of one diff in its fields.
+	mutex sync.Mutex
+
 	inner  driversshared.Driver
 	name   DriverName
 	schema string
@@ -228,6 +233,9 @@ func (d *Driver) Diff(
 	for _, option := range options {
 		option(merged)
 	}
+
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 
 	instructions, err := d.inner.Diff(ctx, current, desired, driversshared.DiffOptions{
 		CompareData: merged.compareData,
