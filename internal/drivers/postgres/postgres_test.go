@@ -283,7 +283,33 @@ func (d *TestingPostgresDriver) FetchAllFromCurrent(table string, additionalRule
 // such a test a schema on the already-running test server, applies the SQL source to it,
 // and returns a connection that stays open so the test can prove that the generated SQL of
 // the diff runs.
-func openVerificationConnection(tb testing.TB, sqlSourcePath string) *sql.DB {
+// The verification schema takes the diff. A second diff of that schema must then be empty.
+func requireDiffAppliesToSQLSource(
+	tb testing.TB,
+	currentPath string,
+	desired driversshared.DataSource,
+	instructions driversshared.Instructions,
+) {
+	tb.Helper()
+
+	verifyConnection, verifyConnectionString := openVerificationConnection(tb, currentPath)
+
+	_, err := verifyConnection.ExecContext(tb.Context(), instructions.String())
+	require.NoError(tb, err)
+
+	driver := NewPostgresDriver(&PostgresDriverConfig{
+		ScratchDatabase: postgresTestConnectionString,
+	})
+	current := driversshared.ConnectionStringDataSource{
+		ConnectionString: verifyConnectionString,
+	}
+
+	secondInstructions, err := driver.Diff(tb.Context(), current, desired, driversshared.DiffOptions{})
+	require.NoError(tb, err)
+	require.Empty(tb, secondInstructions)
+}
+
+func openVerificationConnection(tb testing.TB, sqlSourcePath string) (*sql.DB, string) {
 	tb.Helper()
 
 	adminConnection, err := sql.Open("pgx", postgresTestConnectionString)
@@ -315,7 +341,7 @@ func openVerificationConnection(tb testing.TB, sqlSourcePath string) *sql.DB {
 
 	require.NoError(tb, sqlSource.ApplyTo(tb.Context(), connection))
 
-	return connection
+	return connection, connectionString
 }
 
 func TestPostgresDriver(t *testing.T) {
@@ -344,6 +370,10 @@ func TestPostgresDriver(t *testing.T) {
 );`, diff)
 
 		harness.ExecOnCurrent(diff)
+
+		instructions, err = driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Empty(t, instructions)
 	})
 
 	t.Run("UnknownSchema", func(t *testing.T) {

@@ -59,9 +59,7 @@ func TestPostgresSQLSource(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, currentPath)
-		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
-		require.NoError(t, err)
+		requireDiffAppliesToSQLSource(t, currentPath, desired, instructions)
 	})
 
 	t.Run("EmptyDirectoryDesired", func(t *testing.T) {
@@ -87,9 +85,7 @@ func TestPostgresSQLSource(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, currentPath)
-		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
-		require.NoError(t, err)
+		requireDiffAppliesToSQLSource(t, currentPath, desired, instructions)
 	})
 
 	t.Run("SQLSourceWithConcurrentIndex", func(t *testing.T) {
@@ -127,9 +123,7 @@ func TestPostgresSQLSource(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, currentPath)
-		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
-		require.NoError(t, err)
+		requireDiffAppliesToSQLSource(t, currentPath, desired, instructions)
 	})
 
 	t.Run("SQLSourceWithRenamedNotNullColumn", func(t *testing.T) {
@@ -196,9 +190,7 @@ func TestPostgresSQLSource(t *testing.T) {
 			},
 		}, instructions)
 
-		verifyConnection := openVerificationConnection(t, currentPath)
-		_, err = verifyConnection.ExecContext(t.Context(), instructions.String())
-		require.NoError(t, err)
+		requireDiffAppliesToSQLSource(t, currentPath, desired, instructions)
 	})
 
 	t.Run("DetectScratchVersion", func(t *testing.T) {
@@ -304,6 +296,10 @@ func TestPostgresSQLSource(t *testing.T) {
 		}, instructions)
 
 		harness.ExecOnCurrent(instructions.String())
+
+		instructions, err = driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Empty(t, instructions)
 	})
 
 	t.Run("SQLFileDesiredOnAScratchDatabase", func(t *testing.T) {
@@ -344,6 +340,10 @@ func TestPostgresSQLSource(t *testing.T) {
 		}, instructions)
 
 		harness.ExecOnCurrent(instructions.String())
+
+		instructions, err = driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Empty(t, instructions)
 
 		release, err := driver.openSides(t.Context(), current, desired)
 		require.NoError(t, err)

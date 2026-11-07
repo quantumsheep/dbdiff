@@ -359,6 +359,13 @@ func TestPostgresData(t *testing.T) {
 
 		driver.ExecOnCurrent(diff)
 
+		// The rows of a table without a primary key stay different, so each diff holds the note.
+		driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLCommentInstruction{
+				Text: `The table "logs" holds no primary key, so dbdiff compares no row of it.`,
+			},
+		})
+
 		rows := driver.FetchAllFromCurrent("logs", "")
 
 		require.Equal(t, []map[string]any{
@@ -572,6 +579,15 @@ func TestPostgresData(t *testing.T) {
 		rows := driver.FetchAllFromCurrent("items", "ORDER BY code")
 
 		require.Equal(t, []map[string]any(nil), rows)
+
+		// The two tables now hold the same primary key, so the second diff compares the rows.
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&driversshared.SQLInsertInstruction{
+				TableName:   "items",
+				ColumnNames: []string{"code", "label"},
+				Expressions: []string{"1", "'first'"},
+			},
+		})
 	})
 
 	t.Run("CompareNoRowWithoutTheDataFlag", func(t *testing.T) {
