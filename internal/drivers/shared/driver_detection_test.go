@@ -101,6 +101,15 @@ func TestDetectDriver(t *testing.T) {
 		require.EqualError(t, err, `cannot detect the driver of the current schema "oracle://user@localhost/current" and the desired schema "oracle://user@localhost/desired". Name the driver`)
 	})
 
+	t.Run("UnknownSchemeHidesThePassword", func(t *testing.T) {
+		_, err := DetectDriver(
+			ParseDataSource("postgresql+asyncpg://app:s3cret@db/current"),
+			ParseDataSource("jdbc:postgresql://db/desired?user=app&password=s3cret"),
+		)
+
+		require.EqualError(t, err, `cannot detect the driver of the current schema "postgresql+asyncpg://app:xxxxx@db/current" and the desired schema "jdbc:postgresql://db/desired?password=xxxxx&user=app". Name the driver`)
+	})
+
 	t.Run("MySQLScheme", func(t *testing.T) {
 		driverName, err := DetectDriver(ParseDataSource("mysql://user@localhost/current"), ParseDataSource("mysql://user@localhost/desired"))
 
@@ -120,6 +129,12 @@ func TestDetectDriver(t *testing.T) {
 
 		require.EqualError(t, err, `the current schema "sqlite://current.db" names the sqlite3 driver and the desired schema "postgres://user@localhost/desired" names the postgres driver. Name the driver`)
 	})
+
+	t.Run("TwoDifferentEnginesHideThePassword", func(t *testing.T) {
+		_, err := DetectDriver(ParseDataSource("mysql://root:s3cret@localhost/current"), ParseDataSource("postgres://user:s3cret@localhost/desired"))
+
+		require.EqualError(t, err, `the current schema "mysql://root:xxxxx@localhost/current" names the mysql driver and the desired schema "postgres://user:xxxxx@localhost/desired" names the postgres driver. Name the driver`)
+	})
 }
 
 func TestDetectDriverOfDatabase(t *testing.T) {
@@ -134,6 +149,12 @@ func TestDetectDriverOfDatabase(t *testing.T) {
 		_, err := DetectDriverOfDatabase(ParseDataSource("oracle://user@localhost/app"))
 
 		require.EqualError(t, err, `cannot detect the driver of the database "oracle://user@localhost/app". Name the driver`)
+	})
+
+	t.Run("UnknownSchemeHidesThePassword", func(t *testing.T) {
+		_, err := DetectDriverOfDatabase(ParseDataSource("jdbc:postgresql://db/prod?user=app&password=s3cret"))
+
+		require.EqualError(t, err, `cannot detect the driver of the database "jdbc:postgresql://db/prod?password=xxxxx&user=app". Name the driver`)
 	})
 }
 

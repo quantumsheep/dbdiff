@@ -2,6 +2,7 @@ package driversshared
 
 import (
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -58,10 +59,40 @@ func dataSourceArgument(dataSource DataSource) string {
 	case FolderDataSource:
 		return value.Path
 	case ConnectionStringDataSource:
-		return value.ConnectionString
+		return redactConnectionString(value.ConnectionString)
 	default:
 		return ""
 	}
+}
+
+// An error message goes to a terminal or to the log of a CI job, so it must not show a
+// password.
+func redactConnectionString(connectionString string) string {
+	parsed, err := url.Parse(connectionString)
+	if err != nil {
+		return connectionString
+	}
+
+	query := parsed.Query()
+	holdsPassword := parsed.User != nil
+
+	for key := range query {
+		if strings.EqualFold(key, "password") {
+			query.Set(key, "xxxxx")
+
+			holdsPassword = true
+		}
+	}
+
+	// url.URL.String changes the case of a scheme, which changes a Windows path such as
+	// C:\app.db. A value without a password stays as the user wrote it for that reason.
+	if !holdsPassword {
+		return connectionString
+	}
+
+	parsed.RawQuery = query.Encode()
+
+	return parsed.Redacted()
 }
 
 func detectDriverOfDataSource(dataSource DataSource) DriverName {
