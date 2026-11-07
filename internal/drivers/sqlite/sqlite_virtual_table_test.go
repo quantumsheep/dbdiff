@@ -62,4 +62,17 @@ func TestSQLiteVirtualTable(t *testing.T) {
 		driver.ExecOnDesired(`CREATE VIRTUAL TABLE docs USING fts5(title, body);`)
 		driver.RequireInstructions(nil)
 	})
+
+	t.Run("VirtualTableNameInOtherCaseReplacesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`CREATE VIRTUAL TABLE Docs USING fts5(title, body);`)
+		driver.ExecOnDesired(`CREATE VIRTUAL TABLE docs USING fts5(title, body);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&driversshared.SQLDropTableInstruction{Name: "Docs"},
+			&SQLiteCreateVirtualTableInstruction{
+				Definition: "CREATE VIRTUAL TABLE docs USING fts5(title, body)",
+			},
+		})
+	})
 }

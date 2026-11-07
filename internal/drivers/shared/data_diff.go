@@ -26,6 +26,10 @@ type DataRules[Table any, Quoter IdentifierQuoter] struct {
 	// The two hooks below are optional. If they are nil, the diff uses the quoter.
 	SelectExpression func(columnName string) string
 	Insert           func(table Table, columnNames []string, expressions []string) Instruction
+
+	// An engine that compares names without case gives this optional key, which matches a
+	// desired table with a current table. If it is nil, the diff uses TableName.
+	TableKey func(table Table) string
 }
 
 // The schema section already creates or drops the other tables.
@@ -45,8 +49,13 @@ func DiffData[Table any, Quoter IdentifierQuoter](
 			continue
 		}
 
+		tableKey := rules.TableKey
+		if tableKey == nil {
+			tableKey = rules.TableName
+		}
+
 		currentTable, found := lo.Find(currentTables, func(table Table) bool {
-			return rules.TableName(table) == rules.TableName(desiredTable)
+			return tableKey(table) == tableKey(desiredTable)
 		})
 		if !found {
 			additions, err := tableDataInstructions(ctx, desiredDatabaseConnection, desiredTable, rules)

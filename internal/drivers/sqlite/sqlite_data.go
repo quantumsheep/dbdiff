@@ -45,6 +45,9 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]driversshared.Instructio
 			TableName: func(table *SQLiteTable) string {
 				return table.Name
 			},
+			TableKey: func(table *SQLiteTable) string {
+				return identifierKey(table.Name)
+			},
 			PrimaryKey: func(ctx context.Context, db *sql.DB, table *SQLiteTable) ([]string, error) {
 				return table.PrimaryKeyColumnNames(), nil
 			},

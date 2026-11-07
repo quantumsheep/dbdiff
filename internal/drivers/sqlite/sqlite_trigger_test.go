@@ -239,4 +239,44 @@ func TestSQLiteTrigger(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("TriggerOnTableNameInOtherCase", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, c TEXT);
+			CREATE TABLE log (x TEXT);
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, c TEXT);
+			CREATE TABLE log (x TEXT);
+			CREATE TRIGGER users_insert AFTER INSERT ON Users BEGIN INSERT INTO log VALUES (new.c); END;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER users_insert AFTER INSERT ON Users BEGIN INSERT INTO log VALUES (new.c); END",
+			},
+		})
+	})
+
+	t.Run("TriggerNameInOtherCaseReplacesTheTrigger", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY);
+			CREATE TRIGGER Users_Insert AFTER INSERT ON users BEGIN SELECT 1; END;
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY);
+			CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteDropTriggerInstruction{Name: "Users_Insert"},
+			&SQLiteCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER users_insert AFTER INSERT ON users BEGIN SELECT 1; END",
+			},
+		})
+	})
 }

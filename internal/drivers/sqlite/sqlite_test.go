@@ -421,4 +421,14 @@ func TestSQLiteDriver(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("IgnoredTableNameInOtherCase", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE ignored (id INTEGER PRIMARY KEY);`)
+
+		driver.IgnoreTables = []string{"Ignored"}
+
+		driver.RequireInstructions(nil)
+	})
 }

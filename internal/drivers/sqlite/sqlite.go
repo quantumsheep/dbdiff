@@ -114,6 +114,18 @@ func (d *SQLiteDriver) openSides(
 	}, nil
 }
 
+// SQLite compares two identifiers without the case of the ASCII letters. It keeps the case
+// of every other letter.
+func identifierKey(name string) string {
+	return strings.Map(func(character rune) rune {
+		if character >= 'A' && character <= 'Z' {
+			return character + ('a' - 'A')
+		}
+
+		return character
+	}, name)
+}
+
 func holdsTableRecreation(instructions []driversshared.Instruction) bool {
 	return lo.SomeBy(instructions, func(instruction driversshared.Instruction) bool {
 		_, isRecreation := instruction.(*SQLiteTableRecreationInstruction)
@@ -140,7 +152,7 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 
 	additions, removals, err := driversshared.DiffByKey(desiredTables, currentTables, driversshared.DiffRules[*SQLiteTable]{
 		Key: func(table *SQLiteTable) string {
-			return table.Name
+			return identifierKey(table.Name)
 		},
 		Create: func(table *SQLiteTable) []driversshared.Instruction {
 			return table.Instructions()
@@ -164,9 +176,8 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 	return append(additions, removals...), nil
 }
 
-// A table, an index, and a view share one namespace, and SQLite compares names without
-// case. The set holds the lowercase name of each object of the two sides, so the temporary
-// table of a recreation can take a free name.
+// A table, an index, and a view share one namespace. The set holds the key of each object
+// of the two sides, so the temporary table of a recreation can take a free name.
 func (d *SQLiteDriver) getReservedNames(ctx context.Context) (map[string]bool, error) {
 	reservedNames := make(map[string]bool)
 
@@ -183,7 +194,7 @@ func (d *SQLiteDriver) getReservedNames(ctx context.Context) (map[string]bool, e
 		}
 
 		for _, name := range names {
-			reservedNames[strings.ToLower(name)] = true
+			reservedNames[identifierKey(name)] = true
 		}
 	}
 
@@ -193,7 +204,7 @@ func (d *SQLiteDriver) getReservedNames(ctx context.Context) (map[string]bool, e
 func (d *SQLiteDriver) DiffViews(ctx context.Context) ([]driversshared.Instruction, error) {
 	additions, removals, err := driversshared.DiffSides(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection, d.GetViews, driversshared.DiffRules[*SQLiteView]{
 		Key: func(view *SQLiteView) string {
-			return view.Name
+			return identifierKey(view.Name)
 		},
 		Create: func(view *SQLiteView) []driversshared.Instruction {
 			return view.Instructions()
@@ -243,7 +254,10 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 	var tables []*SQLiteTable
 
 	for _, tableName := range tableNames {
-		if slices.Contains(d.IgnoreTables, tableName) {
+		ignored := slices.ContainsFunc(d.IgnoreTables, func(ignoredTableName string) bool {
+			return identifierKey(ignoredTableName) == identifierKey(tableName)
+		})
+		if ignored {
 			continue
 		}
 
@@ -668,7 +682,7 @@ func (d *SQLiteDriver) GetIndexKeys(
 }
 
 func (d *SQLiteDriver) GetTriggers(ctx context.Context, db *sql.DB, objectName string) ([]*SQLiteTrigger, error) {
-	return driversshared.QueryAll(ctx, db, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name", func(rows *sql.Rows) (*SQLiteTrigger, error) {
+	return driversshared.QueryAll(ctx, db, "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? COLLATE NOCASE ORDER BY name", func(rows *sql.Rows) (*SQLiteTrigger, error) {
 		trigger := &SQLiteTrigger{}
 
 		err := rows.Scan(&trigger.Name, &trigger.SQL)

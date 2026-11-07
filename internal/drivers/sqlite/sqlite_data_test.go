@@ -65,6 +65,64 @@ func TestSQLiteData(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CompareRowsOfATableNameInOtherCase", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE Users (id INTEGER PRIMARY KEY, name TEXT);
+			INSERT INTO Users (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (4, 'Dave');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Robert'), (3, 'Carol');
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&driversshared.SQLInsertInstruction{
+				TableName:   "users",
+				ColumnNames: []string{"id", "name"},
+				Expressions: []string{"3", "'Carol'"},
+			},
+			&driversshared.SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*driversshared.SQLSetClause{
+					{
+						ColumnName: "name",
+						Expression: "'Robert'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
+					},
+				},
+			},
+			&driversshared.SQLDeleteInstruction{
+				TableName: "Users",
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "4",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Robert"},
+			{"id": int64(3), "name": "Carol"},
+		}, rows)
+	})
+
 	t.Run("CompareRowsOfANewTable", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.CompareData = true

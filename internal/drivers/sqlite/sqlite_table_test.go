@@ -754,4 +754,37 @@ func TestSQLiteTable(t *testing.T) {
 			{"email": "bob@example.com", "age": int64(25)},
 		}, rows)
 	})
+
+	t.Run("TableNameThatDiffersInCaseOnlyIsTheSameTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE Users (id INTEGER PRIMARY KEY, c TEXT);
+			CREATE INDEX users_c ON Users (c);
+
+			INSERT INTO Users (id, c) VALUES (1, 'x');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, c TEXT, d TEXT);
+			CREATE INDEX users_c ON users (c);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name: "d",
+						Type: "TEXT",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "c": "x", "d": nil},
+		}, rows)
+	})
 }

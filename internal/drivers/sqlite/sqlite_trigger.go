@@ -12,7 +12,7 @@ type SQLiteTrigger struct {
 func diffTriggerRules() driversshared.DiffRules[*SQLiteTrigger] {
 	return driversshared.ReplaceRules(
 		func(trigger *SQLiteTrigger) string {
-			return trigger.Name
+			return identifierKey(trigger.Name)
 		},
 		func(desired *SQLiteTrigger, current *SQLiteTrigger) bool {
 			return desired.SQL == current.SQL

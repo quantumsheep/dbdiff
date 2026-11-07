@@ -17,7 +17,8 @@ type SQLiteIndex struct {
 }
 
 func (i *SQLiteIndex) Equal(other *SQLiteIndex) bool {
-	if i.Name != other.Name || i.Table != other.Table || i.Unique != other.Unique {
+	if identifierKey(i.Name) != identifierKey(other.Name) || identifierKey(i.Table) != identifierKey(other.Table) ||
+		i.Unique != other.Unique {
 		return false
 	}
 

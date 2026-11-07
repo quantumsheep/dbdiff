@@ -470,4 +470,19 @@ func TestSQLiteIndex(t *testing.T) {
 			{"id": int64(1), "age": int64(30)},
 		}, rows)
 	})
+
+	t.Run("IndexNameInOtherCaseIsTheSameIndex", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE INDEX Users_Name ON users (name);
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+			CREATE INDEX users_name ON users (name);
+		`)
+		driver.RequireInstructions(nil)
+	})
 }

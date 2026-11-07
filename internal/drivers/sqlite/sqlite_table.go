@@ -387,7 +387,7 @@ func (t *SQLiteTable) DiffTriggers(other *SQLiteTable) ([]driversshared.Instruct
 func (t *SQLiteTable) DiffIndexes(other *SQLiteTable) ([]driversshared.Instruction, error) {
 	additions, removals, err := driversshared.DiffByKey(t.Indexes, other.Indexes, driversshared.ReplaceRules(
 		func(index *SQLiteIndex) string {
-			return index.Name
+			return identifierKey(index.Name)
 		},
 		(*SQLiteIndex).Equal,
 		func(index *SQLiteIndex) driversshared.Instruction {
@@ -411,7 +411,7 @@ func temporaryTableName(tableName string, reservedNames map[string]bool) string 
 	name := "_" + tableName + "_temp"
 	counter := 1
 
-	for reservedNames[strings.ToLower(name)] {
+	for reservedNames[identifierKey(name)] {
 		counter++
 		name = "_" + tableName + "_temp" + strconv.Itoa(counter)
 	}
