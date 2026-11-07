@@ -890,6 +890,58 @@ func TestMariaDBColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("flags", "ORDER BY id"))
 	})
 
+	t.Run("BinaryDefaultThatIsNotUTF8", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE payloads (
+				id int NOT NULL,
+				payload varbinary(4) DEFAULT X'BEEF',
+				note varbinary(4) DEFAULT 'AB',
+				PRIMARY KEY (id)
+			);
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE payloads (id int NOT NULL, PRIMARY KEY (id));
+			INSERT INTO payloads VALUES (1);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "payloads",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "payload",
+						Type: "varbinary(4)",
+						Default: sql.NullString{
+							String: "0xBEEF",
+							Valid:  true,
+						},
+						DefaultIsExpression: true,
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "payloads",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "note",
+						Type: "varbinary(4)",
+						Default: sql.NullString{
+							String: "'AB'",
+							Valid:  true,
+						},
+						DefaultIsExpression: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "payload": "\xbe\xef", "note": "AB"},
+		}, driver.FetchAllFromCurrent("payloads", "ORDER BY id"))
+	})
+
 	t.Run("ChangeGeneratedColumnStorageKeepsDependents", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 

@@ -135,7 +135,7 @@ func (d *MySQLDriver) GetTableColumns(
 ) ([]*MySQLColumn, error) {
 	mariadb := d.detailsByConnection[db].mariadb
 
-	return driversshared.QueryAll(ctx, db, `
+	columns, err := driversshared.QueryAll(ctx, db, `
 		SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA,
 			COLLATION_NAME, COLUMN_COMMENT, GENERATION_EXPRESSION
 		FROM information_schema.COLUMNS
@@ -185,6 +185,48 @@ func (d *MySQLDriver) GetTableColumns(
 
 		return column, nil
 	}, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, column := range columns {
+		if !mariadb || !column.defaultCanLoseBytes() {
+			continue
+		}
+
+		err = readBinaryColumnDefault(ctx, db, tableName, column)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return columns, nil
+}
+
+// The COLUMNS table of MariaDB stores the default of a BINARY or VARBINARY column as a
+// quoted string, and it replaces each byte that is not valid UTF-8 with a question mark.
+func (c *MySQLColumn) defaultCanLoseBytes() bool {
+	typeName := strings.ToLower(c.Type)
+	isBinary := strings.HasPrefix(typeName, "binary") || strings.HasPrefix(typeName, "varbinary")
+
+	return isBinary && strings.HasPrefix(c.Default.String, "'") && strings.Contains(c.Default.String, "?")
+}
+
+// DEFAULT() needs a row of the table. The outer join gives one row on an empty table.
+func readBinaryColumnDefault(ctx context.Context, db *sql.DB, tableName string, column *MySQLColumn) error {
+	row := db.QueryRowContext(ctx, "SELECT HEX(DEFAULT("+QuoteIdentifier(tableName)+"."+QuoteIdentifier(column.Name)+
+		")) FROM (SELECT 1) AS dbdiff_row LEFT JOIN "+QuoteIdentifier(tableName)+" ON FALSE;")
+
+	var hexadecimal string
+
+	err := row.Scan(&hexadecimal)
+	if err != nil {
+		return err
+	}
+
+	column.Default.String = "0x" + hexadecimal
+
+	return nil
 }
 
 // MariaDB stores every default as an expression, and it stores the text NULL for the
