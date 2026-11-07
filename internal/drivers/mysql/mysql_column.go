@@ -2,7 +2,13 @@ package driversmysql
 
 import (
 	"database/sql"
+	"regexp"
 	"strings"
+)
+
+var (
+	mysqlBitLiteralPattern = regexp.MustCompile(`^[bB]'[01]*'$`)
+	mysqlHexLiteralPattern = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
 )
 
 type MySQLColumn struct {
@@ -84,6 +90,10 @@ func (c *MySQLColumn) Definition() string {
 // MySQL refuses the parentheses of an expression default around CURRENT_TIMESTAMP.
 func (c *MySQLColumn) defaultClause() string {
 	if !c.DefaultIsExpression {
+		if c.defaultIsBinaryLiteral() {
+			return c.Default.String
+		}
+
 		return QuoteLiteral(c.Default.String)
 	}
 
@@ -96,4 +106,20 @@ func (c *MySQLColumn) defaultClause() string {
 	}
 
 	return "(" + c.Default.String + ")"
+}
+
+// MySQL stores the literal default of a BIT column as b'...' and of a BINARY or VARBINARY
+// column as 0x... The type check keeps the same text of a character column quoted.
+func (c *MySQLColumn) defaultIsBinaryLiteral() bool {
+	typeName := strings.ToLower(c.Type)
+
+	if strings.HasPrefix(typeName, "bit") {
+		return mysqlBitLiteralPattern.MatchString(c.Default.String)
+	}
+
+	if strings.HasPrefix(typeName, "binary") || strings.HasPrefix(typeName, "varbinary") {
+		return mysqlHexLiteralPattern.MatchString(c.Default.String)
+	}
+
+	return false
 }

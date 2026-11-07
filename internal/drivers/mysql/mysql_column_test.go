@@ -219,6 +219,71 @@ func TestMySQLColumn(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("BitAndBinaryDefaults", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE flags (
+				id int NOT NULL,
+				flag bit(1) NOT NULL DEFAULT b'1',
+				payload varbinary(4) DEFAULT 0xDEAD,
+				note varchar(9) DEFAULT 'b''1''',
+				PRIMARY KEY (id)
+			);
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE flags (id int NOT NULL, PRIMARY KEY (id));
+			INSERT INTO flags VALUES (1);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "flags",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:    "flag",
+						Type:    "bit(1)",
+						NotNull: true,
+						Default: sql.NullString{
+							String: "b'1'",
+							Valid:  true,
+						},
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "flags",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "payload",
+						Type: "varbinary(4)",
+						Default: sql.NullString{
+							String: "0xDEAD",
+							Valid:  true,
+						},
+					},
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "flags",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "note",
+						Type: "varchar(9)",
+						Default: sql.NullString{
+							String: "b'1'",
+							Valid:  true,
+						},
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "flag": "\x01", "payload": "\xde\xad", "note": "b'1'"},
+		}, driver.FetchAllFromCurrent("flags", "ORDER BY id"))
+	})
 }
 
 func TestMariaDBColumn(t *testing.T) {
@@ -306,5 +371,37 @@ func TestMariaDBColumn(t *testing.T) {
 				},
 			},
 		})
+	})
+
+	t.Run("BitDefault", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE flags (id int NOT NULL, flag bit(1) NOT NULL DEFAULT b'1', PRIMARY KEY (id));")
+		driver.ExecOnCurrent(`
+			CREATE TABLE flags (id int NOT NULL, PRIMARY KEY (id));
+			INSERT INTO flags VALUES (1);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "flags",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:    "flag",
+						Type:    "bit(1)",
+						NotNull: true,
+						Default: sql.NullString{
+							String: "b'1'",
+							Valid:  true,
+						},
+						DefaultIsExpression: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "flag": "\x01"},
+		}, driver.FetchAllFromCurrent("flags", "ORDER BY id"))
 	})
 }
