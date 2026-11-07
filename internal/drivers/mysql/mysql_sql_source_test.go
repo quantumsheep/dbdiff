@@ -72,6 +72,21 @@ func TestMySQLSQLSource(t *testing.T) {
 			})
 	})
 
+	t.Run("ScratchDatabaseConnectionHoldsOneSession", func(t *testing.T) {
+		directory := t.TempDir()
+		sqltest.WriteSQLFile(t, directory, "001_users.sql", "CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+
+		driver := newTestMySQLDriverWithDesiredDirectory(t, mysqlTestConnectionString, directory)
+		driver.ScratchDatabase = "mysql://root:password@localhost:3306/"
+
+		release, err := driver.openSides(t.Context(), driver.current, driver.desired)
+		require.NoError(t, err)
+
+		defer release()
+
+		require.Equal(t, 1, driver.DesiredDatabaseConnection.Stats().MaxOpenConnections)
+	})
+
 	t.Run("TwoSQLSources", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("the temporary mysql server needs a download on the first run")

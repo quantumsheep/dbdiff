@@ -259,5 +259,9 @@ func (s *mysqlScratchDatabase) open(databaseName string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	return sql.OpenDB(connector), nil
+	// A SET statement of a SQL file must reach the next statement, as in OpenMySQLConnection.
+	db := sql.OpenDB(connector)
+	db.SetMaxOpenConns(1)
+
+	return db, nil
 }
