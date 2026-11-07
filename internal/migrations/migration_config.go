@@ -10,7 +10,7 @@ import (
 	"regexp"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const DefaultConfigPath = "dbdiff.yaml"
