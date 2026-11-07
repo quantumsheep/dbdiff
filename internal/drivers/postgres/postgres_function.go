@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -11,13 +12,14 @@ import (
 )
 
 type PostgresFunction struct {
-	Name          string
-	Arguments     string
-	ArgumentTypes string
-	ReturnType    string
-	Kind          string
-	Def           string
-	Comment       string
+	Name             string
+	Arguments        string
+	ArgumentTypes    string
+	ReturnType       string
+	Kind             string
+	Def              string
+	Comment          string
+	UsesTableRowType bool
 }
 
 func (f *PostgresFunction) CommentInstruction() *PostgresCommentOnRoutineInstruction {
@@ -59,6 +61,14 @@ func (f *PostgresFunction) DropInstruction() driversshared.Instruction {
 }
 
 func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error) {
+	return d.diffFunctions(ctx, false)
+}
+
+func (d *PostgresDriver) DiffTableRowTypeFunctions(ctx context.Context) (*SectionDiff, error) {
+	return d.diffFunctions(ctx, true)
+}
+
+func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType bool) (*SectionDiff, error) {
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
 
@@ -71,6 +81,27 @@ func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error
 	if err != nil {
 		return nil, err
 	}
+
+	// A function and its match on the other side go into one section, so that the DROP
+	// statement of a changed signature comes before the CREATE statement.
+	tableRowTypeKeys := map[string]bool{}
+
+	for _, function := range slices.Concat(desiredFunctions, currentFunctions) {
+		if function.UsesTableRowType {
+			tableRowTypeKeys[function.MatchKey()] = true
+		}
+	}
+
+	inSection := func(function *PostgresFunction) bool {
+		return tableRowTypeKeys[function.MatchKey()] == usesTableRowType
+	}
+
+	desiredFunctions = lo.Filter(desiredFunctions, func(function *PostgresFunction, _ int) bool {
+		return inSection(function)
+	})
+	currentFunctions = lo.Filter(currentFunctions, func(function *PostgresFunction, _ int) bool {
+		return inSection(function)
+	})
 
 	// The match key holds the argument types and no argument names, so a rename of a
 	// parameter stays one function. CREATE OR REPLACE FUNCTION covers a new function and
@@ -140,7 +171,15 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 				'^CREATE OR REPLACE (FUNCTION|PROCEDURE) ' || quote_ident(current_schema()) || '\.',
 				'CREATE OR REPLACE \1 '
 			),
-			coalesce(obj_description(p.oid, 'pg_proc'), '')
+			coalesce(obj_description(p.oid, 'pg_proc'), ''),
+			EXISTS (
+				SELECT 1
+				FROM pg_type t
+				LEFT JOIN pg_type e ON e.oid = t.typelem
+				JOIN pg_class c ON c.oid IN (t.typrelid, e.typrelid)
+				WHERE t.oid = ANY (array_append(coalesce(p.proallargtypes, p.proargtypes::oid[]), p.prorettype))
+				AND c.relkind IN ('r', 'p', 'f')
+			)
 		FROM pg_proc p
 		WHERE p.pronamespace = current_schema()::regnamespace
 		AND p.prokind IN ('f', 'p')
@@ -152,7 +191,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 		function := &PostgresFunction{}
 
 		err := rows.Scan(&function.Name, &function.Arguments, &function.ArgumentTypes,
-			&function.ReturnType, &function.Kind, &function.Def, &function.Comment)
+			&function.ReturnType, &function.Kind, &function.Def, &function.Comment, &function.UsesTableRowType)
 		if err != nil {
 			return nil, err
 		}

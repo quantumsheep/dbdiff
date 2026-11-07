@@ -8,6 +8,16 @@ import (
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
+type PostgresDisableFunctionBodyCheckInstruction struct{}
+
+func (i *PostgresDisableFunctionBodyCheckInstruction) String() string {
+	return "SET check_function_bodies = false;"
+}
+
+func (i *PostgresDisableFunctionBodyCheckInstruction) Comment() string {
+	return "Do not check the function bodies"
+}
+
 type PostgresCreateFunctionInstruction struct {
 	Definition string
 }

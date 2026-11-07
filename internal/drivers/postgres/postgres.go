@@ -124,6 +124,7 @@ func (d *PostgresDriver) Diff(
 		d.DiffAggregates,
 		d.DiffOperators,
 		d.DiffTables,
+		d.DiffTableRowTypeFunctions,
 		d.DiffSequenceOwners,
 		d.DiffStatistics,
 		d.DiffViewsAndMaterializedViews,
@@ -155,6 +156,11 @@ func (d *PostgresDriver) Diff(
 
 	for _, sectionDiff := range slices.Backward(sectionDiffs) {
 		instructions = append(instructions, sectionDiff.Removals...)
+	}
+
+	// A function body can read an object that a later statement creates.
+	if slices.ContainsFunc(instructions, isRoutineCreation) {
+		instructions = slices.Insert(instructions, 0, driversshared.Instruction(&PostgresDisableFunctionBodyCheckInstruction{}))
 	}
 
 	if options.CompareData {
@@ -290,4 +296,13 @@ func sortByDependency[T any](objects []T, nameOf func(T) string, dependencyNames
 	}
 
 	return sorted
+}
+
+func isRoutineCreation(instruction driversshared.Instruction) bool {
+	switch instruction.(type) {
+	case *PostgresCreateFunctionInstruction, *PostgresCreateProcedureInstruction:
+		return true
+	default:
+		return false
+	}
 }
