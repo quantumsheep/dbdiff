@@ -330,6 +330,11 @@ func TestSQLiteData(t *testing.T) {
 		})
 
 		driver.ExecOnCurrent(diff)
+		driver.RequireInstructions([]driversshared.Instruction{
+			&driversshared.SQLCommentInstruction{
+				Text: `The table "logs" holds no primary key, so dbdiff compares no row of it.`,
+			},
+		})
 
 		rows := driver.FetchAllFromCurrent("logs", "")
 
@@ -505,6 +510,32 @@ func TestSQLiteData(t *testing.T) {
 
 		require.Equal(t, []map[string]any{
 			{"code": int64(1), "label": "old"},
+		}, rows)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&driversshared.SQLUpdateInstruction{
+				TableName: "items",
+				SetClauses: []*driversshared.SQLSetClause{
+					{
+						ColumnName: "label",
+						Expression: "'first'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "code",
+							Expression: "1",
+						},
+					},
+				},
+			},
+		})
+
+		rows = driver.FetchAllFromCurrent("items", "ORDER BY code")
+
+		require.Equal(t, []map[string]any{
+			{"code": int64(1), "label": "first"},
 		}, rows)
 	})
 
