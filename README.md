@@ -132,6 +132,8 @@ dbdiff does not support MariaDB on Linux with arm64.
 
 `--data` compares the rows by primary key and prints `INSERT`, `UPDATE`, and `DELETE` statements. dbdiff skips a table with no primary key.
 
+dbdiff reads every row of the two sides into memory. Use `--data` for small tables, for example reference data and seed data.
+
 ## Migrations
 
 `dbdiff migrate` reads `dbdiff.yaml` from the working directory. Each key has the name of its long flag. A flag overrides its key. The keys are `driver`, `migrations`, `desired`, `database`, `schema`, `server-version`, `scratch-database`, and `ignore-table`. `--config`, `--to`, and `--run` have no key.
