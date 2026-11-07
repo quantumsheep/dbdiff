@@ -174,6 +174,32 @@ func TestMySQLForeignKey(t *testing.T) {
 		})
 	})
 
+	t.Run("RestrictEqualsNoAction", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE books (
+				id int NOT NULL,
+				author_id int,
+				PRIMARY KEY (id),
+				CONSTRAINT fk_books_author FOREIGN KEY (author_id) REFERENCES authors (id)
+					ON DELETE RESTRICT ON UPDATE RESTRICT
+			);
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE books (
+				id int NOT NULL,
+				author_id int,
+				PRIMARY KEY (id),
+				CONSTRAINT fk_books_author FOREIGN KEY (author_id) REFERENCES authors (id)
+			);
+		`)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("DropTableWithForeignKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -201,6 +227,32 @@ func TestMySQLForeignKey(t *testing.T) {
 }
 
 func TestMariaDBForeignKey(t *testing.T) {
+	t.Run("NoActionEqualsRestrict", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE books (
+				id int NOT NULL,
+				author_id int,
+				PRIMARY KEY (id),
+				CONSTRAINT fk_books_author FOREIGN KEY (author_id) REFERENCES authors (id)
+					ON DELETE NO ACTION ON UPDATE NO ACTION
+			);
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE authors (id int NOT NULL, PRIMARY KEY (id));
+			CREATE TABLE books (
+				id int NOT NULL,
+				author_id int,
+				PRIMARY KEY (id),
+				CONSTRAINT fk_books_author FOREIGN KEY (author_id) REFERENCES authors (id)
+			);
+		`)
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("ForeignKey", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 

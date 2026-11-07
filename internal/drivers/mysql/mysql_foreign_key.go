@@ -20,8 +20,14 @@ func (k *MySQLForeignKey) Equal(other *MySQLForeignKey) bool {
 		slices.Equal(k.Columns, other.Columns) &&
 		k.ReferencedTable == other.ReferencedTable &&
 		slices.Equal(k.ReferencedColumns, other.ReferencedColumns) &&
-		k.OnUpdate == other.OnUpdate &&
-		k.OnDelete == other.OnDelete
+		sameReferentialAction(k.OnUpdate, other.OnUpdate) &&
+		sameReferentialAction(k.OnDelete, other.OnDelete)
+}
+
+// InnoDB checks NO ACTION at once, the same as RESTRICT. MySQL stores the default rule as
+// NO ACTION and MariaDB stores it as RESTRICT.
+func sameReferentialAction(rule string, otherRule string) bool {
+	return rule == otherRule || !withReferentialAction(rule) && !withReferentialAction(otherRule)
 }
 
 func (k *MySQLForeignKey) Clause() string {
