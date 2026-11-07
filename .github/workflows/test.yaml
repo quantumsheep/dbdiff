@@ -119,7 +119,7 @@ jobs:
           key: embedded-postgres-${{ matrix.platform.suffix }}
 
       - name: Run Tests
-        run: go test -v -coverprofile=coverage.out ./...
+        run: go test -race -v -coverprofile=coverage.out ./...
 
       - name: Show The Coverage
         run: go tool cover -func=coverage.out
