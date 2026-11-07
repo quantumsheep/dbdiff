@@ -94,6 +94,22 @@ func TestPostgresObjectInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresAlterSequenceOwner", func(t *testing.T) {
+		instruction := &PostgresAlterSequenceOwnerInstruction{
+			Name:       "user_ids",
+			TableName:  "users",
+			ColumnName: "id",
+		}
+
+		require.Equal(t, `ALTER SEQUENCE "user_ids" OWNED BY "users"."id";`, instruction.String())
+	})
+
+	t.Run("PostgresAlterSequenceOwnerToNone", func(t *testing.T) {
+		instruction := &PostgresAlterSequenceOwnerInstruction{Name: "user_ids"}
+
+		require.Equal(t, `ALTER SEQUENCE "user_ids" OWNED BY NONE;`, instruction.String())
+	})
+
 	t.Run("PostgresRestartOwnedSequence", func(t *testing.T) {
 		instruction := &PostgresRestartOwnedSequenceInstruction{
 			TableName:  "user's",
@@ -230,6 +246,12 @@ func TestPostgresObjectInstructionComments(t *testing.T) {
 		}
 
 		require.Equal(t, `Create the sequence "users_id_seq"`, instruction.Comment())
+	})
+
+	t.Run("PostgresAlterSequenceOwner", func(t *testing.T) {
+		instruction := &PostgresAlterSequenceOwnerInstruction{Name: "user_ids"}
+
+		require.Equal(t, `Modify the owner column of the sequence "user_ids"`, instruction.Comment())
 	})
 
 	t.Run("PostgresRestartOwnedSequence", func(t *testing.T) {

@@ -1,6 +1,7 @@
 package driverspostgres
 
 import (
+	"database/sql"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -186,7 +187,11 @@ func TestPostgresTableInstructions(t *testing.T) {
 					Name:    "id",
 					Type:    "integer",
 					NotNull: true,
-					Serial:  "serial",
+					Default: sql.NullString{
+						String: "nextval('users_id_seq'::regclass)",
+						Valid:  true,
+					},
+					Serial: "serial",
 				},
 			},
 		}

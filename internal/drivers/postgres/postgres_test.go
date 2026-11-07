@@ -225,6 +225,18 @@ func (d *TestingPostgresDriver) RequireDiffApplies(expected driversshared.Instru
 	d.RequireInstructions(nil)
 }
 
+func (d *TestingPostgresDriver) serialSequenceOfCurrent(tableName string, columnName string) sql.NullString {
+	d.tb.Helper()
+
+	var sequenceName sql.NullString
+
+	err := d.currentConnection.QueryRowContext(d.tb.Context(), `SELECT pg_get_serial_sequence($1, $2)`,
+		driversshared.QuoteIdentifier(tableName), columnName).Scan(&sequenceName)
+	require.NoError(d.tb, err)
+
+	return sequenceName
+}
+
 func (d *TestingPostgresDriver) FetchAllFromCurrent(table string, additionalRules string) []map[string]any {
 	d.tb.Helper()
 

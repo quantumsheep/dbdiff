@@ -68,10 +68,6 @@ func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 	columnCopy := *c
 	columnCopy.Name = other.Name
 
-	// A rename of the table keeps the old sequence name, and the name alone changes
-	// no behavior.
-	columnCopy.SerialSequenceName = other.SerialSequenceName
-
 	return columnCopy == *other
 }
 
@@ -124,12 +120,31 @@ func (c *PostgresColumn) Definition() string {
 		value += fmt.Sprintf(" GENERATED ALWAYS AS (%s) STORED", c.GeneratedExpression)
 	}
 
-	if c.Default.Valid {
+	// The word serial gives the default.
+	if c.Default.Valid && c.Serial == "" {
 		value += fmt.Sprintf(" DEFAULT %s", c.Default.String)
 	}
 
 	return value
 }
+
+// The word serial gives a sequence with this name and these options. The condition reads
+// the aliases sequence_class, sequence_options, owner_table, and owner_column. Another
+// sequence that a column owns keeps its own statement, and the column keeps its default.
+const serialSequenceCondition = `(
+	sequence_class.relname = owner_table.relname || '_' || owner_column.attname || '_seq'
+	AND sequence_options.seqtypid = owner_column.atttypid
+	AND sequence_options.seqstart = 1
+	AND sequence_options.seqincrement = 1
+	AND sequence_options.seqmin = 1
+	AND sequence_options.seqmax = CASE owner_column.atttypid
+		WHEN 'smallint'::regtype THEN 32767
+		WHEN 'integer'::regtype THEN 2147483647
+		WHEN 'bigint'::regtype THEN 9223372036854775807
+	END
+	AND sequence_options.seqcache = 1
+	AND NOT sequence_options.seqcycle
+)`
 
 func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) error {
 	// format_type gives the exact type name, because information_schema.columns gives ARRAY
@@ -142,7 +157,7 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 	//
 	// An empty text of the identity options, of the storage mode, or of the statistics target
 	// names a column that keeps the default of its type. PostgreSQL 16 writes -1 for the
-	// default statistics target, and PostgreSQL 17 writes NULL. GetSequences excludes the
+	// default statistics target, and PostgreSQL 17 writes NULL. GetSequences marks the
 	// sequence of a serial column, so the word of that column builds it again.
 	columns, err := driversshared.QueryAll(ctx, db, `
 			SELECT
@@ -184,29 +199,29 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 					JOIN pg_depend dep ON dep.objid = s.seqrelid AND dep.deptype = 'i'
 					WHERE dep.refobjid = a.attrelid AND dep.refobjsubid = a.attnum
 				), ''),
-				coalesce((
-					SELECT CASE a.atttypid
+				CASE WHEN serial_sequence.relname IS NOT NULL THEN
+					CASE a.atttypid
 						WHEN 'smallint'::regtype THEN 'smallserial'
 						WHEN 'integer'::regtype THEN 'serial'
 						WHEN 'bigint'::regtype THEN 'bigserial'
 					END
-					FROM pg_depend dep
-					JOIN pg_class sequence_class ON sequence_class.oid = dep.objid
-						AND sequence_class.relkind = 'S'
-					WHERE dep.refobjid = a.attrelid
-					AND dep.refobjsubid = a.attnum
-					AND dep.deptype = 'a'
-				), ''),
-				coalesce((
-					SELECT sequence_class.relname
-					FROM pg_depend dep
-					JOIN pg_class sequence_class ON sequence_class.oid = dep.objid
-						AND sequence_class.relkind = 'S'
-					WHERE dep.refobjid = a.attrelid
-					AND dep.refobjsubid = a.attnum
-					AND dep.deptype = 'a'
-				), '')
+				ELSE '' END,
+				coalesce(serial_sequence.relname, '')
 			FROM pg_attribute a
+			LEFT JOIN LATERAL (
+				SELECT sequence_class.relname
+				FROM pg_depend dep
+				JOIN pg_class sequence_class ON sequence_class.oid = dep.objid
+					AND sequence_class.relkind = 'S'
+				JOIN pg_sequence sequence_options ON sequence_options.seqrelid = sequence_class.oid
+				JOIN pg_class owner_table ON owner_table.oid = dep.refobjid
+				JOIN pg_attribute owner_column ON owner_column.attrelid = dep.refobjid
+					AND owner_column.attnum = dep.refobjsubid
+				WHERE dep.refobjid = a.attrelid
+				AND dep.refobjsubid = a.attnum
+				AND dep.deptype = 'a'
+				AND `+serialSequenceCondition+`
+			) serial_sequence ON true
 			LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 			LEFT JOIN pg_type base_type ON base_type.oid = a.atttypid
 			LEFT JOIN pg_collation column_collation ON column_collation.oid = a.attcollation
@@ -227,11 +242,6 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 			&statisticsTarget, &identityOptions, &serial, &serialSequenceName)
 		if err != nil {
 			return nil, err
-		}
-
-		// The word serial holds the default, so the definition writes no DEFAULT clause.
-		if serial != "" {
-			columnDefault = sql.NullString{}
 		}
 
 		return &PostgresColumn{

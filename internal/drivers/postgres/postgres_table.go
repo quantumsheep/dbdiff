@@ -311,7 +311,14 @@ func (t *PostgresTable) DiffTable(
 			}
 		}
 
-		if desiredColumn.Default != currentColumn.Default {
+		// A serial column and a column with an owned sequence of the same name hold the same
+		// default, and the sequence section then changes the options of the sequence.
+		serialAdded := desiredColumn.Serial != "" && currentColumn.Serial == "" &&
+			desiredColumn.Default != currentColumn.Default
+		serialRemoved := desiredColumn.Serial == "" && currentColumn.Serial != "" &&
+			desiredColumn.Default != currentColumn.Default
+
+		if desiredColumn.Default != currentColumn.Default && !serialAdded {
 			if desiredColumn.Default.Valid {
 				instructions = append(instructions, alterTable(&PostgresSetDefaultAction{
 					ColumnName: desiredColumn.Name,
@@ -325,18 +332,16 @@ func (t *PostgresTable) DiffTable(
 
 		// The serial word owns a sequence and gives the default, and PostgreSQL holds no
 		// single action for it.
-		if desiredColumn.Serial != "" && currentColumn.Serial == "" {
-			sequenceName := t.Name + "_" + desiredColumn.Name + "_seq"
-
+		if serialAdded {
 			instructions = append(instructions, &PostgresCreateOwnedSequenceInstruction{
-				Name:       sequenceName,
+				Name:       desiredColumn.SerialSequenceName,
 				DataType:   desiredColumn.Type,
 				TableName:  t.Name,
 				ColumnName: desiredColumn.Name,
 			})
 			instructions = append(instructions, alterTable(&PostgresSetDefaultAction{
 				ColumnName: desiredColumn.Name,
-				Expression: fmt.Sprintf("nextval('%s'::regclass)", driversshared.QuoteIdentifier(sequenceName)),
+				Expression: desiredColumn.Default.String,
 			}))
 			instructions = append(instructions, &PostgresRestartOwnedSequenceInstruction{
 				TableName:  t.Name,
@@ -344,9 +349,8 @@ func (t *PostgresTable) DiffTable(
 			})
 		}
 
-		if desiredColumn.Serial == "" && currentColumn.Serial != "" {
-			instructions = append(instructions,
-				alterTable(&PostgresDropDefaultAction{ColumnName: desiredColumn.Name}))
+		// The default block above removes the use of the sequence first.
+		if serialRemoved {
 			instructions = append(instructions, &PostgresDropSequenceInstruction{
 				Name: currentColumn.SerialSequenceName,
 			})

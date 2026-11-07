@@ -175,9 +175,13 @@ func TestPostgresColumn(t *testing.T) {
 				Name: "users",
 				Columns: []*PostgresColumn{
 					{
-						Name:               "id",
-						Type:               "integer",
-						NotNull:            true,
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+						Default: sql.NullString{
+							String: "nextval('users_id_seq'::regclass)",
+							Valid:  true,
+						},
 						Serial:             "serial",
 						SerialSequenceName: "users_id_seq",
 					},
@@ -216,9 +220,13 @@ func TestPostgresColumn(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresAddColumnAction{
 						Column: &PostgresColumn{
-							Name:               "id",
-							Type:               "bigint",
-							NotNull:            true,
+							Name:    "id",
+							Type:    "bigint",
+							NotNull: true,
+							Default: sql.NullString{
+								String: "nextval('users_id_seq'::regclass)",
+								Valid:  true,
+							},
 							Serial:             "bigserial",
 							SerialSequenceName: "users_id_seq",
 						},
@@ -830,7 +838,7 @@ func TestPostgresColumn(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresSetDefaultAction{
 						ColumnName: "id",
-						Expression: `nextval('"users_id_seq"'::regclass)`,
+						Expression: "nextval('users_id_seq'::regclass)",
 					},
 				},
 			},
@@ -876,7 +884,7 @@ func TestPostgresColumn(t *testing.T) {
 				Actions: []driversshared.AlterTableAction{
 					&PostgresSetDefaultAction{
 						ColumnName: "id",
-						Expression: `nextval('"users_id_seq"'::regclass)`,
+						Expression: "nextval('users_id_seq'::regclass)",
 					},
 				},
 			},

@@ -100,6 +100,25 @@ func (i *PostgresCreateOwnedSequenceInstruction) Comment() string {
 	return driversshared.ObjectComment("Create", "sequence", i.Name)
 }
 
+type PostgresAlterSequenceOwnerInstruction struct {
+	Name       string
+	TableName  string
+	ColumnName string
+}
+
+func (i *PostgresAlterSequenceOwnerInstruction) String() string {
+	owner := "NONE"
+	if i.ColumnName != "" {
+		owner = driversshared.QuoteIdentifier(i.TableName) + "." + driversshared.QuoteIdentifier(i.ColumnName)
+	}
+
+	return fmt.Sprintf("ALTER SEQUENCE %s OWNED BY %s;", driversshared.QuoteIdentifier(i.Name), owner)
+}
+
+func (i *PostgresAlterSequenceOwnerInstruction) Comment() string {
+	return driversshared.ObjectComment("Modify the owner column of", "sequence", i.Name)
+}
+
 // A new sequence of a column that holds rows starts below the values of the column. The
 // statement sets the next value above them and never below the start value. HAVING skips
 // an empty table, so the sequence keeps its start value.
