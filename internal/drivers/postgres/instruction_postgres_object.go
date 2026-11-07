@@ -238,13 +238,14 @@ type PostgresGrantInstruction struct {
 	Privileges []string
 	ObjectType string
 	ObjectName string
+	Arguments  string
 	Grantee    string
 }
 
 func (i *PostgresGrantInstruction) String() string {
 	return fmt.Sprintf("GRANT %s ON %s %s TO %s;",
 		joinPrivileges(i.Privileges), i.ObjectType,
-		driversshared.QuoteIdentifier(i.ObjectName), quoteGrantee(i.Grantee))
+		quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments), quoteGrantee(i.Grantee))
 }
 
 func (i *PostgresGrantInstruction) Comment() string {
@@ -255,13 +256,14 @@ type PostgresRevokeInstruction struct {
 	Privileges []string
 	ObjectType string
 	ObjectName string
+	Arguments  string
 	Grantee    string
 }
 
 func (i *PostgresRevokeInstruction) String() string {
 	return fmt.Sprintf("REVOKE %s ON %s %s FROM %s;",
 		joinPrivileges(i.Privileges), i.ObjectType,
-		driversshared.QuoteIdentifier(i.ObjectName), quoteGrantee(i.Grantee))
+		quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments), quoteGrantee(i.Grantee))
 }
 
 func (i *PostgresRevokeInstruction) Comment() string {
@@ -271,16 +273,27 @@ func (i *PostgresRevokeInstruction) Comment() string {
 type PostgresSetOwnerInstruction struct {
 	ObjectType string
 	ObjectName string
+	Arguments  string
 	Owner      string
 }
 
 func (i *PostgresSetOwnerInstruction) String() string {
 	return fmt.Sprintf("ALTER %s %s OWNER TO %s;",
-		i.ObjectType, driversshared.QuoteIdentifier(i.ObjectName), driversshared.QuoteIdentifier(i.Owner))
+		i.ObjectType, quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments),
+		driversshared.QuoteIdentifier(i.Owner))
 }
 
 func (i *PostgresSetOwnerInstruction) Comment() string {
 	return driversshared.OwnedObjectComment("Change", "owner", i.ObjectType, i.ObjectName)
+}
+
+// Overloads of a routine share one name, so the argument types select the routine.
+func quotePrivilegeObject(objectType string, objectName string, arguments string) string {
+	if !isRoutineObjectType(objectType) {
+		return driversshared.QuoteIdentifier(objectName)
+	}
+
+	return driversshared.QuoteIdentifier(objectName) + "(" + arguments + ")"
 }
 
 // PUBLIC is a keyword, and the quoted name "PUBLIC" names a role.

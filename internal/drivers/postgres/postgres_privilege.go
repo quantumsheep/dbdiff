@@ -15,12 +15,13 @@ import (
 type PostgresPrivilege struct {
 	ObjectType string
 	ObjectName string
+	Arguments  string
 	Grantee    string
 	Privileges []string
 }
 
 func (p *PostgresPrivilege) Key() string {
-	return p.ObjectType + " " + p.ObjectName + " " + p.Grantee
+	return p.ObjectType + " " + privilegeObjectKey(p.ObjectType, p.ObjectName, p.Arguments) + " " + p.Grantee
 }
 
 func (p *PostgresPrivilege) GrantInstruction(privileges []string) *PostgresGrantInstruction {
@@ -28,6 +29,7 @@ func (p *PostgresPrivilege) GrantInstruction(privileges []string) *PostgresGrant
 		Privileges: privileges,
 		ObjectType: p.ObjectType,
 		ObjectName: p.ObjectName,
+		Arguments:  p.Arguments,
 		Grantee:    p.Grantee,
 	}
 }
@@ -37,6 +39,7 @@ func (p *PostgresPrivilege) RevokeInstruction(privileges []string) *PostgresRevo
 		Privileges: privileges,
 		ObjectType: p.ObjectType,
 		ObjectName: p.ObjectName,
+		Arguments:  p.Arguments,
 		Grantee:    p.Grantee,
 	}
 }
@@ -44,15 +47,51 @@ func (p *PostgresPrivilege) RevokeInstruction(privileges []string) *PostgresRevo
 type PostgresOwner struct {
 	ObjectType string
 	ObjectName string
+	Arguments  string
 	Owner      string
+}
+
+func (o *PostgresOwner) Key() string {
+	return privilegeObjectKey(o.ObjectType, o.ObjectName, o.Arguments)
 }
 
 func (o *PostgresOwner) SetInstruction() *PostgresSetOwnerInstruction {
 	return &PostgresSetOwnerInstruction{
 		ObjectType: o.ObjectType,
 		ObjectName: o.ObjectName,
+		Arguments:  o.Arguments,
 		Owner:      o.Owner,
 	}
+}
+
+func isRoutineObjectType(objectType string) bool {
+	return objectType == "FUNCTION" || objectType == "PROCEDURE"
+}
+
+// The key of a routine is the match key of DiffFunctions, and droppedFunctionKeys holds
+// that key. The key of a relation is its name, and recreatedObjectNames holds that name.
+func privilegeObjectKey(objectType string, objectName string, arguments string) string {
+	if !isRoutineObjectType(objectType) {
+		return objectName
+	}
+
+	routine := &PostgresFunction{
+		Name:          objectName,
+		ArgumentTypes: arguments,
+		Kind:          objectType,
+	}
+
+	return routine.MatchKey()
+}
+
+func (d *PostgresDriver) isRecreated(objectType string, objectName string, arguments string) bool {
+	key := privilegeObjectKey(objectType, objectName, arguments)
+
+	if isRoutineObjectType(objectType) {
+		return d.droppedFunctionKeys[key]
+	}
+
+	return d.recreatedObjectNames[key]
 }
 
 // PostgreSQL names a view and a materialized view with the keyword TABLE in a GRANT.
@@ -110,10 +149,10 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 
 	for _, desiredOwner := range desiredOwners {
 		currentOwner, found := lo.Find(currentOwners, func(owner *PostgresOwner) bool {
-			return owner.ObjectName == desiredOwner.ObjectName
+			return owner.Key() == desiredOwner.Key()
 		})
 		if found && currentOwner.Owner == desiredOwner.Owner &&
-			!d.recreatedObjectNames[desiredOwner.ObjectName] {
+			!d.isRecreated(desiredOwner.ObjectType, desiredOwner.ObjectName, desiredOwner.Arguments) {
 			continue
 		}
 
@@ -130,14 +169,38 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		return nil, err
 	}
 
+	// A new object and an object that the diff creates again hold the default privileges.
+	// The default privileges of a routine give EXECUTE to PUBLIC.
+	currentPrivileges = lo.Reject(currentPrivileges, func(privilege *PostgresPrivilege, _ int) bool {
+		return d.isRecreated(privilege.ObjectType, privilege.ObjectName, privilege.Arguments)
+	})
+
+	currentObjectKeys := lo.Map(currentOwners, func(owner *PostgresOwner, _ int) string {
+		return owner.Key()
+	})
+
+	for _, desiredOwner := range desiredOwners {
+		if !isRoutineObjectType(desiredOwner.ObjectType) {
+			continue
+		}
+
+		if !slices.Contains(currentObjectKeys, desiredOwner.Key()) ||
+			d.isRecreated(desiredOwner.ObjectType, desiredOwner.ObjectName, desiredOwner.Arguments) {
+			currentPrivileges = append(currentPrivileges, &PostgresPrivilege{
+				ObjectType: desiredOwner.ObjectType,
+				ObjectName: desiredOwner.ObjectName,
+				Arguments:  desiredOwner.Arguments,
+				Grantee:    "public",
+				Privileges: []string{"EXECUTE"},
+			})
+		}
+	}
+
 	for _, desiredPrivilege := range desiredPrivileges {
 		currentPrivilege, found := lo.Find(currentPrivileges, func(privilege *PostgresPrivilege) bool {
 			return privilege.Key() == desiredPrivilege.Key()
 		})
-
-		// The diff drops and creates the object again, and the new object holds the
-		// default privileges, so every grant of the desired schema comes back.
-		if !found || d.recreatedObjectNames[desiredPrivilege.ObjectName] {
+		if !found {
 			additions = append(additions,
 				desiredPrivilege.GrantInstruction(desiredPrivilege.Privileges))
 
@@ -155,15 +218,16 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		}
 	}
 
-	desiredObjectNames := lo.Map(desiredOwners, func(owner *PostgresOwner, _ int) string {
-		return owner.ObjectName
+	desiredObjectKeys := lo.Map(desiredOwners, func(owner *PostgresOwner, _ int) string {
+		return owner.Key()
 	})
 
 	for _, currentPrivilege := range currentPrivileges {
 		// The diff drops an object that the desired schema does not hold, and the drop removes
 		// every privilege of the object.
-		if !slices.Contains(desiredObjectNames, currentPrivilege.ObjectName) ||
-			d.recreatedObjectNames[currentPrivilege.ObjectName] {
+		currentObjectKey := privilegeObjectKey(
+			currentPrivilege.ObjectType, currentPrivilege.ObjectName, currentPrivilege.Arguments)
+		if !slices.Contains(desiredObjectKeys, currentObjectKey) {
 			continue
 		}
 
@@ -225,7 +289,12 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 		return nil, err
 	}
 
-	return owners, nil
+	routineOwners, err := getRoutineOwners(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.Concat(owners, routineOwners), nil
 }
 
 // PostgreSQL gives the privileges of the owner with the object. The grantee 0 is PUBLIC, and
@@ -282,5 +351,68 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 		return nil, err
 	}
 
-	return privileges, nil
+	routinePrivileges, err := getRoutinePrivileges(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.Concat(privileges, routinePrivileges), nil
+}
+
+func getRoutineOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT
+			p.proname,
+			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+			oidvectortypes(p.proargtypes),
+			pg_get_userbyid(p.proowner)
+		FROM pg_proc p
+		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
+		AND p.prokind IN ('f', 'p')
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
+		)
+		ORDER BY p.proname, oidvectortypes(p.proargtypes)
+	`, func(rows *sql.Rows) (*PostgresOwner, error) {
+		owner := &PostgresOwner{}
+
+		err := rows.Scan(&owner.ObjectName, &owner.ObjectType, &owner.Arguments, &owner.Owner)
+
+		return owner, err
+	})
+}
+
+// A NULL ACL holds the default privileges, and the default privileges of a routine give
+// EXECUTE to PUBLIC. acldefault gives these privileges, so a REVOKE FROM PUBLIC shows.
+func getRoutinePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT
+			p.proname,
+			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+			oidvectortypes(p.proargtypes) AS argument_types,
+			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
+			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+		FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
+		AND p.prokind IN ('f', 'p')
+		AND acl.grantee <> p.proowner
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
+		)
+		GROUP BY p.oid, p.proname, p.prokind, acl.grantee
+		ORDER BY p.proname, argument_types, grantee_name
+	`, func(rows *sql.Rows) (*PostgresPrivilege, error) {
+		privilege := &PostgresPrivilege{}
+
+		var granted string
+
+		err := rows.Scan(&privilege.ObjectName, &privilege.ObjectType, &privilege.Arguments, &privilege.Grantee, &granted)
+		if err != nil {
+			return nil, err
+		}
+
+		privilege.Privileges = sortedPrivileges(strings.Split(granted, ","))
+
+		return privilege, nil
+	})
 }

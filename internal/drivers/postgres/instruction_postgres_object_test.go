@@ -74,6 +74,47 @@ func TestPostgresObjectInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresGrantOnAFunction", func(t *testing.T) {
+		instruction := &PostgresGrantInstruction{
+			Privileges: []string{"EXECUTE"},
+			ObjectType: "FUNCTION",
+			ObjectName: "add_one",
+			Arguments:  "integer",
+			Grantee:    "app_writer",
+		}
+
+		require.Equal(t,
+			`GRANT EXECUTE ON FUNCTION "add_one"(integer) TO "app_writer";`,
+			instruction.String())
+	})
+
+	t.Run("PostgresRevokeOnAProcedureWithNoArguments", func(t *testing.T) {
+		instruction := &PostgresRevokeInstruction{
+			Privileges: []string{"EXECUTE"},
+			ObjectType: "PROCEDURE",
+			ObjectName: "record_run",
+			Arguments:  "",
+			Grantee:    "public",
+		}
+
+		require.Equal(t,
+			`REVOKE EXECUTE ON PROCEDURE "record_run"() FROM PUBLIC;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresSetOwnerOfAFunction", func(t *testing.T) {
+		instruction := &PostgresSetOwnerInstruction{
+			ObjectType: "FUNCTION",
+			ObjectName: "add_one",
+			Arguments:  "integer, text",
+			Owner:      "app_owner",
+		}
+
+		require.Equal(t,
+			`ALTER FUNCTION "add_one"(integer, text) OWNER TO "app_owner";`,
+			instruction.String())
+	})
+
 	t.Run("PostgresSetOwner", func(t *testing.T) {
 		instruction := &PostgresSetOwnerInstruction{
 			ObjectType: "TABLE",
