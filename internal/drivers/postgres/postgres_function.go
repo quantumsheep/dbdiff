@@ -127,6 +127,11 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType boo
 		if desiredFunction.Def != currentFunction.Def {
 			if desiredFunction.ReturnType != currentFunction.ReturnType ||
 				desiredFunction.Arguments != currentFunction.Arguments {
+				err := d.recreateFunctionDependents(ctx, currentFunction)
+				if err != nil {
+					return nil, err
+				}
+
 				additions = append(additions, currentFunction.DropInstruction())
 				dropped = true
 			}
@@ -153,6 +158,57 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType boo
 		Additions: additions,
 		Removals:  removals,
 	}, nil
+}
+
+// PostgreSQL refuses to drop a function while another object uses it. DiffViewsAndMaterializedViews
+// drops and creates again each relation that this function marks. The kind blocker names an
+// object that the diff cannot drop and create again.
+func (d *PostgresDriver) recreateFunctionDependents(ctx context.Context, function *PostgresFunction) error {
+	dependents, err := driversshared.QueryAll(ctx, d.CurrentDatabaseConnection, `
+		SELECT DISTINCT
+			CASE
+				WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
+					AND rule_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+				ELSE 'blocker'
+			END AS kind,
+			CASE
+				WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
+					AND rule_class.relnamespace = current_schema()::regnamespace THEN rule_class.relname::text
+				ELSE pg_describe_object(d.classid, d.objid, d.objsubid)
+			END AS name
+		FROM pg_depend d
+		JOIN pg_proc p ON p.oid = d.refobjid
+		LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
+		LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
+		WHERE d.refclassid = 'pg_proc'::regclass
+		AND d.deptype IN ('n', 'a')
+		AND p.pronamespace = current_schema()::regnamespace
+		AND p.proname = $1
+		AND oidvectortypes(p.proargtypes) = $2
+		ORDER BY kind, name
+	`, func(rows *sql.Rows) (*PostgresColumnDependent, error) {
+		dependent := &PostgresColumnDependent{}
+
+		err := rows.Scan(&dependent.Kind, &dependent.Name)
+
+		return dependent, err
+	}, function.Name, function.ArgumentTypes)
+	if err != nil {
+		return err
+	}
+
+	for _, dependent := range dependents {
+		if dependent.Kind == "blocker" {
+			return fmt.Errorf(
+				"the %s uses the function %q. dbdiff must drop and create this function again, "+
+					"and it cannot drop and create this object again",
+				dependent.Name, function.Name)
+		}
+
+		d.markRecreated(dependent.Name)
+	}
+
+	return nil
 }
 
 func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*PostgresFunction, error) {

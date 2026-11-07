@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPostgresFunction(t *testing.T) {
@@ -113,6 +114,61 @@ func TestPostgresFunction(t *testing.T) {
 				Definition: "CREATE OR REPLACE FUNCTION all_users()\n RETURNS SETOF users\n LANGUAGE sql\nAS $function$SELECT * FROM users$function$",
 			},
 		})
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatAViewUses", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE FUNCTION answer() RETURNS integer LANGUAGE sql AS 'SELECT 42';
+			CREATE VIEW answers AS SELECT answer() AS value;
+			CREATE VIEW doubled_answers AS SELECT value * 2 AS value FROM answers;
+		`)
+		driver.ExecOnDesired(`
+			CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';
+			CREATE VIEW answers AS SELECT answer() AS value;
+			CREATE VIEW doubled_answers AS SELECT value * 2 AS value FROM answers;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&driversshared.SQLDropViewInstruction{
+				Name: "doubled_answers",
+			},
+			&driversshared.SQLDropViewInstruction{
+				Name: "answers",
+			},
+			&PostgresDropFunctionInstruction{
+				Name: "answer",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION answer()\n RETURNS bigint\n LANGUAGE sql\nAS $function$SELECT 42$function$",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "answers",
+				Query: " SELECT answer() AS value;",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "doubled_answers",
+				Query: " SELECT (value * 2) AS value\n   FROM answers;",
+			},
+		})
+	})
+
+	t.Run("ChangeTheReturnTypeOfAFunctionThatADefaultUses", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE FUNCTION answer() RETURNS integer LANGUAGE sql AS 'SELECT 42';
+			CREATE TABLE answers (value bigint DEFAULT answer());
+		`)
+		driver.ExecOnDesired(`
+			CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';
+			CREATE TABLE answers (value bigint DEFAULT answer());
+		`)
+
+		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
+		require.EqualError(t, err, `the default value for column value of table answers uses the function "answer". `+
+			`dbdiff must drop and create this function again, and it cannot drop and create this object again`)
 	})
 
 	t.Run("CreateFunction", func(t *testing.T) {
