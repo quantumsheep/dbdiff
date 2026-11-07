@@ -275,8 +275,9 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*Se
 
 	// PostgreSQL refuses to drop a relation while another relation reads it. CASCADE can
 	// drop objects that the diff does not see. Thus the diff also drops and creates again
-	// each relation that reads a dropped relation. The dependency order puts each relation
-	// after the relations that it reads, so one pass finds every indirect reader too.
+	// each relation that reads a dropped relation. DiffTables marks each relation that reads
+	// a rebuilt column. The dependency order puts each relation after the relations that it
+	// reads, so one pass finds every indirect reader too.
 	droppedNames := map[string]bool{}
 
 	for _, currentRelation := range currentRelations {
@@ -284,7 +285,8 @@ func (d *PostgresDriver) DiffViewsAndMaterializedViews(ctx context.Context) (*Se
 		readsADroppedRelation := lo.SomeBy(currentRelation.DependencyNames(), func(name string) bool {
 			return droppedNames[name]
 		})
-		if !found || readsADroppedRelation || !desiredRelation.HasEqualDefinition(currentRelation) {
+		if !found || readsADroppedRelation || d.recreatedObjectNames[currentRelation.Name()] ||
+			!desiredRelation.HasEqualDefinition(currentRelation) {
 			droppedNames[currentRelation.Name()] = true
 		}
 	}

@@ -75,6 +75,27 @@ func (c *PostgresColumn) HasEqualAttributes(other *PostgresColumn) bool {
 	return columnCopy == *other
 }
 
+// PostgreSQL 13 adds the DROP EXPRESSION action, and PostgreSQL 17 adds the SET EXPRESSION
+// action. No version holds an action that makes a plain column a generated column. The TYPE
+// action of a generated column accepts no USING clause and keeps the old expression.
+func (c *PostgresColumn) NeedsRebuild(current *PostgresColumn, serverVersion int) bool {
+	bothGenerated := c.GeneratedExpression != "" && current.GeneratedExpression != ""
+	typeChanged := c.Type != current.Type || c.Collation != current.Collation
+
+	switch {
+	case bothGenerated && typeChanged:
+		return true
+	case c.GeneratedExpression == current.GeneratedExpression:
+		return false
+	case c.GeneratedExpression == "":
+		return serverVersion < 130000
+	case current.GeneratedExpression == "":
+		return true
+	default:
+		return serverVersion < 170000
+	}
+}
+
 func (c *PostgresColumn) Definition() string {
 	dataType := c.Type
 	if c.Serial != "" {
@@ -100,7 +121,7 @@ func (c *PostgresColumn) Definition() string {
 	}
 
 	if c.GeneratedExpression != "" {
-		value += fmt.Sprintf(" GENERATED ALWAYS AS %s STORED", c.GeneratedExpression)
+		value += fmt.Sprintf(" GENERATED ALWAYS AS (%s) STORED", c.GeneratedExpression)
 	}
 
 	if c.Default.Valid {
@@ -236,4 +257,74 @@ func getTableColumns(ctx context.Context, db *sql.DB, table *PostgresTable) erro
 	table.Columns = append(table.Columns, columns...)
 
 	return nil
+}
+
+type PostgresColumnDependent struct {
+	ColumnName string
+	Kind       string
+	Name       string
+}
+
+// A DROP COLUMN statement removes the indexes and the constraints of the column. PostgreSQL
+// refuses it while a view, a policy, a trigger, or a rule uses the column. The kind blocker
+// names an object that the diff cannot drop and create again.
+func getColumnDependents(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	columnNames []string,
+) ([]*PostgresColumnDependent, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT DISTINCT attname, kind, name
+		FROM (
+			SELECT
+				a.attname,
+				CASE
+					WHEN index_class.oid IS NOT NULL THEN 'index'
+					WHEN table_constraint.oid IS NOT NULL THEN 'constraint'
+					WHEN table_trigger.oid IS NOT NULL THEN 'trigger'
+					WHEN table_policy.polrelid = d.refobjid THEN 'policy'
+					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
+						AND rule_class.relnamespace = current_schema()::regnamespace THEN 'relation'
+					WHEN table_policy.oid IS NOT NULL OR r.oid IS NOT NULL THEN 'blocker'
+				END AS kind,
+				CASE
+					WHEN index_class.oid IS NOT NULL THEN index_class.relname
+					WHEN table_constraint.oid IS NOT NULL THEN table_constraint.conname
+					WHEN table_trigger.oid IS NOT NULL THEN table_trigger.tgname
+					WHEN table_policy.polrelid = d.refobjid THEN table_policy.polname
+					WHEN rule_class.relkind IN ('v', 'm') AND r.rulename = '_RETURN'
+						AND rule_class.relnamespace = current_schema()::regnamespace THEN rule_class.relname
+					WHEN table_policy.oid IS NOT NULL THEN
+						format('policy %I on %s', table_policy.polname, table_policy.polrelid::regclass)
+					WHEN r.rulename = '_RETURN' THEN format('view %s', r.ev_class::regclass)
+					ELSE format('rule %I on %s', r.rulename, r.ev_class::regclass)
+				END AS name
+			FROM pg_depend d
+			JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+			LEFT JOIN pg_class index_class ON d.classid = 'pg_class'::regclass
+				AND index_class.oid = d.objid
+				AND index_class.relkind IN ('i', 'I')
+			LEFT JOIN pg_constraint table_constraint ON d.classid = 'pg_constraint'::regclass
+				AND table_constraint.oid = d.objid
+				AND table_constraint.conrelid = d.refobjid
+			LEFT JOIN pg_trigger table_trigger ON d.classid = 'pg_trigger'::regclass
+				AND table_trigger.oid = d.objid
+			LEFT JOIN pg_policy table_policy ON d.classid = 'pg_policy'::regclass
+				AND table_policy.oid = d.objid
+			LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
+			LEFT JOIN pg_class rule_class ON rule_class.oid = r.ev_class
+			WHERE d.refclassid = 'pg_class'::regclass
+			AND d.refobjid = $1::regclass
+			AND a.attname = ANY($2)
+		) dependents
+		WHERE kind IS NOT NULL
+		ORDER BY attname, kind, name
+	`, func(rows *sql.Rows) (*PostgresColumnDependent, error) {
+		dependent := &PostgresColumnDependent{}
+
+		err := rows.Scan(&dependent.ColumnName, &dependent.Kind, &dependent.Name)
+
+		return dependent, err
+	}, driversshared.QuoteIdentifier(tableName), columnNames)
 }

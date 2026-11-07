@@ -169,6 +169,7 @@ func identityOptionDefaults(currentOptions string, columnType string) string {
 func (t *PostgresTable) DiffTable(
 	other *PostgresTable,
 	hasAutomaticCast AutomaticCastLookup,
+	serverVersion int,
 ) ([]driversshared.Instruction, error) {
 	var instructions []driversshared.Instruction
 
@@ -245,9 +246,9 @@ func (t *PostgresTable) DiffTable(
 			continue
 		}
 
-		// PostgreSQL holds no action that changes the expression of a generated column, and the
-		// column keeps no data of its own.
-		if desiredColumn.GeneratedExpression != currentColumn.GeneratedExpression {
+		// A generated column keeps no data of its own. DiffTables removes the dependents of a
+		// rebuilt column from the current table, so the blocks below create them again.
+		if desiredColumn.NeedsRebuild(currentColumn, serverVersion) {
 			instructions = append(instructions, &PostgresAlterTableInstruction{
 				Name: t.Name,
 				Actions: []driversshared.AlterTableAction{
@@ -255,8 +256,22 @@ func (t *PostgresTable) DiffTable(
 					&PostgresAddColumnAction{Column: desiredColumn},
 				},
 			})
+			instructions = append(instructions, desiredColumn.StorageInstructions(t.Name)...)
+			instructions = append(instructions, desiredColumn.StatisticsInstructions(t.Name)...)
 
 			continue
+		}
+
+		if desiredColumn.GeneratedExpression != currentColumn.GeneratedExpression {
+			if desiredColumn.GeneratedExpression == "" {
+				instructions = append(instructions,
+					alterTable(&PostgresDropExpressionAction{ColumnName: desiredColumn.Name}))
+			} else {
+				instructions = append(instructions, alterTable(&PostgresSetExpressionAction{
+					ColumnName: desiredColumn.Name,
+					Expression: desiredColumn.GeneratedExpression,
+				}))
+			}
 		}
 
 		// PostgreSQL refuses to remove the NOT NULL flag of an identity column, so this
@@ -880,6 +895,14 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		return d.HasAutomaticCast(ctx, d.CurrentDatabaseConnection, oldType, newType)
 	}
 
+	var serverVersion int
+
+	err = d.CurrentDatabaseConnection.QueryRowContext(ctx, `SELECT current_setting('server_version_num')::int`).
+		Scan(&serverVersion)
+	if err != nil {
+		return nil, err
+	}
+
 	// The action of a rule can name a second table, so every rule comes after every table.
 	var ruleInstructions []driversshared.Instruction
 
@@ -899,7 +922,32 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 			continue
 		}
 
-		subInstructions, err := desiredTable.DiffTable(currentTable, hasAutomaticCast)
+		rebuiltColumnNames := desiredTable.RebuiltColumnNames(currentTable, serverVersion)
+		if len(rebuiltColumnNames) > 0 {
+			dependents, err := getColumnDependents(ctx, d.CurrentDatabaseConnection, currentTable.Name, rebuiltColumnNames)
+			if err != nil {
+				return nil, err
+			}
+
+			for _, dependent := range dependents {
+				switch dependent.Kind {
+				case "blocker":
+					return nil, fmt.Errorf(
+						"the %s uses the column %q of the table %q. dbdiff must drop and add this column, "+
+							"and it cannot drop and create this object again",
+						dependent.Name, dependent.ColumnName, currentTable.Name)
+				case "relation":
+					d.markRecreated(dependent.Name)
+				}
+			}
+
+			var dropInstructions []driversshared.Instruction
+
+			currentTable, dropInstructions = currentTable.withoutColumnDependents(rebuiltColumnNames, dependents)
+			additions = append(additions, dropInstructions...)
+		}
+
+		subInstructions, err := desiredTable.DiffTable(currentTable, hasAutomaticCast, serverVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -939,6 +987,77 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		Additions:     additions,
 		Removals:      removals,
 	}, nil
+}
+
+func (t *PostgresTable) RebuiltColumnNames(other *PostgresTable, serverVersion int) []string {
+	var names []string
+
+	for _, desiredColumn := range t.Columns {
+		currentColumn, found := other.ColumnByName(desiredColumn.Name)
+		if found && desiredColumn.NeedsRebuild(currentColumn, serverVersion) {
+			names = append(names, desiredColumn.Name)
+		}
+	}
+
+	return names
+}
+
+// A DROP COLUMN statement removes the comment, the indexes, and the constraints of the
+// column. PostgreSQL refuses it while a policy or a trigger uses the column, so the returned
+// instructions drop them before the DROP COLUMN statement. DiffTable creates them again.
+func (t *PostgresTable) withoutColumnDependents(
+	columnNames []string,
+	dependents []*PostgresColumnDependent,
+) (*PostgresTable, []driversshared.Instruction) {
+	isDependent := func(kind string, name string) bool {
+		return slices.ContainsFunc(dependents, func(dependent *PostgresColumnDependent) bool {
+			return dependent.Kind == kind && dependent.Name == name
+		})
+	}
+
+	var dropInstructions []driversshared.Instruction
+
+	tableCopy := *t
+
+	tableCopy.Indexes = slices.DeleteFunc(slices.Clone(t.Indexes), func(index *PostgresIndex) bool {
+		return isDependent("index", index.Name)
+	})
+	tableCopy.Constraints = slices.DeleteFunc(slices.Clone(t.Constraints), func(constraint *PostgresConstraint) bool {
+		return isDependent("constraint", constraint.Name)
+	})
+	tableCopy.Policies = slices.DeleteFunc(slices.Clone(t.Policies), func(policy *PostgresPolicy) bool {
+		if !isDependent("policy", policy.Name) {
+			return false
+		}
+
+		dropInstructions = append(dropInstructions, policy.DropInstruction())
+
+		return true
+	})
+	tableCopy.Triggers = slices.DeleteFunc(slices.Clone(t.Triggers), func(trigger *PostgresTrigger) bool {
+		if !isDependent("trigger", trigger.Name) {
+			return false
+		}
+
+		dropInstructions = append(dropInstructions, &PostgresDropTriggerInstruction{
+			Name:      trigger.Name,
+			TableName: t.Name,
+		})
+
+		return true
+	})
+	tableCopy.Columns = lo.Map(t.Columns, func(column *PostgresColumn, _ int) *PostgresColumn {
+		if !slices.Contains(columnNames, column.Name) {
+			return column
+		}
+
+		columnCopy := *column
+		columnCopy.Comment = ""
+
+		return &columnCopy
+	})
+
+	return &tableCopy, dropInstructions
 }
 
 func isTableDropped(name string, desiredTables []*PostgresTable) bool {

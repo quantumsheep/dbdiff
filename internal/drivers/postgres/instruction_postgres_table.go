@@ -110,6 +110,24 @@ func (a *PostgresDropDefaultAction) TableActionClause() string {
 	return "ALTER COLUMN " + driversshared.QuoteIdentifier(a.ColumnName) + " DROP DEFAULT"
 }
 
+type PostgresSetExpressionAction struct {
+	ColumnName string
+	Expression string
+}
+
+func (a *PostgresSetExpressionAction) TableActionClause() string {
+	return fmt.Sprintf("ALTER COLUMN %s SET EXPRESSION AS (%s)",
+		driversshared.QuoteIdentifier(a.ColumnName), a.Expression)
+}
+
+type PostgresDropExpressionAction struct {
+	ColumnName string
+}
+
+func (a *PostgresDropExpressionAction) TableActionClause() string {
+	return "ALTER COLUMN " + driversshared.QuoteIdentifier(a.ColumnName) + " DROP EXPRESSION"
+}
+
 type PostgresAddIdentityAction struct {
 	ColumnName string
 	Identity   string

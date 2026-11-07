@@ -692,7 +692,7 @@ func TestPostgresTableInstructions(t *testing.T) {
 
 		require.Equal(t, `CREATE TABLE "measures" (
 	"value" integer,
-	"doubled" integer GENERATED ALWAYS AS (value * 2) STORED
+	"doubled" integer GENERATED ALWAYS AS ((value * 2)) STORED
 );`, instruction.String())
 	})
 

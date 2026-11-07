@@ -1,7 +1,9 @@
 package driverspostgres
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -323,10 +325,101 @@ func TestPostgresColumn(t *testing.T) {
 	t.Run("ModifyGeneratedExpression", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
-		driver.ExecOnCurrent(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);`)
-		driver.ExecOnCurrent(`INSERT INTO measures (value) VALUES (5);`)
-		driver.ExecOnDesired(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 3) STORED);`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);
+			CREATE INDEX measures_doubled_idx ON measures (doubled);
+			CREATE VIEW doubled_measures AS SELECT doubled FROM measures;
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 3) STORED);
+			CREATE INDEX measures_doubled_idx ON measures (doubled);
+			CREATE VIEW doubled_measures AS SELECT doubled FROM measures;
+		`)
 		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetExpressionAction{
+						ColumnName: "doubled",
+						Expression: "(value * 3)",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("doubled_measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"doubled": int64(15),
+			},
+		}, rows)
+	})
+
+	t.Run("GeneratedColumnBecomesAPlainColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);
+			CREATE VIEW doubled_measures AS SELECT doubled FROM measures;
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE measures (value INT, doubled INT DEFAULT 0);
+			CREATE VIEW doubled_measures AS SELECT doubled FROM measures;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropExpressionAction{ColumnName: "doubled"},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetDefaultAction{
+						ColumnName: "doubled",
+						Expression: "0",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":   int64(5),
+				"doubled": int64(10),
+			},
+		}, rows)
+	})
+
+	t.Run("PlainColumnBecomesAGeneratedColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, doubled INT CONSTRAINT doubled_positive CHECK (doubled > 0));
+			CREATE INDEX measures_doubled_idx ON measures (doubled);
+			COMMENT ON COLUMN measures.doubled IS 'two times the value';
+			ALTER TABLE measures ALTER COLUMN doubled SET STATISTICS 500;
+			CREATE VIEW doubled_measures AS SELECT doubled FROM measures;
+			CREATE VIEW measure_values AS SELECT value FROM measures;
+			INSERT INTO measures (value, doubled) VALUES (5, 7);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE measures (
+				value INT,
+				doubled INT GENERATED ALWAYS AS (value * 2) STORED CONSTRAINT doubled_positive CHECK (doubled > 0)
+			);
+			CREATE INDEX measures_doubled_idx ON measures (doubled);
+			COMMENT ON COLUMN measures.doubled IS 'two times the value';
+			ALTER TABLE measures ALTER COLUMN doubled SET STATISTICS 500;
+			CREATE VIEW doubled_measures AS SELECT doubled FROM measures;
+			CREATE VIEW measure_values AS SELECT value FROM measures;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "doubled_measures"},
 			&PostgresAlterTableInstruction{
 				Name: "measures",
 				Actions: []driversshared.AlterTableAction{
@@ -335,7 +428,110 @@ func TestPostgresColumn(t *testing.T) {
 						Column: &PostgresColumn{
 							Name:                "doubled",
 							Type:                "integer",
-							GeneratedExpression: "(value * 3)",
+							GeneratedExpression: "(value * 2)",
+							Comment:             "two times the value",
+							StatisticsTarget: sql.NullInt64{
+								Int64: 500,
+								Valid: true,
+							},
+						},
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresSetStatisticsAction{
+						ColumnName:       "doubled",
+						StatisticsTarget: 500,
+					},
+				},
+			},
+			&PostgresCommentOnColumnInstruction{
+				TableName:  "measures",
+				ColumnName: "doubled",
+				Text:       "two times the value",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "doubled_positive",
+							Type: "c",
+							Def:  "CHECK ((doubled > 0))",
+						},
+					},
+				},
+			},
+			&PostgresCreateIndexInstruction{
+				Definition: "CREATE INDEX measures_doubled_idx ON measures USING btree (doubled)",
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "doubled_measures",
+				Query: " SELECT doubled\n   FROM measures;",
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("doubled_measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"doubled": int64(10),
+			},
+		}, rows)
+	})
+
+	t.Run("GeneratedColumnChangesItsTypeAndItsExpression", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, label INT GENERATED ALWAYS AS (value) STORED);
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value INT, label TEXT GENERATED ALWAYS AS ((value + 1)::text) STORED);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "label"},
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "label",
+							Type:                "text",
+							GeneratedExpression: "((value + 1))::text",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value": int64(5),
+				"label": "6",
+			},
+		}, rows)
+	})
+
+	t.Run("GeneratedColumnChangesOnlyItsType", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);
+			INSERT INTO measures (value) VALUES (5);
+		`)
+		driver.ExecOnDesired(`CREATE TABLE measures (value INT, doubled BIGINT GENERATED ALWAYS AS (value * 2) STORED);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "doubled"},
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "doubled",
+							Type:                "bigint",
+							GeneratedExpression: "(value * 2)",
 						},
 					},
 				},
@@ -346,9 +542,130 @@ func TestPostgresColumn(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{
 				"value":   int64(5),
-				"doubled": int64(15),
+				"doubled": int64(10),
 			},
 		}, rows)
+	})
+
+	t.Run("RebuiltColumnWithAPolicyAndATrigger", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		setup := `
+			CREATE FUNCTION touch() RETURNS TRIGGER AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+		`
+		dependents := `
+			ALTER TABLE measures ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY positive_doubled ON measures USING (doubled > 0);
+			CREATE TRIGGER touch_doubled BEFORE UPDATE OF doubled ON measures FOR EACH ROW EXECUTE FUNCTION touch();
+		`
+		driver.ExecOnCurrent(setup + `CREATE TABLE measures (value INT, doubled INT);` + dependents)
+		driver.ExecOnCurrent(`INSERT INTO measures (value, doubled) VALUES (5, 7);`)
+		driver.ExecOnDesired(setup +
+			`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);` + dependents)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropPolicyInstruction{
+				Name:      "positive_doubled",
+				TableName: "measures",
+			},
+			&PostgresDropTriggerInstruction{
+				Name:      "touch_doubled",
+				TableName: "measures",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "doubled"},
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "doubled",
+							Type:                "integer",
+							GeneratedExpression: "(value * 2)",
+						},
+					},
+				},
+			},
+			&PostgresCreatePolicyInstruction{
+				Name:       "positive_doubled",
+				TableName:  "measures",
+				Permissive: "PERMISSIVE",
+				Command:    "ALL",
+				Roles:      []string{"public"},
+				Using:      "(doubled > 0)",
+			},
+			&PostgresCreateTriggerInstruction{
+				Definition: "CREATE TRIGGER touch_doubled BEFORE UPDATE OF doubled ON measures " +
+					"FOR EACH ROW EXECUTE FUNCTION touch()",
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("measures", "")
+		require.Equal(t, []map[string]any{
+			{
+				"value":   int64(5),
+				"doubled": int64(10),
+			},
+		}, rows)
+	})
+
+	t.Run("ViewOfAnotherSchemaBlocksARebuiltColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		otherSchema := driver.currentSchema + "_other"
+
+		driver.ExecOnCurrent(fmt.Sprintf(`
+			CREATE TABLE measures (value INT, doubled INT);
+			CREATE SCHEMA %[1]s;
+			CREATE VIEW %[1]s.doubled_measures AS SELECT doubled FROM measures;
+		`, otherSchema))
+		t.Cleanup(func() {
+			_, err := driver.conn.ExecContext(context.Background(), fmt.Sprintf(`DROP SCHEMA %s CASCADE;`, otherSchema))
+			require.NoError(t, err)
+		})
+		driver.ExecOnDesired(`CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);`)
+
+		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
+		require.EqualError(t, err, fmt.Sprintf(
+			`the view %s.doubled_measures uses the column "doubled" of the table "measures". `+
+				`dbdiff must drop and add this column, and it cannot drop and create this object again`,
+			otherSchema))
+	})
+
+	t.Run("NeedsRebuild", func(t *testing.T) {
+		plain := &PostgresColumn{Type: "integer"}
+		doubled := &PostgresColumn{
+			Type:                "integer",
+			GeneratedExpression: "(value * 2)",
+		}
+		tripled := &PostgresColumn{
+			Type:                "integer",
+			GeneratedExpression: "(value * 3)",
+		}
+		bigDoubled := &PostgresColumn{
+			Type:                "bigint",
+			GeneratedExpression: "(value * 2)",
+		}
+
+		testCases := []struct {
+			name          string
+			desired       *PostgresColumn
+			current       *PostgresColumn
+			serverVersion int
+			expected      bool
+		}{
+			{"PlainColumnsOnPostgres17", plain, plain, 170000, false},
+			{"SameExpressionOnPostgres12", doubled, doubled, 120000, false},
+			{"GeneratedToPlainOnPostgres12", plain, doubled, 120000, true},
+			{"GeneratedToPlainOnPostgres13", plain, doubled, 130000, false},
+			{"PlainToGeneratedOnPostgres17", doubled, plain, 170000, true},
+			{"NewExpressionOnPostgres16", tripled, doubled, 160000, true},
+			{"NewExpressionOnPostgres17", tripled, doubled, 170000, false},
+			{"NewTypeOfAGeneratedColumnOnPostgres17", bigDoubled, doubled, 170000, true},
+		}
+
+		for _, testCase := range testCases {
+			require.Equal(t, testCase.expected,
+				testCase.desired.NeedsRebuild(testCase.current, testCase.serverVersion), testCase.name)
+		}
 	})
 
 	t.Run("CreateTableWithColumnCollation", func(t *testing.T) {
