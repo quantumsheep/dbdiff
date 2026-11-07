@@ -7,6 +7,33 @@ import (
 )
 
 func TestMySQLView(t *testing.T) {
+	t.Run("CreateViewsInDependencyOrder", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
+			CREATE VIEW z_base AS SELECT id FROM users;
+			CREATE VIEW a_top AS SELECT id FROM z_base;
+			CREATE VIEW m_other AS SELECT id FROM users;
+		`)
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateViewInstruction{
+				Name:       "z_base",
+				Definition: "select `users`.`id` AS `id` from `users`",
+			},
+			&MySQLCreateViewInstruction{
+				Name:       "a_top",
+				Definition: "select `z_base`.`id` AS `id` from `z_base`",
+			},
+			&MySQLCreateViewInstruction{
+				Name:       "m_other",
+				Definition: "select `users`.`id` AS `id` from `users`",
+			},
+		})
+	})
+
 	t.Run("CreateView", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -103,6 +130,33 @@ func TestMySQLView(t *testing.T) {
 }
 
 func TestMariaDBView(t *testing.T) {
+	t.Run("CreateViewsInDependencyOrder", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));
+			CREATE VIEW z_base AS SELECT id FROM users;
+			CREATE VIEW a_top AS SELECT id FROM z_base;
+			CREATE VIEW m_other AS SELECT id FROM users;
+		`)
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, PRIMARY KEY (id));")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateViewInstruction{
+				Name:       "z_base",
+				Definition: "select `users`.`id` AS `id` from `users`",
+			},
+			&MySQLCreateViewInstruction{
+				Name:       "a_top",
+				Definition: "select `z_base`.`id` AS `id` from `z_base`",
+			},
+			&MySQLCreateViewInstruction{
+				Name:       "m_other",
+				Definition: "select `users`.`id` AS `id` from `users`",
+			},
+		})
+	})
+
 	t.Run("View", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
 
