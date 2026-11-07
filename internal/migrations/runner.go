@@ -264,7 +264,7 @@ func (r *Runner) applyPending(ctx context.Context, reader *bufio.Reader, lastVer
 			_, _ = fmt.Fprintf(r.Output, "%s\n", entry.Label())
 			_, _ = fmt.Fprintf(r.Output, "  %s\n", indentStatement(strings.TrimSpace(content)))
 
-			answer, err := readStepAnswer(reader, r.Output)
+			answer, err := readStepAnswer(ctx, reader, r.Output)
 			if err != nil {
 				return err
 			}
@@ -601,11 +601,14 @@ func copyAppliedMigrations(set *Set, directory string) error {
 	return nil
 }
 
-func readStepAnswer(reader *bufio.Reader, output io.Writer) (string, error) {
+func readStepAnswer(ctx context.Context, reader *bufio.Reader, output io.Writer) (string, error) {
 	for {
 		_, _ = fmt.Fprint(output, "  [a]pply  apply the [r]est  [q]uit ? ")
 
-		line, err := reader.ReadString('\n')
+		line, err := readLine(ctx, reader)
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 
 		answer := strings.ToLower(strings.TrimSpace(line))
 		if answer == "a" || answer == "r" || answer == "q" {
@@ -621,5 +624,32 @@ func readStepAnswer(reader *bufio.Reader, output io.Writer) (string, error) {
 		}
 
 		_, _ = fmt.Fprintln(output, "  Answer a, r, or q.")
+	}
+}
+
+type readResult struct {
+	line string
+	err  error
+}
+
+// A read of a terminal does not stop when the context stops. Without the goroutine, an
+// interrupt signal at the prompt does nothing.
+func readLine(ctx context.Context, reader *bufio.Reader) (string, error) {
+	results := make(chan readResult, 1)
+
+	go func() {
+		line, err := reader.ReadString('\n')
+
+		results <- readResult{
+			line: line,
+			err:  err,
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-results:
+		return result.line, result.err
 	}
 }

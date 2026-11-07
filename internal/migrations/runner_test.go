@@ -804,6 +804,29 @@ func TestRunnerStep(t *testing.T) {
 		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
 	})
 
+	t.Run("AStoppedContextEndsThePrompt", func(t *testing.T) {
+		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		directory := t.TempDir()
+		writeTwoFiles(t, directory)
+
+		set, err := internalmigrations.LoadSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		input, inputWriter := io.Pipe()
+		t.Cleanup(func() {
+			require.NoError(t, inputWriter.Close())
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		output := &promptWriter{
+			prompted: cancel,
+		}
+
+		err = newRunner(migrator, set, output).Step(ctx, input)
+		require.EqualError(t, err, "context canceled")
+		require.Equal(t, []string{"dbdiff_migrations"}, migrator.TableNames())
+	})
+
 	t.Run("StepWithNoPendingFile", func(t *testing.T) {
 		migrator := driverssqlite.NewTestSQLiteMigrator(t)
 
@@ -948,4 +971,16 @@ func newRunner(
 		Set:      set,
 		Output:   output,
 	}
+}
+
+type promptWriter struct {
+	prompted func()
+}
+
+func (w *promptWriter) Write(text []byte) (int, error) {
+	if strings.Contains(string(text), "[q]uit ? ") {
+		w.prompted()
+	}
+
+	return len(text), nil
 }

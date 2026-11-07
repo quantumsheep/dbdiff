@@ -1,9 +1,14 @@
 package main_test
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/clitest"
@@ -18,6 +23,52 @@ func TestDbdiffCommand(t *testing.T) {
 		require.Equal(t, 0, result.ExitCode)
 		require.Contains(t, result.Stdout, "dbdiff version ")
 		require.NotContains(t, result.Stdout, "version \n")
+	})
+
+	t.Run("AnInterruptStopsThePrompt", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows cannot send an interrupt signal to another process")
+		}
+
+		binaryPath := filepath.Join(t.TempDir(), "dbdiff")
+
+		buildOutput, err := exec.CommandContext(t.Context(), "go", "build", "-o", binaryPath, ".").CombinedOutput()
+		require.NoError(t, err, string(buildOutput))
+
+		project := clitest.NewMigrationProject(t, "")
+
+		sqltest.WriteSQLFile(t, project.MigrationsDirectory, "20260814101500_init.sql",
+			"CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		command := exec.CommandContext(t.Context(), binaryPath,
+			"migrate", "step", "--config", project.ConfigPath, "--database", project.DatabasePath)
+
+		_, err = command.StdinPipe()
+		require.NoError(t, err)
+
+		stdout, err := command.StdoutPipe()
+		require.NoError(t, err)
+
+		stderr := &bytes.Buffer{}
+		command.Stderr = stderr
+
+		require.NoError(t, command.Start())
+
+		reader := bufio.NewReader(stdout)
+
+		prompt, err := reader.ReadString('?')
+		require.NoError(t, err)
+		require.Equal(t, "20260814101500_init\n  CREATE TABLE users (id INTEGER PRIMARY KEY);\n  [a]pply  apply the [r]est  [q]uit ?", prompt)
+
+		require.NoError(t, command.Process.Signal(os.Interrupt))
+
+		rest, err := io.ReadAll(reader)
+		require.NoError(t, err)
+		require.Equal(t, " ", string(rest))
+
+		require.Error(t, command.Wait())
+		require.Equal(t, 1, command.ProcessState.ExitCode())
+		require.Equal(t, "dbdiff: context canceled\n", stderr.String())
 	})
 
 	t.Run("ShellCompletionOfMigrate", func(t *testing.T) {
