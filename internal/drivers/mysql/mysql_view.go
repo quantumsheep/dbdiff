@@ -1,6 +1,9 @@
 package driversmysql
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -116,4 +119,47 @@ func endOfStringLiteral(content string, index int) int {
 	}
 
 	return len(content)
+}
+
+// The definition text qualifies every name with the database, and the two sides hold two
+// database names. The removal of the qualifier keeps the two texts comparable.
+func (d *MySQLDriver) GetViews(ctx context.Context, db *sql.DB) ([]*MySQLView, error) {
+	databaseQualifier := QuoteIdentifier(d.detailsByConnection[db].databaseName) + "."
+
+	return driversshared.QueryAll(ctx, db, `
+		SELECT TABLE_NAME, VIEW_DEFINITION, SECURITY_TYPE, CHECK_OPTION
+		FROM information_schema.VIEWS
+		WHERE TABLE_SCHEMA = DATABASE()
+		ORDER BY TABLE_NAME;
+	`, func(rows *sql.Rows) (*MySQLView, error) {
+		var name string
+		var definition sql.NullString
+		var securityType string
+		var checkOption string
+
+		err := rows.Scan(&name, &definition, &securityType, &checkOption)
+		if err != nil {
+			return nil, err
+		}
+
+		// The catalog gives NULL when the connection misses the SHOW VIEW privilege.
+		if !definition.Valid {
+			return nil, fmt.Errorf("the view %q gives no definition. Grant the SHOW VIEW privilege", name)
+		}
+
+		view := &MySQLView{
+			Name:       name,
+			Definition: removeDatabaseQualifier(definition.String, databaseQualifier),
+		}
+
+		if securityType != "DEFINER" {
+			view.SecurityType = securityType
+		}
+
+		if checkOption != "NONE" {
+			view.CheckOption = checkOption
+		}
+
+		return view, nil
+	})
 }

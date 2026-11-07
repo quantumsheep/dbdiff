@@ -1,6 +1,9 @@
 package driversmysql
 
 import (
+	"context"
+	"database/sql"
+
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
 
@@ -43,4 +46,23 @@ func diffTriggerRules() driversshared.DiffRules[*MySQLTrigger] {
 				Name: trigger.Name,
 			}
 		})
+}
+
+// The order of ACTION_ORDER keeps two triggers of one timing and one event in their
+// activation order, so the creation builds that order again without a FOLLOWS clause.
+func (d *MySQLDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableName string) ([]*MySQLTrigger, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, ACTION_STATEMENT
+		FROM information_schema.TRIGGERS
+		WHERE TRIGGER_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = ?
+		ORDER BY ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORDER;
+	`, func(rows *sql.Rows) (*MySQLTrigger, error) {
+		trigger := &MySQLTrigger{
+			Table: tableName,
+		}
+
+		err := rows.Scan(&trigger.Name, &trigger.Timing, &trigger.Event, &trigger.Statement)
+
+		return trigger, err
+	}, tableName)
 }

@@ -1,6 +1,8 @@
 package driversmysql
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"strings"
@@ -652,4 +654,138 @@ func (t *MySQLTable) indexChanges(
 		func(index *MySQLIndex) driversshared.Instruction {
 			return index.DropInstruction()
 		})
+}
+
+// Every catalog query needs a stable ORDER BY, because MySQL gives no stable row order.
+func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable, error) {
+	type tableRow struct {
+		Name          string
+		Engine        sql.NullString
+		Collation     sql.NullString
+		CreateOptions sql.NullString
+	}
+
+	tableRows, err := driversshared.QueryAll(ctx, db, `
+		SELECT TABLE_NAME, ENGINE, TABLE_COLLATION, CREATE_OPTIONS
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME <> ?
+		ORDER BY TABLE_NAME;
+	`, func(rows *sql.Rows) (tableRow, error) {
+		var row tableRow
+
+		err := rows.Scan(&row.Name, &row.Engine, &row.Collation, &row.CreateOptions)
+
+		return row, err
+	}, driversshared.MigrationHistoryTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	var tables []*MySQLTable
+
+	for _, row := range tableRows {
+		if slices.Contains(d.IgnoreTables, row.Name) {
+			continue
+		}
+
+		partitioned := strings.Contains(strings.ToLower(row.CreateOptions.String), "partitioned")
+
+		table, err := d.GetTable(ctx, db, row.Name, row.Engine, row.Collation, partitioned)
+		if err != nil {
+			return nil, err
+		}
+
+		tables = append(tables, table)
+	}
+
+	return tables, nil
+}
+
+func (d *MySQLDriver) GetTable(
+	ctx context.Context,
+	db *sql.DB,
+	tableName string,
+	engine sql.NullString,
+	tableCollation sql.NullString,
+	partitioned bool,
+) (*MySQLTable, error) {
+	columns, err := d.GetTableColumns(ctx, db, tableName, tableCollation)
+	if err != nil {
+		return nil, err
+	}
+
+	foreignKeys, err := d.GetTableForeignKeys(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	primaryKey, indexes, err := d.GetTableIndexes(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	checkConstraints, err := d.GetTableCheckConstraints(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	triggers, err := d.GetTableTriggers(ctx, db, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	partitionClause := ""
+
+	if partitioned {
+		partitionClause, err = d.GetTablePartitionClause(ctx, db, tableName)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	details := d.detailsByConnection[db]
+
+	return &MySQLTable{
+		Name:               tableName,
+		Columns:            columns,
+		PrimaryKey:         primaryKey,
+		Indexes:            indexes,
+		ForeignKeys:        foreignKeys,
+		CheckConstraints:   checkConstraints,
+		Triggers:           triggers,
+		Engine:             engine.String,
+		EngineIsDefault:    strings.EqualFold(engine.String, details.defaultEngine),
+		Collation:          tableCollation.String,
+		CollationIsDefault: tableCollation.String == details.defaultCollation,
+		PartitionClause:    partitionClause,
+	}, nil
+}
+
+// The PARTITIONS catalog table gives the parts of the clause, and the rebuild of the text
+// from those parts is fragile. The text of SHOW CREATE TABLE holds the whole clause.
+func (d *MySQLDriver) GetTablePartitionClause(ctx context.Context, db *sql.DB, tableName string) (string, error) {
+	row := db.QueryRowContext(ctx, "SHOW CREATE TABLE "+QuoteIdentifier(tableName)+";")
+
+	var name, definition string
+
+	err := row.Scan(&name, &definition)
+	if err != nil {
+		return "", err
+	}
+
+	return parsePartitionClause(definition), nil
+}
+
+// The clause ends the text of SHOW CREATE TABLE, so the last occurrence skips a comment
+// or a default value that holds the same words. An old server wraps the clause in the
+// conditional comment /*!50100 ... */.
+func parsePartitionClause(definition string) string {
+	position := strings.LastIndex(definition, "PARTITION BY")
+	if position < 0 {
+		return ""
+	}
+
+	clause := strings.TrimSpace(definition[position:])
+
+	return strings.TrimSpace(strings.TrimSuffix(clause, "*/"))
 }
