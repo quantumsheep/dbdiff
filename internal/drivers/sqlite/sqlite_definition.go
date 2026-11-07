@@ -269,6 +269,7 @@ func parseColumnAttributes(name string, tokens []string) (*SQLiteColumn, []*pars
 	column := &SQLiteColumn{Name: name}
 
 	var foreignKeys []*parsedConstraint
+	var checkClauses []string
 
 	// An ON CONFLICT clause belongs to the constraint before it, so the loop keeps the
 	// name of the constraint that it read last.
@@ -311,7 +312,13 @@ func parseColumnAttributes(name string, tokens []string) (*SQLiteColumn, []*pars
 			column.Collation = unquoteIdentifier(next)
 
 		case strings.EqualFold(token, "CHECK") && strings.HasPrefix(next, "("):
-			column.Check = next
+			check := &SQLiteCheckConstraint{Expression: next}
+
+			if position >= 2 && strings.EqualFold(tokens[position-2], "CONSTRAINT") {
+				check.Name = unquoteIdentifier(tokens[position-1])
+			}
+
+			checkClauses = append(checkClauses, check.Clause())
 
 		case strings.EqualFold(token, "REFERENCES"):
 			foreignKey := &parsedConstraint{
@@ -333,6 +340,8 @@ func parseColumnAttributes(name string, tokens []string) (*SQLiteColumn, []*pars
 			}
 		}
 	}
+
+	column.Checks = strings.Join(checkClauses, " ")
 
 	return column, foreignKeys
 }

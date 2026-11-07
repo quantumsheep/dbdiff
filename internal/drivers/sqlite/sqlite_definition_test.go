@@ -43,9 +43,9 @@ func TestSQLiteDefinition(t *testing.T) {
 						PrimaryKey: true,
 					},
 					{
-						Name:  "price",
-						Type:  "INTEGER",
-						Check: "(price > 0)",
+						Name:   "price",
+						Type:   "INTEGER",
+						Checks: "CHECK (price > 0)",
 					},
 					{
 						Name:                "total",
@@ -101,9 +101,9 @@ func TestSQLiteDefinition(t *testing.T) {
 						PrimaryKey: true,
 					},
 					{
-						Name:  "body",
-						Type:  "TEXT",
-						Check: "(body <> '')",
+						Name:   "body",
+						Type:   "TEXT",
+						Checks: "CHECK (body <> '')",
 					},
 					{
 						Name: "score",
@@ -137,9 +137,9 @@ func TestSQLiteDefinition(t *testing.T) {
 				Name:        "codes",
 				Columns: []*SQLiteColumn{
 					{
-						Name:  "name",
-						Type:  "TEXT",
-						Check: `(name NOT LIKE '%x\%' ESCAPE'\')`,
+						Name:   "name",
+						Type:   "TEXT",
+						Checks: `CHECK (name NOT LIKE '%x\%' ESCAPE'\')`,
 					},
 					{
 						Name: "code",

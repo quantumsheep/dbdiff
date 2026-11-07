@@ -1526,6 +1526,107 @@ func TestSQLiteColumn(t *testing.T) {
 		_, _, err = driver.GetTableColumns(t.Context(), db, "users", parseTableDefinition(""))
 		require.ErrorIs(t, err, errRowIteration)
 	})
+
+	t.Run("DropColumnUsedByAGeneratedColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER GENERATED ALWAYS AS (a + 1));
+			INSERT INTO t (id, a) VALUES (1, 1);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreatedTableTWithIDOnly(),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
+	t.Run("DropColumnUsedByTheCheckOfAnotherColumnRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b INTEGER CHECK (b > a));
+			INSERT INTO t (id, a, b) VALUES (1, 1, 2);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreatedTableTWithIDOnly(),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
+	t.Run("DropColumnUsedByATableCheckRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, CHECK (a > 0));
+			INSERT INTO t (id, a) VALUES (1, 1);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreatedTableTWithIDOnly(),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
+
+	t.Run("DropColumnWithItsOwnCheckAltersTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER CHECK (a > 0));
+			INSERT INTO t (id, a) VALUES (1, 1);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name:   "t",
+				Action: &driversshared.SQLDropColumnAction{ColumnName: "a"},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1)},
+		}, rows)
+	})
 }
 
 func recreatedTableTWithIDOnly() []driversshared.Instruction {

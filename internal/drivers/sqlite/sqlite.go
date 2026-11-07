@@ -443,7 +443,7 @@ func (d *SQLiteDriver) GetTableColumns(
 		if found {
 			column.AutoIncrement = attributes.AutoIncrement
 			column.Collation = attributes.Collation
-			column.Check = attributes.Check
+			column.Checks = attributes.Checks
 			column.PrimaryKeyConflict = attributes.PrimaryKeyConflict
 			column.UniqueConflict = attributes.UniqueConflict
 			column.NotNullConflict = attributes.NotNullConflict

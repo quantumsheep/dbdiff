@@ -31,9 +31,9 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 						Collation: "NOCASE",
 					},
 					{
-						Name:  "age",
-						Type:  "INTEGER",
-						Check: "(age > 0)",
+						Name:   "age",
+						Type:   "INTEGER",
+						Checks: "CHECK (age > 0)",
 					},
 				},
 				CheckConstraints: []*SQLiteCheckConstraint{
@@ -196,5 +196,84 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 			CREATE TABLE items (id INTEGER, CONSTRAINT items_positive CHECK (id > 0));
 		`)
 		driver.RequireInstructions(nil)
+	})
+
+	t.Run("CreateTableWithTwoColumnChecksAndANamedColumnCheck", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE people (
+				age INTEGER CHECK (age > 0) CONSTRAINT age_limit CHECK (age < 200)
+			);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "people",
+				Columns: []*SQLiteColumn{
+					{
+						Name:   "age",
+						Type:   "INTEGER",
+						Checks: `CHECK (age > 0) CONSTRAINT "age_limit" CHECK (age < 200)`,
+					},
+				},
+			},
+		})
+
+		_, err := driver.currentDatabase().ExecContext(t.Context(), `INSERT INTO people (age) VALUES (0);`)
+		require.EqualError(t, err, "constraint failed: CHECK constraint failed: age > 0 (275)")
+
+		_, err = driver.currentDatabase().ExecContext(t.Context(), `INSERT INTO people (age) VALUES (300);`)
+		require.EqualError(t, err, "constraint failed: CHECK constraint failed: age_limit (275)")
+	})
+
+	t.Run("RemoveOneOfTwoColumnChecksRecreatesTheTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE people (age INTEGER CHECK (age > 0) CHECK (age < 200));
+			INSERT INTO people (age) VALUES (30);
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE people (age INTEGER CHECK (age < 200));`)
+		driver.RequireDiffApplies(slices.Concat(
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{},
+			},
+			recreated("people",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_people_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:   "age",
+							Type:   "INTEGER",
+							Checks: "CHECK (age < 200)",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_people_temp",
+					ColumnNames:       []string{"age"},
+					SelectExpressions: []string{`"age"`},
+					FromTableName:     "people",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "people"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_people_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
+				},
+			),
+			[]driversshared.Instruction{
+				&SQLitePragmaForeignKeysInstruction{Enabled: true},
+			},
+		))
+
+		rows := driver.FetchAllFromCurrent("people", "")
+
+		require.Equal(t, []map[string]any{
+			{"age": int64(30)},
+		}, rows)
 	})
 }

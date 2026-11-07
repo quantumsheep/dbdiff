@@ -160,6 +160,23 @@ func (t *SQLiteTable) NeedsRecreationToDrop(column *SQLiteColumn) bool {
 		}
 	}
 
+	for _, otherColumn := range t.Columns {
+		if otherColumn == column {
+			continue
+		}
+
+		if expressionReferencesColumn(otherColumn.GeneratedExpression, column.Name) ||
+			expressionReferencesColumn(otherColumn.Checks, column.Name) {
+			return true
+		}
+	}
+
+	for _, check := range t.CheckConstraints {
+		if expressionReferencesColumn(check.Expression, column.Name) {
+			return true
+		}
+	}
+
 	for _, index := range t.Indexes {
 		if expressionReferencesColumn(index.Where, column.Name) {
 			return true

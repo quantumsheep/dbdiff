@@ -346,9 +346,9 @@ func TestSQLiteInstructions(t *testing.T) {
 					Collation: "NOCASE",
 				},
 				{
-					Name:  "age",
-					Type:  "INTEGER",
-					Check: "(age > 0)",
+					Name:   "age",
+					Type:   "INTEGER",
+					Checks: "CHECK (age > 0)",
 				},
 			},
 		}

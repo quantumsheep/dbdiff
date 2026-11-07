@@ -30,7 +30,9 @@ type SQLiteColumn struct {
 
 	Collation string
 
-	Check string
+	// The value holds every CHECK clause of the column with its CONSTRAINT name, in the
+	// order of the CREATE TABLE text. A string keeps the column comparable with ==.
+	Checks string
 
 	PrimaryKeyConflict string
 	UniqueConflict     string
@@ -77,8 +79,8 @@ func (c *SQLiteColumn) Definition() string {
 		value += " UNIQUE" + conflictClause(c.UniqueConflict)
 	}
 
-	if c.Check != "" {
-		value += " CHECK " + c.Check
+	if c.Checks != "" {
+		value += " " + c.Checks
 	}
 
 	if c.Default.Valid {
