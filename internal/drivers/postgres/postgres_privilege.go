@@ -390,10 +390,11 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		}
 	}
 
+	currentPrivilegesByKey := driversshared.FirstByKey(currentPrivileges, (*PostgresPrivilege).Key)
+	desiredPrivilegesByKey := driversshared.FirstByKey(desiredPrivileges, (*PostgresPrivilege).Key)
+
 	for _, desiredPrivilege := range desiredPrivileges {
-		currentPrivilege, found := lo.Find(currentPrivileges, func(privilege *PostgresPrivilege) bool {
-			return privilege.Key() == desiredPrivilege.Key()
-		})
+		currentPrivilege, found := currentPrivilegesByKey[desiredPrivilege.Key()]
 		if !found {
 			currentPrivilege = &PostgresPrivilege{}
 		}
@@ -401,8 +402,8 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		additions = append(additions, desiredPrivilege.changeInstructions(currentPrivilege)...)
 	}
 
-	desiredObjectKeys := lo.Map(desiredOwners, func(owner *PostgresOwner, _ int) string {
-		return owner.Key()
+	desiredObjectKeys := lo.SliceToMap(desiredOwners, func(owner *PostgresOwner) (string, bool) {
+		return owner.Key(), true
 	})
 
 	desiredColumnKeys, err := getColumnKeys(ctx, d.DesiredDatabaseConnection)
@@ -416,7 +417,7 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		// drop of a parent column removes.
 		currentObjectKey := privilegeObjectKey(
 			currentPrivilege.ObjectType, currentPrivilege.ObjectName, currentPrivilege.Arguments)
-		if !slices.Contains(desiredObjectKeys, currentObjectKey) {
+		if !desiredObjectKeys[currentObjectKey] {
 			continue
 		}
 
@@ -425,9 +426,7 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 			continue
 		}
 
-		_, found := lo.Find(desiredPrivileges, func(privilege *PostgresPrivilege) bool {
-			return privilege.Key() == currentPrivilege.Key()
-		})
+		_, found := desiredPrivilegesByKey[currentPrivilege.Key()]
 		if !found {
 			additions = append(additions,
 				currentPrivilege.RevokeInstruction(currentPrivilege.Privileges, false))

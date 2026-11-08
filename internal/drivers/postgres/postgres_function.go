@@ -121,10 +121,11 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, section functionSect
 	// parameter stays one function. CREATE OR REPLACE FUNCTION covers a new function and
 	// a modified function. PostgreSQL refuses that statement when the return type or the
 	// name of a parameter changes.
+	currentFunctionsByKey := driversshared.FirstByKey(currentFunctions, (*PostgresFunction).MatchKey)
+	desiredFunctionsByKey := driversshared.FirstByKey(desiredFunctions, (*PostgresFunction).MatchKey)
+
 	for _, desiredFunction := range desiredFunctions {
-		currentFunction, found := lo.Find(currentFunctions, func(function *PostgresFunction) bool {
-			return function.MatchKey() == desiredFunction.MatchKey()
-		})
+		currentFunction, found := currentFunctionsByKey[desiredFunction.MatchKey()]
 		if !found {
 			additions = append(additions, desiredFunction.CreateInstruction())
 
@@ -163,9 +164,7 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, section functionSect
 	var earlyRemovals []driversshared.Instruction
 
 	for _, currentFunction := range currentFunctions {
-		_, found := lo.Find(desiredFunctions, func(function *PostgresFunction) bool {
-			return function.MatchKey() == currentFunction.MatchKey()
-		})
+		_, found := desiredFunctionsByKey[currentFunction.MatchKey()]
 		if found || d.droppedFunctionKeys[currentFunction.MatchKey()] {
 			continue
 		}

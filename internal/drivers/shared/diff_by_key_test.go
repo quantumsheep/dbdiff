@@ -53,6 +53,13 @@ func TestDiffByKey(t *testing.T) {
 		}, removals)
 	})
 
+	t.Run("TwoCurrentObjectsWithOneKey", func(t *testing.T) {
+		additions, removals, err := DiffByKey([]string{"b2"}, []string{"b2", "b9"}, rules)
+		require.NoError(t, err)
+		require.Empty(t, additions)
+		require.Empty(t, removals)
+	})
+
 	t.Run("EmptySides", func(t *testing.T) {
 		additions, removals, err := DiffByKey(nil, nil, rules)
 		require.NoError(t, err)

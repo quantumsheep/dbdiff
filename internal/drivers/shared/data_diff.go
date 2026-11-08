@@ -44,19 +44,19 @@ func DiffData[Table any, Quoter IdentifierQuoter](
 	var instructions []Instruction
 	var removalsPerTable [][]Instruction
 
+	tableKey := rules.TableKey
+	if tableKey == nil {
+		tableKey = rules.TableName
+	}
+
+	currentTablesByKey := FirstByKey(currentTables, tableKey)
+
 	for _, desiredTable := range desiredTables {
 		if rules.SkipTable != nil && rules.SkipTable(desiredTable) {
 			continue
 		}
 
-		tableKey := rules.TableKey
-		if tableKey == nil {
-			tableKey = rules.TableName
-		}
-
-		currentTable, found := lo.Find(currentTables, func(table Table) bool {
-			return tableKey(table) == tableKey(desiredTable)
-		})
+		currentTable, found := currentTablesByKey[tableKey(desiredTable)]
 		if !found {
 			additions, err := tableDataInstructions(ctx, desiredDatabaseConnection, desiredTable, rules)
 			if err != nil {

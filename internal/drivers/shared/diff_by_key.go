@@ -3,8 +3,6 @@ package driversshared
 import (
 	"context"
 	"database/sql"
-
-	"github.com/samber/lo"
 )
 
 type DiffRules[T any] struct {
@@ -22,10 +20,11 @@ func DiffByKey[T any](
 	var additions []Instruction
 	var removals []Instruction
 
+	currentByKey := FirstByKey(currentObjects, rules.Key)
+	desiredByKey := FirstByKey(desiredObjects, rules.Key)
+
 	for _, desiredObject := range desiredObjects {
-		currentObject, found := lo.Find(currentObjects, func(object T) bool {
-			return rules.Key(object) == rules.Key(desiredObject)
-		})
+		currentObject, found := currentByKey[rules.Key(desiredObject)]
 		if !found {
 			additions = append(additions, rules.Create(desiredObject)...)
 			continue
@@ -40,15 +39,29 @@ func DiffByKey[T any](
 	}
 
 	for _, currentObject := range currentObjects {
-		_, found := lo.Find(desiredObjects, func(object T) bool {
-			return rules.Key(object) == rules.Key(currentObject)
-		})
+		_, found := desiredByKey[rules.Key(currentObject)]
 		if !found {
 			removals = append(removals, rules.Drop(currentObject)...)
 		}
 	}
 
 	return additions, removals, nil
+}
+
+// Two objects can share a key, and the first one wins, as with a search of the slice.
+func FirstByKey[T any](objects []T, key func(T) string) map[string]T {
+	objectsByKey := make(map[string]T, len(objects))
+
+	for _, object := range objects {
+		objectKey := key(object)
+
+		_, found := objectsByKey[objectKey]
+		if !found {
+			objectsByKey[objectKey] = object
+		}
+	}
+
+	return objectsByKey
 }
 
 func DiffSides[T any](
