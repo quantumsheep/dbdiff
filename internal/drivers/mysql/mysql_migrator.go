@@ -18,7 +18,8 @@ const mysqlMigrationLockNameExpression = "CONCAT('dbdiff_migrations_', MD5(DATAB
 var errMySQLMigrationLockNotTaken = errors.New("the server did not give the migration lock")
 
 var mysqlHistoryDialect = internalmigrations.SQLDialect{
-	QuoteIdentifier: QuoteIdentifier,
+	BackslashEscapes: true,
+	QuoteIdentifier:  QuoteIdentifier,
 	Placeholder: func(int) string {
 		return "?"
 	},

@@ -25,6 +25,7 @@ type Migrator interface {
 	Unlock(ctx context.Context) error
 
 	Exec(ctx context.Context, statement string) error
+	SplitStatements(content string) []string
 	Begin(ctx context.Context) (Transaction, error)
 
 	RecordDirty(ctx context.Context, migration *Migration) error

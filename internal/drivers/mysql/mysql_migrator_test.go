@@ -383,6 +383,32 @@ func TestMySQLMigrator(t *testing.T) {
 		require.Equal(t, internalmigrations.StateDirty, set.Entries[0].State)
 	})
 
+	t.Run("UpSplitsAFileWithABackslashEscape", func(t *testing.T) {
+		migrator := NewTestMySQLMigrator(t)
+		directory := t.TempDir()
+
+		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql", "-- dbdiff:no-transaction\n"+
+			"CREATE TABLE `notes` (`id` int NOT NULL, `body` varchar(50), PRIMARY KEY (`id`));\n"+
+			"INSERT INTO `notes` VALUES (1, 'it\\'s; fine');\n")
+
+		set, err := internalmigrations.LoadSet(t.Context(), migrator, directory)
+		require.NoError(t, err)
+
+		runner := &internalmigrations.Runner{
+			Migrator: migrator,
+			Set:      set,
+			Output:   io.Discard,
+		}
+
+		require.NoError(t, runner.Up(t.Context(), ""))
+
+		var body string
+
+		err = migrator.Connection.QueryRowContext(t.Context(), "SELECT `body` FROM `notes`;").Scan(&body)
+		require.NoError(t, err)
+		require.Equal(t, "it's; fine", body)
+	})
+
 	t.Run("SatisfiesTheMigratorInterface", func(t *testing.T) {
 		var migrator internalmigrations.Migrator = &MySQLMigrator{}
 		require.NotNil(t, migrator)

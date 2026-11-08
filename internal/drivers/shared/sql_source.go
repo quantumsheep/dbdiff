@@ -19,6 +19,8 @@ func ScratchDatabaseName(role string) string {
 type SQLSource struct {
 	Path  string
 	Files []string
+
+	BackslashEscapes bool
 }
 
 func NewSQLSource(path string) (*SQLSource, error) {
@@ -51,7 +53,7 @@ func (s *SQLSource) ApplyTo(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
-		err = applySQLContent(ctx, db, trimGooseDownSection(string(content)))
+		err = applySQLContent(ctx, db, trimGooseDownSection(string(content)), s.BackslashEscapes)
 		if err != nil {
 			return fmt.Errorf("failed to apply %q: %w", file, err)
 		}
@@ -60,7 +62,7 @@ func (s *SQLSource) ApplyTo(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func applySQLContent(ctx context.Context, db *sql.DB, content string) error {
+func applySQLContent(ctx context.Context, db *sql.DB, content string, backslashEscapes bool) error {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
@@ -71,7 +73,7 @@ func applySQLContent(ctx context.Context, db *sql.DB, content string) error {
 		return err
 	}
 
-	for _, statement := range SplitSQLStatements(content) {
+	for _, statement := range SplitSQLStatements(content, backslashEscapes) {
 		_, err := db.ExecContext(ctx, statement)
 		if err != nil {
 			return err

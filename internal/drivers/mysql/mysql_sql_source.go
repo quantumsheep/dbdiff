@@ -99,6 +99,8 @@ func (d *MySQLDriver) OpenSide(
 		return nil, err
 	}
 
+	sqlSource.BackslashEscapes = true
+
 	serverConfig, err := d.scratchServerConfig(ctx, otherSource)
 	if err != nil {
 		return nil, err

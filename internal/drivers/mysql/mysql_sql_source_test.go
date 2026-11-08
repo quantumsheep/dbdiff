@@ -88,6 +88,40 @@ func TestMySQLSQLSource(t *testing.T) {
 		require.Equal(t, 1, driver.DesiredDatabaseConnection.Stats().MaxOpenConnections)
 	})
 
+	t.Run("SQLSourceWithABackslashEscapeOutsideATransaction", func(t *testing.T) {
+		directory := t.TempDir()
+		sqltest.WriteSQLFile(t, directory, "001_notes.sql", "-- dbdiff:no-transaction\n"+
+			"CREATE TABLE notes (id int NOT NULL, body varchar(50), PRIMARY KEY (id));\n"+
+			"INSERT INTO notes VALUES (1, 'it\\'s; fine');\n")
+
+		driver := newTestMySQLDriverWithDesiredDirectory(t, mysqlTestConnectionString, directory)
+		driver.ScratchDatabase = "mysql://root:password@localhost:3306/"
+		driver.CompareData = true
+
+		driver.RequireDiffApplies(driversshared.Instructions{
+			&MySQLCreateTableInstruction{
+				Name: "notes",
+				Columns: []*MySQLColumn{
+					{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+					{
+						Name: "body",
+						Type: "varchar(50)",
+					},
+				},
+				PrimaryKey: []string{"id"},
+			},
+			&MySQLInsertInstruction{
+				TableName:   "notes",
+				ColumnNames: []string{"id", "body"},
+				Expressions: []string{"1", "'it''s; fine'"},
+			},
+		})
+	})
+
 	t.Run("UnreachableServerOfTheDatabaseSide", func(t *testing.T) {
 		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "desired.sql", "CREATE TABLE t (id int);")
 

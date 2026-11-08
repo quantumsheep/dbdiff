@@ -36,6 +36,8 @@ type SQLDialect struct {
 
 	// If this field is true, the applied_at column holds RFC3339 text.
 	StoresTimeAsText bool
+
+	BackslashEscapes bool
 }
 
 type SQLMigrator struct {
@@ -224,6 +226,10 @@ func (m *SQLMigrator) DeleteRecord(ctx context.Context, version string) error {
 	_, err := m.Connection.ExecContext(ctx, statement, version)
 
 	return err
+}
+
+func (m *SQLMigrator) SplitStatements(content string) []string {
+	return driversshared.SplitSQLStatements(content, m.Dialect.BackslashEscapes)
 }
 
 func (m *SQLMigrator) Exec(ctx context.Context, statement string) error {

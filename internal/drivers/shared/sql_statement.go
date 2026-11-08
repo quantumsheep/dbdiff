@@ -30,7 +30,10 @@ func FileUsesTransaction(content string) bool {
 // END too, so the block counter reads CASE as an opener. A bare BEGIN opens a block only
 // in a statement that owns a body or inside a block, because BEGIN alone starts a
 // transaction.
-func SplitSQLStatements(content string) []string {
+//
+// MySQL reads a backslash in a string as an escape character, and PostgreSQL and SQLite do
+// not. The engine gives that rule with backslashEscapes.
+func SplitSQLStatements(content string, backslashEscapes bool) []string {
 	var statements []string
 
 	start := 0
@@ -48,7 +51,13 @@ func SplitSQLStatements(content string) []string {
 			index = EndOfLineComment(content, index)
 		case strings.HasPrefix(rest, "/*"):
 			index = endOfBlockComment(content, index)
-		case content[index] == '\'' || content[index] == '"' || content[index] == '`':
+		case content[index] == '\'' || content[index] == '"':
+			if backslashEscapes {
+				index = endOfQuotedText(content, index, true)
+			} else {
+				index = EndOfQuotedText(content, index)
+			}
+		case content[index] == '`':
 			index = EndOfQuotedText(content, index)
 		case content[index] == '$':
 			index = endOfDollarQuotedText(content, index)
@@ -195,15 +204,20 @@ func endOfBlockComment(content string, index int) int {
 	return len(content)
 }
 
+// PostgreSQL reads a backslash as an escape in a string of the form E'...' only. A string of
+// another form holds the backslash as a character of the text.
 func EndOfQuotedText(content string, index int) int {
+	escapes := content[index] == '\'' && index > 0 && (content[index-1] == 'E' || content[index-1] == 'e')
+
+	return endOfQuotedText(content, index, escapes)
+}
+
+func endOfQuotedText(content string, index int, escapes bool) int {
 	quote := content[index]
-	escapes := quote == '\'' && index > 0 && (content[index-1] == 'E' || content[index-1] == 'e')
 
 	index++
 
 	for index < len(content) {
-		// PostgreSQL reads a backslash as an escape in a string of the form E'...' only.
-		// A string of another form holds the backslash as a character of the text.
 		if escapes && content[index] == '\\' {
 			index += 2
 

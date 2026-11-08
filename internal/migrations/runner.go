@@ -507,7 +507,7 @@ func (r *Runner) applyOneWithoutTransaction(ctx context.Context, entry *Entry, c
 	statements := []string{content}
 
 	if !driversshared.FileUsesTransaction(content) {
-		statements = driversshared.SplitSQLStatements(content)
+		statements = r.Migrator.SplitStatements(content)
 	}
 
 	for _, statement := range statements {
