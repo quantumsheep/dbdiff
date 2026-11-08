@@ -627,3 +627,40 @@ func (i *MySQLSetForeignKeyChecksInstruction) Comment() string {
 
 	return "Turn the enforcement of the foreign keys off for the order of the instructions"
 }
+
+type backslashEscapesStep int
+
+const (
+	saveSQLMode backslashEscapesStep = iota
+	allowBackslashEscapes
+	restoreSQLMode
+)
+
+// The instruction turns off NO_BACKSLASH_ESCAPES, because QuoteLiteral doubles each
+// backslash. The last step gives the session its mode again, because a later statement of
+// the session can expect that mode.
+type MySQLBackslashEscapesInstruction struct {
+	Step backslashEscapesStep
+}
+
+func (i *MySQLBackslashEscapesInstruction) String() string {
+	switch i.Step {
+	case saveSQLMode:
+		return "SET @dbdiff_sql_mode = @@SESSION.sql_mode;"
+	case allowBackslashEscapes:
+		return "SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');"
+	default:
+		return "SET SESSION sql_mode = @dbdiff_sql_mode;"
+	}
+}
+
+func (i *MySQLBackslashEscapesInstruction) Comment() string {
+	switch i.Step {
+	case saveSQLMode:
+		return "Keep the SQL mode of the session"
+	case allowBackslashEscapes:
+		return "Read a backslash of a string as an escape character"
+	default:
+		return "Give the session its SQL mode again"
+	}
+}

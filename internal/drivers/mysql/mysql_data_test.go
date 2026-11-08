@@ -110,6 +110,53 @@ func TestMySQLData(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", ""))
 	})
 
+	t.Run("DataWithABackslashInASessionWithoutBackslashEscapes", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnDesired(`
+			CREATE TABLE paths (id int NOT NULL, path varchar(100), PRIMARY KEY (id));
+			INSERT INTO paths (id, path) VALUES (1, 'C:\\temp');
+		`)
+		driver.ExecOnCurrent(`CREATE TABLE paths (id int NOT NULL, path varchar(100), PRIMARY KEY (id));`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLBackslashEscapesInstruction{
+				Step: saveSQLMode,
+			},
+			&MySQLBackslashEscapesInstruction{
+				Step: allowBackslashEscapes,
+			},
+			&MySQLInsertInstruction{
+				TableName:   "paths",
+				ColumnNames: []string{"id", "path"},
+				Expressions: []string{"1", `'C:\\temp'`},
+			},
+			&MySQLBackslashEscapesInstruction{
+				Step: restoreSQLMode,
+			},
+		})
+
+		session, err := driver.currentConnection.Conn(t.Context())
+		require.NoError(t, err)
+
+		_, err = session.ExecContext(t.Context(),
+			"SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',NO_BACKSLASH_ESCAPES');\n"+diff)
+		require.NoError(t, err)
+
+		var keepsTheMode bool
+
+		err = session.QueryRowContext(t.Context(),
+			"SELECT FIND_IN_SET('NO_BACKSLASH_ESCAPES', @@SESSION.sql_mode) > 0;").Scan(&keepsTheMode)
+		require.NoError(t, err)
+		require.True(t, keepsTheMode)
+		require.NoError(t, session.Close())
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "path": `C:\temp`},
+		}, driver.FetchAllFromCurrent("paths", ""))
+	})
+
 	t.Run("DataOfANewTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true

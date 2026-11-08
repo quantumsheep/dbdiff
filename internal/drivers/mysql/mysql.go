@@ -220,6 +220,27 @@ func (d *MySQLDriver) Diff(
 		instructions = append(instructions, &MySQLSetForeignKeyChecksInstruction{Enabled: true})
 	}
 
+	holdsABackslash := lo.SomeBy(instructions, func(instruction driversshared.Instruction) bool {
+		return strings.Contains(instruction.String(), `\`)
+	})
+	if holdsABackslash {
+		instructions = slices.Concat(
+			[]driversshared.Instruction{
+				&MySQLBackslashEscapesInstruction{
+					Step: saveSQLMode,
+				},
+				&MySQLBackslashEscapesInstruction{
+					Step: allowBackslashEscapes,
+				},
+			},
+			instructions,
+			[]driversshared.Instruction{
+				&MySQLBackslashEscapesInstruction{
+					Step: restoreSQLMode,
+				},
+			})
+	}
+
 	return instructions, nil
 }
 

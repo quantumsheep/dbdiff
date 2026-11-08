@@ -625,6 +625,15 @@ func TestMySQLInstructions(t *testing.T) {
 			(&MySQLSetForeignKeyChecksInstruction{Enabled: true}).String())
 	})
 
+	t.Run("MySQLBackslashEscapes", func(t *testing.T) {
+		require.Equal(t, "SET @dbdiff_sql_mode = @@SESSION.sql_mode;",
+			(&MySQLBackslashEscapesInstruction{Step: saveSQLMode}).String())
+		require.Equal(t, "SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');",
+			(&MySQLBackslashEscapesInstruction{Step: allowBackslashEscapes}).String())
+		require.Equal(t, "SET SESSION sql_mode = @dbdiff_sql_mode;",
+			(&MySQLBackslashEscapesInstruction{Step: restoreSQLMode}).String())
+	})
+
 	t.Run("ColumnDefinitionWithEveryClause", func(t *testing.T) {
 		column := &MySQLColumn{
 			Name:    "title",
