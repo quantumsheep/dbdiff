@@ -304,9 +304,10 @@ type MySQLTableDiff struct {
 
 // MySQL refuses the removal or the rename of a column while a foreign key, a check
 // constraint, an expression key, or a generated column reads the column, so those removals
-// come before the column actions. The constraint names are unique in the schema, so the
-// removals of the foreign keys and of the check constraints come before every creation. The
-// additions of the keys come last, so a new key reads the new columns.
+// come before the column actions. The constraint names and the trigger names are unique in
+// the schema, so the removals of the triggers, of the foreign keys, and of the check
+// constraints come before every creation. The additions of the keys come last, so a new key
+// reads the new columns.
 func (t *MySQLTable) DiffTable(
 	other *MySQLTable,
 	columnsDiffs map[string]*MySQLTableColumnsDiff,
@@ -471,8 +472,6 @@ func (t *MySQLTable) DiffTable(
 	}
 
 	var instructions []driversshared.Instruction
-
-	instructions = append(instructions, triggerRemovals...)
 
 	var autoIncrementLaterColumnNames []string
 
@@ -672,7 +671,7 @@ func (t *MySQLTable) DiffTable(
 	instructions = append(instructions, triggerAdditions...)
 
 	return &MySQLTableDiff{
-		DropDependents: append(foreignKeyRemovals, checkRemovals...),
+		DropDependents: slices.Concat(triggerRemovals, foreignKeyRemovals, checkRemovals),
 		Alter:          instructions,
 		AddDependents:  foreignKeyAdditions,
 	}, nil

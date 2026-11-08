@@ -276,6 +276,11 @@ func (d *MySQLDriver) DiffTables(
 			return check.Name
 		})
 	})
+	desiredTriggerNames := lo.FlatMap(desiredTables, func(table *MySQLTable, _ int) []string {
+		return lo.Map(table.Triggers, func(trigger *MySQLTrigger, _ int) string {
+			return trigger.Name
+		})
+	})
 
 	additions, removals, err := driversshared.DiffByKey(desiredTables, currentTables, driversshared.DiffRules[*MySQLTable]{
 		Key: func(table *MySQLTable) string {
@@ -295,9 +300,18 @@ func (d *MySQLDriver) DiffTables(
 
 			return tableDiff.Alter, nil
 		},
-		// The constraint names are unique in the schema, and the table drops come last. So a
-		// name that a desired table takes again must be free before the creations.
+		// The constraint names and the trigger names are unique in the schema, and the table
+		// drops come last. So a name that a desired table takes again must be free before the
+		// creations.
 		Drop: func(table *MySQLTable) []driversshared.Instruction {
+			for _, trigger := range table.Triggers {
+				if slices.Contains(desiredTriggerNames, trigger.Name) {
+					dropDependents = append(dropDependents, &MySQLDropTriggerInstruction{
+						Name: trigger.Name,
+					})
+				}
+			}
+
 			for _, foreignKey := range table.ForeignKeys {
 				if slices.Contains(desiredForeignKeyNames, foreignKey.Name) {
 					dropDependents = append(dropDependents, &MySQLAlterTableInstruction{
