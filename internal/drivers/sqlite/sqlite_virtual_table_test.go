@@ -75,4 +75,17 @@ func TestSQLiteVirtualTable(t *testing.T) {
 			},
 		})
 	})
+	t.Run("IgnoredVirtualTable", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE VIRTUAL TABLE docs USING fts5(title, body);
+			CREATE VIRTUAL TABLE notes USING fts5(body);
+		`)
+		driver.ExecOnDesired(`CREATE VIRTUAL TABLE notes USING fts5(body, tags);`)
+
+		driver.IgnoreTables = []string{"Docs", "notes"}
+
+		driver.RequireInstructions(nil)
+	})
 }

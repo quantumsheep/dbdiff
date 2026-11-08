@@ -582,10 +582,7 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 	var tables []*SQLiteTable
 
 	for _, tableName := range tableNames {
-		ignored := slices.ContainsFunc(d.IgnoreTables, func(ignoredTableName string) bool {
-			return identifierKey(ignoredTableName) == identifierKey(tableName)
-		})
-		if ignored {
+		if d.isIgnoredTable(tableName) {
 			continue
 		}
 
@@ -598,6 +595,12 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 	}
 
 	return tables, nil
+}
+
+func (d *SQLiteDriver) isIgnoredTable(tableName string) bool {
+	return slices.ContainsFunc(d.IgnoreTables, func(ignoredTableName string) bool {
+		return identifierKey(ignoredTableName) == identifierKey(tableName)
+	})
 }
 
 func (d *SQLiteDriver) GetTable(ctx context.Context, db *sql.DB, tableName string) (*SQLiteTable, error) {

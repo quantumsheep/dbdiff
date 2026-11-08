@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 // SQLite holds no ALTER statement for a virtual table, so a new definition prints a DROP
@@ -25,7 +26,7 @@ func (t *SQLiteVirtualTable) DropInstruction() *driversshared.SQLDropTableInstru
 }
 
 func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQLiteVirtualTable, error) {
-	return driversshared.QueryAll(ctx, db, `
+	tables, err := driversshared.QueryAll(ctx, db, `
 		SELECT master.name, master.sql
 		FROM sqlite_master AS master
 		WHERE master.type = 'table' AND master.name NOT LIKE 'sqlite_%'
@@ -41,6 +42,13 @@ func (d *SQLiteDriver) GetVirtualTables(ctx context.Context, db *sql.DB) ([]*SQL
 
 		return table, err
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return lo.Reject(tables, func(table *SQLiteVirtualTable, _ int) bool {
+		return d.isIgnoredTable(table.Name)
+	}), nil
 }
 
 func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]driversshared.Instruction, error) {
