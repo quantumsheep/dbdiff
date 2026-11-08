@@ -3,6 +3,8 @@ package driverssqlite
 import (
 	"context"
 	"database/sql"
+	"slices"
+	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/samber/lo"
@@ -57,7 +59,7 @@ func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]driversshared.I
 			return identifierKey(table.Name)
 		},
 		func(desired *SQLiteVirtualTable, current *SQLiteVirtualTable) bool {
-			return desired.SQL == current.SQL
+			return slices.Equal(moduleArgumentTokens(desired.SQL), moduleArgumentTokens(current.SQL))
 		},
 		func(table *SQLiteVirtualTable) driversshared.Instruction {
 			return table.CreateInstruction()
@@ -70,4 +72,52 @@ func (d *SQLiteDriver) DiffVirtualTables(ctx context.Context) ([]driversshared.I
 	}
 
 	return append(additions, removals...), nil
+}
+
+// SQLite keeps the CREATE VIRTUAL TABLE statement as the user wrote it, and a new definition
+// drops the table and its rows. The tokens skip the comments, the whitespace, the case of
+// a bare word, and the table name, because none of them changes the table.
+func moduleArgumentTokens(definition string) []string {
+	text := withoutComments(definition)
+
+	var tokens []string
+
+	index := 0
+
+	for index < len(text) {
+		end := endOfQuotedTextOrComment(text, index)
+
+		switch {
+		case end > index:
+			tokens = append(tokens, text[index:end])
+		case isWordByte(text[index]):
+			end = index
+
+			for end < len(text) && isWordByte(text[end]) {
+				end++
+			}
+
+			tokens = append(tokens, identifierKey(text[index:end]))
+		case strings.ContainsRune(" \t\r\n\f\v", rune(text[index])):
+			end = index + 1
+		default:
+			end = index + 1
+			tokens = append(tokens, text[index:end])
+		}
+
+		index = end
+	}
+
+	usingPosition := slices.Index(tokens, "using")
+	if usingPosition < 0 {
+		return tokens
+	}
+
+	return tokens[usingPosition+1:]
+}
+
+func isWordByte(character byte) bool {
+	return character == '_' || character == '$' || character >= 0x80 ||
+		(character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+		(character >= '0' && character <= '9')
 }

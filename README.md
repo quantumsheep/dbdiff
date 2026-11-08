@@ -259,6 +259,7 @@ err = migrator.Up(ctx)
 ## Limits
 
 - PostgreSQL: dbdiff compares one schema per run. It does not print `CREATE SCHEMA`.
+- SQLite: SQLite cannot change a virtual table. If the module or its arguments change, dbdiff drops the virtual table and creates it again, and the new table holds no row.
 - MySQL: dbdiff compares one database per run. `--privileges` compares only the grants of the database and of the tables.
 - The `mysql` client splits the bodies of triggers and routines at each semicolon. To apply such a diff, use `dbdiff migrate up`.
 - dbdiff has no down migrations. This is a design choice. A rollback is a new up migration that reverses the change. To roll back, change the desired schema back, run `dbdiff migrate generate`, then run `dbdiff migrate up`.
