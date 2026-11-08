@@ -126,6 +126,36 @@ func TestNewDriverAndDiff(t *testing.T) {
 		require.Contains(t, statements[0].SQL, "INSERT INTO")
 	})
 
+	t.Run("RenameGuessOption", func(t *testing.T) {
+		current := writeSchema(t, "current.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY, nickname TEXT);\n")
+		desired := writeSchema(t, "desired.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n")
+
+		driver, err := NewDriver(SQLiteDriverName)
+		require.NoError(t, err)
+
+		statements, err := driver.Diff(t.Context(), current, desired)
+		require.NoError(t, err)
+		require.Equal(t, Statements{
+			{
+				SQL:     `ALTER TABLE "users" DROP COLUMN "nickname";`,
+				Comment: `Modify the table "users"`,
+			},
+			{
+				SQL:     `ALTER TABLE "users" ADD COLUMN "email" TEXT;`,
+				Comment: `Modify the table "users"`,
+			},
+		}, statements)
+
+		statements, err = driver.Diff(t.Context(), current, desired, WithRenameGuess())
+		require.NoError(t, err)
+		require.Equal(t, Statements{
+			{
+				SQL:     `ALTER TABLE "users" RENAME COLUMN "nickname" TO "email";`,
+				Comment: `Modify the table "users"`,
+			},
+		}, statements)
+	})
+
 	t.Run("PostgreSQLConfigOnTheSQLiteDriver", func(t *testing.T) {
 		_, err := NewDriver(SQLiteDriverName, WithPostgreSQLDriverConfig(PostgreSQLDriverConfig{
 			Schema: "public",

@@ -185,7 +185,7 @@ func (d *MySQLDriver) Diff(
 		// A column default can read a sequence, so the sequences come before the tables.
 		d.DiffSequences,
 		func(context.Context) ([]driversshared.Instruction, error) {
-			return d.DiffTables(desiredTables, currentTables)
+			return d.DiffTables(desiredTables, currentTables, options.GuessRenames)
 		},
 		// A view can call a function, and MySQL checks the call at the creation of the view,
 		// so the routines come before the views.
@@ -226,6 +226,7 @@ func (d *MySQLDriver) Diff(
 func (d *MySQLDriver) DiffTables(
 	desiredTables []*MySQLTable,
 	currentTables []*MySQLTable,
+	guessRenames bool,
 ) ([]driversshared.Instruction, error) {
 	columnsDiffs := map[string]*MySQLTableColumnsDiff{}
 
@@ -234,7 +235,7 @@ func (d *MySQLDriver) DiffTables(
 			return table.Name == desiredTable.Name
 		})
 		if found {
-			columnsDiffs[desiredTable.Name] = desiredTable.DiffColumns(currentTable)
+			columnsDiffs[desiredTable.Name] = desiredTable.DiffColumns(currentTable, guessRenames)
 		}
 	}
 

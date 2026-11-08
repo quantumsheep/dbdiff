@@ -10,6 +10,7 @@ import (
 func TestMySQLIndex(t *testing.T) {
 	t.Run("RenameColumnOfAFunctionalIndex", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, name varchar(20), PRIMARY KEY (id), KEY upper_name ((upper(name))));")
 		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, nm varchar(20), PRIMARY KEY (id), KEY upper_name ((upper(nm))));")

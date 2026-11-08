@@ -108,6 +108,7 @@ func TestMySQLTable(t *testing.T) {
 
 	t.Run("RenameAndRetypeAPrimaryKeyColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE users (user_id bigint NOT NULL, name varchar(20), PRIMARY KEY (user_id));")
 		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, name varchar(20), PRIMARY KEY (id));")

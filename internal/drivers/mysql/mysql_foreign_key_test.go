@@ -431,6 +431,7 @@ func TestMySQLForeignKey(t *testing.T) {
 
 	t.Run("RenameBothColumnsOfAForeignKey", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired(`
 			CREATE TABLE parents (parent_key int NOT NULL, PRIMARY KEY (parent_key));

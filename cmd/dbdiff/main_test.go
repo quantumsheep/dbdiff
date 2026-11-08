@@ -249,6 +249,27 @@ help:Shows a list of commands or help for one command
 		require.Equal(t, "UPDATE \"users\" SET \"name\" = 'Alice' WHERE \"id\" = 1;\n", result.Stdout)
 	})
 
+	t.Run("GuessRenamesFlag", func(t *testing.T) {
+		directory := t.TempDir()
+		currentPath := filepath.Join(directory, "current.sqlite")
+		finalPath := filepath.Join(directory, "final.sqlite")
+
+		clitest.WriteSQLiteDatabase(t, currentPath, `CREATE TABLE users (id INTEGER PRIMARY KEY, nickname TEXT);`)
+		clitest.WriteSQLiteDatabase(t, finalPath, `CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);`)
+
+		result := clitest.Run(t, "diff", currentPath, finalPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, "ALTER TABLE \"users\" DROP COLUMN \"nickname\";\nALTER TABLE \"users\" ADD COLUMN \"email\" TEXT;\n", result.Stdout)
+
+		result = clitest.Run(t, "diff", "--guess-renames", currentPath, finalPath)
+
+		require.Equal(t, 0, result.ExitCode)
+		require.Empty(t, result.Stderr)
+		require.Equal(t, "ALTER TABLE \"users\" RENAME COLUMN \"nickname\" TO \"email\";\n", result.Stdout)
+	})
+
 	t.Run("IgnoreTableFlag", func(t *testing.T) {
 		directory := t.TempDir()
 		currentPath := filepath.Join(directory, "current.sqlite")

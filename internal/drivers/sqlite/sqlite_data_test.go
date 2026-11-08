@@ -484,6 +484,7 @@ func TestSQLiteData(t *testing.T) {
 
 	t.Run("CompareRowsOfATableWithAnotherPrimaryKey", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
+		driver.GuessRenames = true
 		driver.CompareData = true
 
 		driver.ExecOnCurrent(`CREATE TABLE items (identifier INTEGER PRIMARY KEY, label TEXT);`)

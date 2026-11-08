@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,6 +297,29 @@ func TestMigrateGenerateCommand(t *testing.T) {
 		content, err := os.ReadFile(filepath.Join(migrations, name))
 		require.NoError(t, err)
 		require.Equal(t, "-- dbdiff "+helpers.Version()+"\n-- generated "+moment.UTC().Format(time.RFC3339)+"\n", string(content))
+	})
+
+	t.Run("GuessRenamesFlag", func(t *testing.T) {
+		directory := t.TempDir()
+
+		migrations := clitest.MakeMigrationsDirectory(t, directory)
+		sqltest.WriteSQLFile(t, migrations, "20260101000000_add_users.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY, nickname TEXT);")
+		sqltest.WriteSQLFile(t, directory, "schema.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);")
+
+		result := clitest.Run(t, "migrate", "generate", "--driver", "sqlite3", "--guess-renames",
+			"--migrations", migrations, "--desired", filepath.Join(directory, "schema.sql"), "rename_nickname")
+		require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+		path := strings.TrimSuffix(result.Stdout, "\n")
+		name := filepath.Base(path)
+
+		moment, err := time.Parse("20060102150405", name[:14])
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff "+helpers.Version()+"\n-- generated "+moment.UTC().Format(time.RFC3339)+"\n"+
+			"\n-- Modify the table \"users\"\nALTER TABLE \"users\" RENAME COLUMN \"nickname\" TO \"email\";\n", string(content))
 	})
 
 	t.Run("EmptyFlagWithNoMigrations", func(t *testing.T) {

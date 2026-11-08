@@ -76,6 +76,7 @@ dbdiff completion fish > ~/.config/fish/completions/dbdiff.fish   # fish
 | `--data`           | none                              | Compare the rows too.                                                                                       |
 | `--comments`       | none                              | Print a comment before each change.                                                                         |
 | `--privileges`     | none                              | Compare the owners and the privileges (PostgreSQL and MySQL).                                               |
+| `--guess-renames`  | none                              | Rename a column if exactly one removed column has the same attributes (SQLite and MySQL).                    |
 | `--exit-code`      | none                              | If the schemas differ, exit with code 1.                                                                    |
 | `--config`         | A file path                       | Read this configuration file. The default is `dbdiff.yaml` in the working directory.                        |
 | `--ignore-table`   | A table name                      | Ignore this table. Repeat the flag for more tables.                                                         |
@@ -93,6 +94,7 @@ dbdiff completion fish > ~/.config/fish/completions/dbdiff.fish   # fish
 | `--to`             | A migration version                             | For `up` and `baseline`, stop after this version. The default is the last migration.                        |
 | `--run`            | none                                            | For `preview`, apply the pending files in one transaction. Then roll back the transaction.                  |
 | `--empty`          | none                                            | For `generate`, write a file with no statement. The command does not read the desired schema.               |
+| `--guess-renames`  | none                                            | For `generate`, rename a column if exactly one removed column has the same attributes (SQLite and MySQL).   |
 | `--driver`         | `sqlite3`, `postgres`, or `mysql`               | Select the engine. dbdiff detects it from the arguments by default.                                         |
 | `--schema`         | A schema name                                   | Select the PostgreSQL schema. The default is the search path. Only the postgres driver accepts this flag.   |
 | `--server-version` | A server version                                | Select the version of the temporary server. Only the postgres driver and the mysql driver accept this flag. |

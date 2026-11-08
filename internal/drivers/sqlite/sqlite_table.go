@@ -259,12 +259,18 @@ func commonColumnNamesInOrder(first *SQLiteTable, second *SQLiteTable) []string 
 	return names
 }
 
-func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
+func (t *SQLiteTable) DiffColumns(other *SQLiteTable, guessRenames bool) *SQLiteTableColumnsDiff {
+	renamedFrom := map[string]string{}
+
+	if guessRenames {
+		renamedFrom = driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*SQLiteColumn).HasEqualAttributes)
+	}
+
 	diff := &SQLiteTableColumnsDiff{
 		Added:              []string{},
 		Modified:           []string{},
 		Removed:            []string{},
-		RenamedFrom:        driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*SQLiteColumn).HasEqualAttributes),
+		RenamedFrom:        renamedFrom,
 		ForeignKeysChanged: false,
 		ConstraintsChanged: !slices.Equal(t.PrimaryKey, other.PrimaryKey) ||
 			t.PrimaryKeyName != other.PrimaryKeyName ||
@@ -341,8 +347,9 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable) *SQLiteTableColumnsDiff {
 func (t *SQLiteTable) DiffTable(
 	other *SQLiteTable,
 	reservedNames map[string]bool,
+	guessRenames bool,
 ) ([]driversshared.Instruction, error) {
-	columnsDiff := t.DiffColumns(other)
+	columnsDiff := t.DiffColumns(other, guessRenames)
 
 	// SQLite holds no ALTER COLUMN, so a changed column or constraint recreates the table.
 	if columnsDiff.NeedsRecreation() {

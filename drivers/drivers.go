@@ -183,7 +183,8 @@ func (d *Driver) Migrator(options ...migrations.MigratorOption) *migrations.Migr
 }
 
 type diffOptions struct {
-	compareData bool
+	compareData  bool
+	guessRenames bool
 }
 
 // DiffOption configures one Diff call.
@@ -193,6 +194,15 @@ type DiffOption func(*diffOptions)
 func WithData() DiffOption {
 	return func(merged *diffOptions) {
 		merged.compareData = true
+	}
+}
+
+// WithRenameGuess renames a column if exactly one removed column of the table has the same
+// attributes as the added column. Without this option, the diff drops the removed column and
+// adds the added column. Only the sqlite driver and the mysql driver guess a rename.
+func WithRenameGuess() DiffOption {
+	return func(merged *diffOptions) {
+		merged.guessRenames = true
 	}
 }
 
@@ -238,7 +248,8 @@ func (d *Driver) Diff(
 	defer d.mutex.Unlock()
 
 	instructions, err := d.inner.Diff(ctx, current, desired, driversshared.DiffOptions{
-		CompareData: merged.compareData,
+		CompareData:  merged.compareData,
+		GuessRenames: merged.guessRenames,
 	})
 	if err != nil {
 		return nil, err

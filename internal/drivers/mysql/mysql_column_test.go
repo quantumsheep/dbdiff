@@ -185,8 +185,39 @@ func TestMySQLColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", ""))
 	})
 
+	t.Run("ReplaceColumnWithoutTheRenameGuess", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, email varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, nickname varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users (id, nickname) VALUES (1, 'ali');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLDropColumnAction{
+					ColumnName: "nickname",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "email",
+						Type: "varchar(100)",
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": nil},
+		}, driver.FetchAllFromCurrent("users", ""))
+	})
+
 	t.Run("RenameColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, full_name varchar(100), PRIMARY KEY (id));")
 		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));")
@@ -209,6 +240,7 @@ func TestMySQLColumn(t *testing.T) {
 
 	t.Run("RenameColumnWithACheckAndAnIndex", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired(`
 			CREATE TABLE orders (
@@ -262,6 +294,7 @@ func TestMySQLColumn(t *testing.T) {
 
 	t.Run("RenameAnAutoIncrementPrimaryKeyColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE users (user_id int NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (user_id));")
 		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (id));")
@@ -284,6 +317,7 @@ func TestMySQLColumn(t *testing.T) {
 
 	t.Run("RenameAndRetypeAnAutoIncrementPrimaryKeyColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE users (user_id bigint NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (user_id));")
 		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL AUTO_INCREMENT, name varchar(20), PRIMARY KEY (id));")
@@ -748,6 +782,7 @@ func TestMySQLColumn(t *testing.T) {
 
 	t.Run("RenameAColumnThatAGeneratedColumnReads", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired(`
 			CREATE TABLE prices (
@@ -1185,6 +1220,7 @@ func TestMariaDBColumn(t *testing.T) {
 
 	t.Run("RenameColumnWithACheckAndAnIndex", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired(`
 			CREATE TABLE orders (
@@ -1475,6 +1511,7 @@ func TestMariaDBColumn(t *testing.T) {
 
 	t.Run("RenameAColumnWithAColumnCheck", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, aa int CHECK (aa > 0), PRIMARY KEY (id));")
 		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int CHECK (a > 0), PRIMARY KEY (id));")
@@ -1516,6 +1553,7 @@ func TestMariaDBColumn(t *testing.T) {
 
 	t.Run("RenameAndMoveAColumnWithAColumnCheck", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE t (aa int CHECK (aa > 0), id int NOT NULL, b int, PRIMARY KEY (id));")
 		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, b int, a int CHECK (a > 0), PRIMARY KEY (id));")
@@ -1558,6 +1596,7 @@ func TestMariaDBColumn(t *testing.T) {
 
 	t.Run("ChangeAColumnCheckThatKeepsTheNameOfARenamedColumn", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, aa int CHECK (aa > 1), PRIMARY KEY (id));")
 		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int CHECK (a > 0), PRIMARY KEY (id));")
@@ -1593,6 +1632,7 @@ func TestMariaDBColumn(t *testing.T) {
 
 	t.Run("RemoveAColumnCheckThatKeepsTheNameOfARenamedColumn", func(t *testing.T) {
 		driver := NewTestMariaDBDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, aa int, PRIMARY KEY (id));")
 		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int CHECK (a > 0), PRIMARY KEY (id));")

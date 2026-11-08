@@ -174,8 +174,52 @@ func TestSQLiteColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ReplaceColumnWithoutTheRenameGuess", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				nickname TEXT
+			);
+
+			INSERT INTO users (id, nickname) VALUES (1, 'ali');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT
+			);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &driversshared.SQLDropColumnAction{
+					ColumnName: "nickname",
+				},
+			},
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name: "email",
+						Type: "TEXT",
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": nil},
+		}, rows)
+	})
+
 	t.Run("RenameColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnCurrent(`
 			CREATE TABLE users (
@@ -212,6 +256,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 	t.Run("RenameColumnWithSeveralCandidates", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnCurrent(`
 			CREATE TABLE users (
@@ -260,6 +305,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 	t.Run("RenameColumnTakesOneCandidateOnly", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnCurrent(`
 			CREATE TABLE users (
@@ -305,6 +351,7 @@ func TestSQLiteColumn(t *testing.T) {
 
 	t.Run("RenameTwoColumns", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
+		driver.GuessRenames = true
 
 		driver.ExecOnCurrent(`
 			CREATE TABLE users (

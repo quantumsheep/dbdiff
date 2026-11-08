@@ -9,7 +9,8 @@ import (
 const MigrationHistoryTableName = "dbdiff_migrations"
 
 type DiffOptions struct {
-	CompareData bool
+	CompareData  bool
+	GuessRenames bool
 }
 
 // A driver value runs one diff at a time. Each Diff call binds the connection

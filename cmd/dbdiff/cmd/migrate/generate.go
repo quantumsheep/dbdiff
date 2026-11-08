@@ -24,6 +24,10 @@ func generateCommand() *cli.Command {
 				Usage: "The desired schema. A .sql file, a directory of .sql files, or a connection URL",
 			},
 			&cli.BoolFlag{
+				Name:  "guess-renames",
+				Usage: "Rename a column if exactly one removed column of the table has the same attributes as the added column. Without this flag, dbdiff drops the removed column and adds the added column",
+			},
+			&cli.BoolFlag{
 				Name:  "empty",
 				Usage: "Write a migration file with no statement. The command does not read the desired schema",
 			},
@@ -106,7 +110,9 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	instructions, err := driver.Diff(ctx, current, desired, driversshared.DiffOptions{})
+	instructions, err := driver.Diff(ctx, current, desired, driversshared.DiffOptions{
+		GuessRenames: command.Bool("guess-renames"),
+	})
 	if err != nil {
 		return err
 	}

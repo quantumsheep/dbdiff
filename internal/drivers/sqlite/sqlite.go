@@ -46,7 +46,9 @@ func (d *SQLiteDriver) Diff(
 	defer release()
 
 	steps := []func(context.Context) ([]driversshared.Instruction, error){
-		d.DiffTables,
+		func(ctx context.Context) ([]driversshared.Instruction, error) {
+			return d.DiffTables(ctx, options.GuessRenames)
+		},
 		d.DiffVirtualTables,
 		d.DiffViews,
 	}
@@ -159,7 +161,7 @@ func recreatedTableNames(instructions []driversshared.Instruction) []string {
 	return names
 }
 
-func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruction, error) {
+func (d *SQLiteDriver) DiffTables(ctx context.Context, guessRenames bool) ([]driversshared.Instruction, error) {
 	desiredTables, err := d.GetTables(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
 		return nil, err
@@ -183,7 +185,7 @@ func (d *SQLiteDriver) DiffTables(ctx context.Context) ([]driversshared.Instruct
 			return table.Instructions()
 		},
 		Change: func(desired *SQLiteTable, current *SQLiteTable) ([]driversshared.Instruction, error) {
-			return desired.DiffTable(current, reservedNames)
+			return desired.DiffTable(current, reservedNames, guessRenames)
 		},
 		Drop: func(table *SQLiteTable) []driversshared.Instruction {
 			return []driversshared.Instruction{&driversshared.SQLDropTableInstruction{

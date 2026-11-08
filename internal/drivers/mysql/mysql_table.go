@@ -108,9 +108,13 @@ type MySQLTableColumnsDiff struct {
 	Retyped []string
 }
 
-func (t *MySQLTable) DiffColumns(other *MySQLTable) *MySQLTableColumnsDiff {
+func (t *MySQLTable) DiffColumns(other *MySQLTable, guessRenames bool) *MySQLTableColumnsDiff {
 	diff := &MySQLTableColumnsDiff{
-		RenamedFrom: driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*MySQLColumn).HasEqualAttributes),
+		RenamedFrom: map[string]string{},
+	}
+
+	if guessRenames {
+		diff.RenamedFrom = driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*MySQLColumn).HasEqualAttributes)
 	}
 
 	// A table holds at most one AUTO_INCREMENT column. If the current one goes away and the

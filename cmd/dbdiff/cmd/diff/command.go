@@ -39,6 +39,10 @@ func Command() *cli.Command {
 				Usage: "Compare the rows of each table that the current schema and the desired schema both hold. The comparison needs a primary key",
 			},
 			&cli.BoolFlag{
+				Name:  "guess-renames",
+				Usage: "Rename a column if exactly one removed column of the table has the same attributes as the added column. Without this flag, dbdiff drops the removed column and adds the added column",
+			},
+			&cli.BoolFlag{
 				Name:  "exit-code",
 				Usage: "Exit with the code 1 when the schemas differ, like diff(1)",
 			},
@@ -102,7 +106,8 @@ func action(ctx context.Context, command *cli.Command) error {
 	}
 
 	instructions, err := driver.Diff(ctx, current, desired, driversshared.DiffOptions{
-		CompareData: command.Bool("data"),
+		CompareData:  command.Bool("data"),
+		GuessRenames: command.Bool("guess-renames"),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to compare the schemas: %w", err)

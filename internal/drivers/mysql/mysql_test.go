@@ -42,7 +42,8 @@ type TestingMySQLDriver struct {
 	desiredDatabase string
 	currentDatabase string
 
-	CompareData bool
+	CompareData  bool
+	GuessRenames bool
 
 	currentConnection *sql.DB
 	desiredConnection *sql.DB
@@ -224,7 +225,10 @@ func (d *TestingMySQLDriver) ExecOnCurrent(sqlStatements string) {
 func (d *TestingMySQLDriver) RequireInstructions(expected driversshared.Instructions) string {
 	d.tb.Helper()
 
-	instructions, err := d.Diff(d.tb.Context(), d.current, d.desired, driversshared.DiffOptions{CompareData: d.CompareData})
+	instructions, err := d.Diff(d.tb.Context(), d.current, d.desired, driversshared.DiffOptions{
+		CompareData:  d.CompareData,
+		GuessRenames: d.GuessRenames,
+	})
 	require.NoError(d.tb, err)
 	require.Equal(d.tb, expected, instructions)
 
