@@ -720,6 +720,163 @@ func TestPostgresConstraint(t *testing.T) {
 		})
 	})
 
+	t.Run("ModifyTheOwnConstraintsOfAPartition", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE zoo (id INT PRIMARY KEY);
+			CREATE TABLE measurements (id INT, value INT, zoo_id INT) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+		`
+
+		driver.ExecOnCurrent(schema + `
+			ALTER TABLE measurements_low
+				ADD CONSTRAINT low_old CHECK (value > 0),
+				ADD CONSTRAINT low_value CHECK (value < 10),
+				ADD CONSTRAINT low_zoo_old FOREIGN KEY (zoo_id) REFERENCES zoo (id);
+		`)
+		driver.ExecOnDesired(schema + `
+			ALTER TABLE measurements_low
+				ADD CONSTRAINT low_unique UNIQUE (value),
+				ADD CONSTRAINT low_value CHECK (value < 20),
+				ADD CONSTRAINT low_zoo FOREIGN KEY (zoo_id) REFERENCES zoo (id);
+			COMMENT ON CONSTRAINT low_unique ON measurements_low IS 'The low value must be unique';
+			COMMENT ON CONSTRAINT low_zoo ON measurements_low IS 'The low zoo must exist';
+		`)
+
+		alterTable := func(action driversshared.AlterTableAction) *PostgresAlterTableInstruction {
+			return &PostgresAlterTableInstruction{
+				Name:    "measurements_low",
+				Actions: []driversshared.AlterTableAction{action},
+			}
+		}
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			alterTable(&PostgresDropConstraintAction{ConstraintName: "low_zoo_old"}),
+			alterTable(&PostgresDropConstraintAction{ConstraintName: "low_old"}),
+			alterTable(&PostgresAddConstraintAction{
+				Constraint: &PostgresConstraint{
+					Name:    "low_unique",
+					Type:    "u",
+					Def:     "UNIQUE (value)",
+					Comment: "The low value must be unique",
+				},
+			}),
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "measurements_low",
+				Name:      "low_unique",
+				Text:      "The low value must be unique",
+			},
+			alterTable(&PostgresDropConstraintAction{ConstraintName: "low_value"}),
+			alterTable(&PostgresAddConstraintAction{
+				Constraint: &PostgresConstraint{
+					Name: "low_value",
+					Type: "c",
+					Def:  "CHECK ((value < 20))",
+				},
+			}),
+			alterTable(&PostgresAddConstraintAction{
+				Constraint: &PostgresConstraint{
+					Name:            "low_zoo",
+					Type:            "f",
+					Def:             "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+					ReferencedTable: "zoo",
+					Comment:         "The low zoo must exist",
+				},
+			}),
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "measurements_low",
+				Name:      "low_zoo",
+				Text:      "The low zoo must exist",
+			},
+		})
+	})
+
+	t.Run("CreateAPartitionWithItsOwnConstraints", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE zoo (id INT PRIMARY KEY);
+			CREATE TABLE measurements (id INT, zoo_id INT) PARTITION BY RANGE (id);
+		`
+
+		driver.ExecOnCurrent(schema)
+		driver.ExecOnDesired(schema + `
+			CREATE TABLE measurements_low PARTITION OF measurements (
+				CONSTRAINT low_zoo_id CHECK (zoo_id > 0),
+				CONSTRAINT low_zoo FOREIGN KEY (zoo_id) REFERENCES zoo (id)
+			) FOR VALUES FROM (0) TO (100);
+			COMMENT ON CONSTRAINT low_zoo_id ON measurements_low IS 'The low zoo id must be positive';
+			COMMENT ON CONSTRAINT low_zoo ON measurements_low IS 'The low zoo must exist';
+		`)
+
+		alterTable := func(action driversshared.AlterTableAction) *PostgresAlterTableInstruction {
+			return &PostgresAlterTableInstruction{
+				Name:    "measurements_low",
+				Actions: []driversshared.AlterTableAction{action},
+			}
+		}
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "measurements_low",
+				ParentName: "measurements",
+				Bound:      "FOR VALUES FROM (0) TO (100)",
+			},
+			alterTable(&PostgresAddConstraintAction{
+				Constraint: &PostgresConstraint{
+					Name:    "low_zoo_id",
+					Type:    "c",
+					Def:     "CHECK ((zoo_id > 0))",
+					Comment: "The low zoo id must be positive",
+				},
+			}),
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "measurements_low",
+				Name:      "low_zoo_id",
+				Text:      "The low zoo id must be positive",
+			},
+			alterTable(&PostgresAddConstraintAction{
+				Constraint: &PostgresConstraint{
+					Name:            "low_zoo",
+					Type:            "f",
+					Def:             "FOREIGN KEY (zoo_id) REFERENCES zoo(id)",
+					ReferencedTable: "zoo",
+					Comment:         "The low zoo must exist",
+				},
+			}),
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "measurements_low",
+				Name:      "low_zoo",
+				Text:      "The low zoo must exist",
+			},
+		})
+	})
+
+	t.Run("DropAParentColumnThatAnOwnConstraintOfAPartitionReads", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measurements (id INT, value INT) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements (
+				CONSTRAINT low_value CHECK (value > 0)
+			) FOR VALUES FROM (0) TO (100);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE measurements (id INT) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measurements",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{ColumnName: "value"},
+				},
+			},
+		})
+	})
+
 	t.Run("AChangedParentConstraintKeepsTheCommentOfTheChildCopy", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

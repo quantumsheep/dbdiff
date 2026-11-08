@@ -178,7 +178,7 @@ func (t *PostgresTable) DiffTable(
 
 	// A partition takes the columns, the constraints, and the inherited indexes of its parent.
 	// A partition keeps its own default, NOT NULL flag, storage mode, and statistics target of
-	// each column. The diff does not compare the own constraints of a partition.
+	// each column.
 	// DiffTables prints the removals of the own indexes of a partition.
 	// A new bound or a new parent needs a detach and an attach, because PostgreSQL
 	// holds no action that changes a bound in place. ATTACH PARTITION refuses a table without
@@ -204,6 +204,7 @@ func (t *PostgresTable) DiffTable(
 
 		instructions = append(instructions, diffRowLevelSecurity(t, other)...)
 		instructions = append(instructions, diffComments(t, other)...)
+		instructions = append(instructions, t.diffOwnConstraints(other)...)
 		instructions = append(instructions, t.inheritedConstraintCommentInstructions(other)...)
 		instructions = append(instructions, diffIndexAdditions(t, other)...)
 		instructions = append(instructions, diffTriggers(t, other)...)
@@ -516,9 +517,52 @@ func (t *PostgresTable) DiffTable(
 	instructions = append(instructions, diffComments(t, other)...)
 
 	// PostgreSQL drops every constraint and every index of a column with the column, so
-	// these two blocks come before the column removals below. DiffTables prints the foreign
-	// keys, because a foreign key can name a key of a table that DiffTables changes later.
-	// A table holds one primary key only, so the removals come before the additions.
+	// the constraints come before the column removals below.
+	instructions = append(instructions, t.diffOwnConstraints(other)...)
+	instructions = append(instructions, t.inheritedConstraintCommentInstructions(other)...)
+	instructions = append(instructions, dropNotNullInstructions...)
+
+	instructions = append(instructions, diffIndexAdditions(t, other)...)
+
+	// The mode USING INDEX names an index, so this block comes after the index additions
+	// above. It comes before the index removals below, because PostgreSQL refuses to drop
+	// the index that the replica identity of the current table holds.
+	if t.ReplicaIdentity != other.ReplicaIdentity ||
+		t.ReplicaIdentityIndex != other.ReplicaIdentityIndex {
+		instructions = append(instructions, alterTable(&PostgresReplicaIdentityAction{
+			Mode:      t.ReplicaIdentity,
+			IndexName: t.ReplicaIdentityIndex,
+		}))
+	}
+
+	instructions = append(instructions, diffIndexRemovals(t, other)...)
+
+	for _, currentColumn := range other.Columns {
+		_, found := t.ColumnByName(currentColumn.Name)
+		if !found && !currentColumn.Inherited && !slices.Contains(earlyDroppedColumnNames, currentColumn.Name) {
+			instructions = append(instructions,
+				alterTable(&driversshared.SQLDropColumnAction{ColumnName: currentColumn.Name}))
+		}
+	}
+
+	instructions = append(instructions, diffTriggers(t, other)...)
+
+	return instructions, nil
+}
+
+// DiffTables prints the foreign keys, because a foreign key can name a key of a table that
+// DiffTables changes later. A table holds one primary key only, so the removals come before
+// the additions.
+func (t *PostgresTable) diffOwnConstraints(other *PostgresTable) []driversshared.Instruction {
+	var instructions []driversshared.Instruction
+
+	alterTable := func(action driversshared.AlterTableAction) driversshared.Instruction {
+		return &PostgresAlterTableInstruction{
+			Name:    t.Name,
+			Actions: []driversshared.AlterTableAction{action},
+		}
+	}
+
 	for _, currentConstraint := range other.Constraints {
 		_, found := t.ConstraintByName(currentConstraint.Name)
 		if !found && !currentConstraint.Inherited && !currentConstraint.IsForeignKey() {
@@ -553,35 +597,7 @@ func (t *PostgresTable) DiffTable(
 		instructions = append(instructions, desiredConstraint.CommentInstructions(t.Name, currentConstraint)...)
 	}
 
-	instructions = append(instructions, t.inheritedConstraintCommentInstructions(other)...)
-	instructions = append(instructions, dropNotNullInstructions...)
-
-	instructions = append(instructions, diffIndexAdditions(t, other)...)
-
-	// The mode USING INDEX names an index, so this block comes after the index additions
-	// above. It comes before the index removals below, because PostgreSQL refuses to drop
-	// the index that the replica identity of the current table holds.
-	if t.ReplicaIdentity != other.ReplicaIdentity ||
-		t.ReplicaIdentityIndex != other.ReplicaIdentityIndex {
-		instructions = append(instructions, alterTable(&PostgresReplicaIdentityAction{
-			Mode:      t.ReplicaIdentity,
-			IndexName: t.ReplicaIdentityIndex,
-		}))
-	}
-
-	instructions = append(instructions, diffIndexRemovals(t, other)...)
-
-	for _, currentColumn := range other.Columns {
-		_, found := t.ColumnByName(currentColumn.Name)
-		if !found && !currentColumn.Inherited && !slices.Contains(earlyDroppedColumnNames, currentColumn.Name) {
-			instructions = append(instructions,
-				alterTable(&driversshared.SQLDropColumnAction{ColumnName: currentColumn.Name}))
-		}
-	}
-
-	instructions = append(instructions, diffTriggers(t, other)...)
-
-	return instructions, nil
+	return instructions
 }
 
 func diffPartitionColumns(desiredTable *PostgresTable, currentTable *PostgresTable) []driversshared.Instruction {
@@ -992,14 +1008,10 @@ func (t *PostgresTable) CreateTableInstruction() *PostgresCreateTableInstruction
 
 // A partition takes the foreign keys of its parent, so a second statement of one fails.
 func (t *PostgresTable) ForeignKeyInstructions() []driversshared.Instruction {
-	if t.IsPartition() {
-		return nil
-	}
-
 	var instructions []driversshared.Instruction
 
 	for _, constraint := range t.Constraints {
-		if !constraint.IsForeignKey() {
+		if !constraint.IsForeignKey() || constraint.Inherited {
 			continue
 		}
 
@@ -1027,6 +1039,7 @@ func (t *PostgresTable) Instructions() []driversshared.Instruction {
 		}
 
 		instructions = append(instructions, t.CommentInstructions()...)
+		instructions = append(instructions, t.diffOwnConstraints(&PostgresTable{})...)
 		instructions = append(instructions, t.inheritedConstraintCommentInstructions(nil)...)
 		instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 
@@ -1192,6 +1205,23 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 				return table.Name == ancestor.Name
 			})
 			currentTable = currentTable.withParentColumnChanges(desiredAncestor, currentAncestor, serverVersion)
+
+			// A drop or a rebuild of a column of the parent drops each own constraint of the
+			// partition that reads the column.
+			droppedColumnNames := desiredAncestor.droppedColumnNamesOfChildren(currentAncestor, serverVersion)
+			if len(droppedColumnNames) == 0 {
+				continue
+			}
+
+			dependents, err := getColumnDependents(ctx, d.CurrentDatabaseConnection, currentTable.Name, droppedColumnNames)
+			if err != nil {
+				return nil, err
+			}
+
+			constraintDependents := lo.Filter(dependents, func(dependent *PostgresColumnDependent, _ int) bool {
+				return dependent.Kind == "constraint"
+			})
+			currentTable, _ = currentTable.withoutColumnDependents(nil, constraintDependents)
 		}
 
 		additions = append(additions, descendantDefaultDrops[desiredTable.Name]...)
@@ -1619,6 +1649,19 @@ func (t *PostgresTable) withParentColumnChanges(
 	return &tableCopy
 }
 
+func (t *PostgresTable) droppedColumnNamesOfChildren(other *PostgresTable, serverVersion int) []string {
+	var names []string
+
+	for _, currentColumn := range other.Columns {
+		desiredColumn, found := t.ColumnByName(currentColumn.Name)
+		if !found || desiredColumn.NeedsRebuild(currentColumn, serverVersion) {
+			names = append(names, currentColumn.Name)
+		}
+	}
+
+	return names
+}
+
 // CREATE TABLE INHERITS and CREATE TABLE PARTITION OF give each column of the parent the
 // default, the NOT NULL flag, and the storage mode of the parent. The returned table holds
 // that state, so DiffTable prints the attributes that the new child keeps for itself.
@@ -1969,10 +2012,6 @@ func diffForeignKeys(
 	var additions []driversshared.Instruction
 
 	for _, currentTable := range currentTables {
-		if currentTable.IsPartition() {
-			continue
-		}
-
 		var desiredForeignKeys []*PostgresConstraint
 
 		desiredTable, found := lo.Find(desiredTables, func(table *PostgresTable) bool {
