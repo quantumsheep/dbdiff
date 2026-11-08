@@ -454,6 +454,8 @@ type PostgresCreatePolicyInstruction struct {
 	WithCheck  string
 }
 
+// pg_policies prints a constant expression with no parentheses, and CREATE POLICY
+// accepts an expression only in parentheses.
 func (i *PostgresCreatePolicyInstruction) String() string {
 	statement := fmt.Sprintf("CREATE POLICY %s ON %s",
 		driversshared.QuoteIdentifier(i.Name), driversshared.QuoteIdentifier(i.TableName))
@@ -471,11 +473,11 @@ func (i *PostgresCreatePolicyInstruction) String() string {
 	}
 
 	if i.Using != "" {
-		statement += " USING " + i.Using
+		statement += " USING (" + i.Using + ")"
 	}
 
 	if i.WithCheck != "" {
-		statement += " WITH CHECK " + i.WithCheck
+		statement += " WITH CHECK (" + i.WithCheck + ")"
 	}
 
 	return statement + ";"

@@ -331,7 +331,7 @@ func TestPostgresTableInstructions(t *testing.T) {
 		}
 
 		require.Equal(t,
-			`CREATE POLICY "docs_read" ON "docs" AS PERMISSIVE FOR SELECT TO public USING (NOT secret);`,
+			`CREATE POLICY "docs_read" ON "docs" AS PERMISSIVE FOR SELECT TO public USING ((NOT secret));`,
 			instruction.String())
 	})
 
@@ -346,7 +346,7 @@ func TestPostgresTableInstructions(t *testing.T) {
 		}
 
 		require.Equal(t,
-			`CREATE POLICY "docs_write" ON "docs" AS PERMISSIVE FOR INSERT TO public WITH CHECK (owner = CURRENT_USER);`,
+			`CREATE POLICY "docs_write" ON "docs" AS PERMISSIVE FOR INSERT TO public WITH CHECK ((owner = CURRENT_USER));`,
 			instruction.String())
 	})
 

@@ -70,6 +70,34 @@ func TestPostgresPolicy(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateAPolicyWithAConstantExpression", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE docs (id INT);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE docs (id INT);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY docs_all ON docs USING (true) WITH CHECK (false);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreatePolicyInstruction{
+				Name:       "docs_all",
+				TableName:  "docs",
+				Permissive: "PERMISSIVE",
+				Command:    "ALL",
+				Roles: []string{
+					"public",
+				},
+				Using:     "true",
+				WithCheck: "false",
+			},
+		})
+	})
+
 	t.Run("AddAPolicyThatReadsANewTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
