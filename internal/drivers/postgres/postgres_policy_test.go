@@ -42,6 +42,64 @@ func TestPostgresPolicy(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateAPolicyThatReadsANewView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE docs (id INT, public BOOLEAN);`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE docs (id INT, public BOOLEAN);
+			CREATE VIEW public_doc_ids AS SELECT id FROM docs WHERE public;
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY docs_read ON docs FOR SELECT USING (id IN (SELECT id FROM public_doc_ids));
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "docs",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresRowLevelSecurityAction{
+						Mode: "ENABLE",
+					},
+				},
+			},
+			&PostgresCreateViewInstruction{
+				Name:  "public_doc_ids",
+				Query: " SELECT id\n   FROM docs\n  WHERE public;",
+			},
+			&PostgresCreatePolicyInstruction{
+				Name:       "docs_read",
+				TableName:  "docs",
+				Permissive: "PERMISSIVE",
+				Command:    "SELECT",
+				Roles:      []string{"public"},
+				Using:      "(id IN ( SELECT public_doc_ids.id\n   FROM public_doc_ids))",
+			},
+		})
+	})
+
+	t.Run("DropAViewAndThePolicyThatReadsIt", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE docs (id INT, public BOOLEAN);
+			CREATE VIEW public_doc_ids AS SELECT id FROM docs WHERE public;
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY docs_read ON docs FOR SELECT USING (id IN (SELECT id FROM public_doc_ids));
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE docs (id INT, public BOOLEAN);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropPolicyInstruction{
+				Name:      "docs_read",
+				TableName: "docs",
+			},
+			&driversshared.SQLDropViewInstruction{Name: "public_doc_ids"},
+		})
+	})
+
 	t.Run("CreateAPolicyForARoleWithACommaInItsName", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

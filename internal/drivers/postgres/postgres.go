@@ -44,6 +44,10 @@ type PostgresDriver struct {
 	droppedColumnDefaults  map[string][]string
 	droppedTableDependents map[string][]*PostgresColumnDependent
 	droppedFunctionKeys    map[string]bool
+
+	// A policy or a rule can read a view, so DiffTables keeps these statements for
+	// DiffPoliciesAndRules, which runs after the views.
+	policyAndRuleDiff *SectionDiff
 }
 
 func NewPostgresDriver(config *PostgresDriverConfig) *PostgresDriver {
@@ -119,6 +123,7 @@ func (d *PostgresDriver) Diff(
 	d.droppedColumnDefaults = nil
 	d.droppedTableDependents = nil
 	d.droppedFunctionKeys = nil
+	d.policyAndRuleDiff = nil
 
 	err = d.VerifySchema(ctx, d.DesiredDatabaseConnection, d.DesiredSchema, "desired")
 	if err != nil {
@@ -147,6 +152,7 @@ func (d *PostgresDriver) Diff(
 		d.DiffStatistics,
 		d.DiffViewsAndMaterializedViews,
 		d.DiffViewRowTypeFunctions,
+		d.DiffPoliciesAndRules,
 		d.DiffPrivileges,
 	}
 
@@ -231,6 +237,14 @@ func (d *PostgresDriver) openSides(
 
 		return d.releaseScratchResources(ctx)
 	}, nil
+}
+
+func (d *PostgresDriver) DiffPoliciesAndRules(ctx context.Context) (*SectionDiff, error) {
+	if d.policyAndRuleDiff == nil {
+		return &SectionDiff{}, nil
+	}
+
+	return d.policyAndRuleDiff, nil
 }
 
 // An early removal covers the object that blocks an addition of another section.

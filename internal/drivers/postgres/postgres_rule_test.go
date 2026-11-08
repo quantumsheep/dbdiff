@@ -24,6 +24,31 @@ func TestPostgresRule(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateARuleThatWritesIntoANewView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE base (a INT);
+			CREATE TABLE audit (a INT);
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE base (a INT);
+			CREATE TABLE audit (a INT);
+			CREATE VIEW audit_entries AS SELECT a FROM audit;
+			CREATE RULE log_delete AS ON DELETE TO base DO ALSO INSERT INTO audit_entries (a) VALUES (OLD.a);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateViewInstruction{
+				Name:  "audit_entries",
+				Query: " SELECT a\n   FROM audit;",
+			},
+			&PostgresCreateRuleInstruction{
+				Definition: "CREATE RULE log_delete AS\n    ON DELETE TO base DO  INSERT INTO audit_entries (a)\n  VALUES (old.a);",
+			},
+		})
+	})
+
 	t.Run("DropRule", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

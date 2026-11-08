@@ -1149,6 +1149,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	// PostgreSQL refuses a change of a column while a policy reads it, so every policy drop
 	// comes before every table change.
 	var policyInstructions []driversshared.Instruction
+	var policyRemovals []driversshared.Instruction
 
 	keptCurrentTables := map[string]*PostgresTable{}
 	recreatedForeignKeys := map[string]bool{}
@@ -1275,7 +1276,7 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 				return policy.DropInstruction()
 			})
 		policyInstructions = append(policyInstructions, policyCreations...)
-		earlyRemovals = append(earlyRemovals, policyDrops...)
+		policyRemovals = append(policyRemovals, policyDrops...)
 
 		// PostgreSQL attaches an own index of a partition to a new index of the parent that
 		// matches it, and then refuses to drop it. So these removals come before every addition.
@@ -1289,8 +1290,11 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 	earlyRemovals = append(earlyRemovals, foreignKeyDrops...)
 	additions = append(additions, foreignKeyInstructions...)
 	additions = append(additions, foreignKeyAdditions...)
-	additions = append(additions, policyInstructions...)
-	additions = append(additions, ruleInstructions...)
+
+	d.policyAndRuleDiff = &SectionDiff{
+		EarlyRemovals: policyRemovals,
+		Additions:     slices.Concat(policyInstructions, ruleInstructions),
+	}
 
 	// The reverse order gives each DROP TABLE statement before the table that it names.
 	for _, currentTable := range slices.Backward(currentTables) {
