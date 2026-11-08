@@ -488,10 +488,10 @@ func hasRowIDAlias(table *SQLiteTable) bool {
 	})
 }
 
-// A column definition reads DEFAULT "x" as the text x, but a SELECT statement reads "x" as
-// the column x. Therefore, the copy writes the text as a string literal.
+// A column definition reads DEFAULT "x" or DEFAULT x as the text x, but a SELECT statement
+// reads "x" or x as the column x. Therefore, the copy writes the text as a string literal.
 func defaultExpression(defaultText string) string {
-	if strings.HasPrefix(defaultText, `"`) && endOfQuotedTextOrComment(defaultText, 0) == len(defaultText) {
+	if textDefaultPattern.MatchString(defaultText) && !keywordDefaultPattern.MatchString(defaultText) {
 		return driversshared.QuoteLiteral(unquoteIdentifier(defaultText))
 	}
 

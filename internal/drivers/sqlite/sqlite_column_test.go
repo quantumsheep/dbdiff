@@ -435,6 +435,113 @@ func TestSQLiteColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("CreateTableWithTextDefaultsWithoutQuotes", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT DEFAULT abc, b TEXT DEFAULT `bq`, c TEXT DEFAULT [br]);")
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteCreateTableInstruction{
+				ForeignKeys: []*SQLiteForeignKey{},
+				Name:        "t",
+				Columns: []*SQLiteColumn{
+					{
+						Name:       "id",
+						Type:       "INTEGER",
+						PrimaryKey: true,
+					},
+					{
+						Name: "a",
+						Type: "TEXT",
+						Default: sql.NullString{
+							String: "abc",
+							Valid:  true,
+						},
+					},
+					{
+						Name: "b",
+						Type: "TEXT",
+						Default: sql.NullString{
+							String: "`bq`",
+							Valid:  true,
+						},
+					},
+					{
+						Name: "c",
+						Type: "TEXT",
+						Default: sql.NullString{
+							String: "[br]",
+							Valid:  true,
+						},
+					},
+				},
+			},
+		})
+
+		driver.ExecOnCurrent("INSERT INTO t (id) VALUES (1);")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "a": "abc", "b": "bq", "c": "br"},
+		}, driver.FetchAllFromCurrent("t", ""))
+	})
+
+	t.Run("RecreationCopiesABareWordDefaultAsText", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, abc TEXT);
+
+			INSERT INTO t (id, abc) VALUES (1, 'hello');
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, y TEXT DEFAULT abc, abc TEXT);`)
+		driver.RequireDiffApplies(slices.Concat(
+			recreationPrologue(),
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name: "y",
+							Type: "TEXT",
+							Default: sql.NullString{
+								String: "abc",
+								Valid:  true,
+							},
+						},
+						{
+							Name: "abc",
+							Type: "TEXT",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "y", "abc"},
+					SelectExpressions: []string{`"id"`, `'abc'`, `"abc"`},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			recreationEpilogue("t"),
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "y": "abc", "abc": "hello"},
+		}, rows)
+	})
+
 	t.Run("RecreationCopiesADoubleQuotedDefaultAsText", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

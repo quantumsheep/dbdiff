@@ -115,10 +115,18 @@ var literalDefaultPattern = regexp.MustCompile(`(?i)^(?:` +
 	`null|true|false|current_time|current_date|current_timestamp` +
 	`)$`)
 
+// SQLite reads a bare word, a quoted identifier, and a bracketed name in a DEFAULT clause as
+// text, but it refuses each of them inside parentheses as a value that is not constant.
+var textDefaultPattern = regexp.MustCompile("(?i)^(?:" +
+	`"(?:[^"]|"")*"|` + "`(?:[^`]|``)*`" + `|\[[^\]]*\]|[a-z_][a-z0-9_$]*` +
+	")$")
+
+var keywordDefaultPattern = regexp.MustCompile(`(?i)^(?:null|true|false|current_time|current_date|current_timestamp)$`)
+
 // PRAGMA table_xinfo removes the parentheses around an expression default, but the
 // DEFAULT clause accepts an expression in parentheses only.
 func normalizedDefault(value sql.NullString) sql.NullString {
-	if !value.Valid || literalDefaultPattern.MatchString(value.String) {
+	if !value.Valid || literalDefaultPattern.MatchString(value.String) || textDefaultPattern.MatchString(value.String) {
 		return value
 	}
 
