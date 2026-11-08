@@ -156,6 +156,49 @@ func TestNewDriverAndDiff(t *testing.T) {
 		}, statements)
 	})
 
+	t.Run("PointerDataSources", func(t *testing.T) {
+		current := writeSchema(t, "current.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+		desired := writeSchema(t, "desired.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n")
+
+		driver, err := NewDriver(SQLiteDriverName)
+		require.NoError(t, err)
+
+		statements, err := driver.Diff(t.Context(), &current, &desired)
+		require.NoError(t, err)
+		require.Equal(t, Statements{
+			{
+				SQL:     `ALTER TABLE "users" ADD COLUMN "email" TEXT;`,
+				Comment: `Modify the table "users"`,
+			},
+		}, statements)
+	})
+
+	t.Run("DetectTheDriverOfAPointerDataSource", func(t *testing.T) {
+		current := NewConnectionStringDataSource("postgres://localhost/app")
+		desired := NewFileDataSource("schema.sql")
+
+		name, err := DetectDriver(&current, &desired)
+		require.NoError(t, err)
+		require.Equal(t, PostgresDriverName, name)
+	})
+
+	t.Run("NilDataSources", func(t *testing.T) {
+		desired := writeSchema(t, "desired.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
+
+		driver, err := NewDriver(SQLiteDriverName)
+		require.NoError(t, err)
+
+		_, err = driver.Diff(t.Context(), nil, desired)
+		require.EqualError(t, err, "failed to read the current data source: the data source is nil. "+
+			"Give a FileDataSource, a FolderDataSource, or a ConnectionStringDataSource value")
+
+		var missing *FileDataSource
+
+		_, err = driver.Diff(t.Context(), desired, missing)
+		require.EqualError(t, err, "failed to read the desired data source: the data source is nil. "+
+			"Give a FileDataSource, a FolderDataSource, or a ConnectionStringDataSource value")
+	})
+
 	t.Run("PostgreSQLConfigOnTheSQLiteDriver", func(t *testing.T) {
 		_, err := NewDriver(SQLiteDriverName, WithPostgreSQLDriverConfig(PostgreSQLDriverConfig{
 			Schema: "public",

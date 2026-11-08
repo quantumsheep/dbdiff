@@ -1,6 +1,7 @@
 package driversshared
 
 import (
+	"errors"
 	"os"
 	"strings"
 )
@@ -67,5 +68,37 @@ func SQLSourcePath(dataSource DataSource) (string, bool) {
 		return value.Path, true
 	default:
 		return "", false
+	}
+}
+
+var errNilDataSource = errors.New("the data source is nil. " +
+	"Give a FileDataSource, a FolderDataSource, or a ConnectionStringDataSource value")
+
+// A pointer to a data source type also satisfies DataSource, and the drivers read only the
+// value types. This function replaces a pointer with its value.
+func NormalizeDataSource(dataSource DataSource) (DataSource, error) {
+	switch value := dataSource.(type) {
+	case *FileDataSource:
+		if value == nil {
+			return nil, errNilDataSource
+		}
+
+		return *value, nil
+	case *FolderDataSource:
+		if value == nil {
+			return nil, errNilDataSource
+		}
+
+		return *value, nil
+	case *ConnectionStringDataSource:
+		if value == nil {
+			return nil, errNilDataSource
+		}
+
+		return *value, nil
+	case nil:
+		return nil, errNilDataSource
+	default:
+		return dataSource, nil
 	}
 }
