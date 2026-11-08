@@ -739,6 +739,37 @@ func TestPostgresTable(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateTableThatInheritsATableWithACommaInItsName", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE "z,parent" (a INT);
+			CREATE TABLE achild (b INT) INHERITS ("z,parent");
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateTableInstruction{
+				Name: "z,parent",
+				Columns: []*PostgresColumn{
+					{
+						Name: "a",
+						Type: "integer",
+					},
+				},
+			},
+			&PostgresCreateTableInstruction{
+				Name: "achild",
+				Columns: []*PostgresColumn{
+					{
+						Name: "b",
+						Type: "integer",
+					},
+				},
+				Inherits: []string{"z,parent"},
+			},
+		})
+	})
+
 	t.Run("CreateTableThatInheritsAColumnAndACheck", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 

@@ -3,6 +3,7 @@ package driverspostgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -1758,7 +1759,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 			), '') ELSE '' END,
 			coalesce(pg_get_expr(c.relpartbound, c.oid), ''),
 			coalesce((
-				SELECT array_to_string(array_agg(parent.relname ORDER BY i.inhseqno), ',')
+				SELECT json_agg(parent.relname ORDER BY i.inhseqno)::text
 				FROM pg_inherits i
 				JOIN pg_class parent ON parent.oid = i.inhparent
 				WHERE i.inhrelid = c.oid AND NOT c.relispartition
@@ -1810,7 +1811,10 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		}
 
 		if inherits != "" {
-			table.Inherits = strings.Split(inherits, ",")
+			err := json.Unmarshal([]byte(inherits), &table.Inherits)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if storageParameters != "" {
