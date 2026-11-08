@@ -117,6 +117,8 @@ dbdiff diff --scratch-database postgres://user:password@localhost:5432/postgres 
 
 A scratch database needs none of the server requirements below. It also works for MariaDB on Linux with arm64.
 
+A user or a role belongs to the server, not to a database. If a SQL file creates a user or a role on the scratch server, dbdiff drops the temporary database but the user or the role stays. The next run of the same file then fails. Write `CREATE USER IF NOT EXISTS` in MySQL. In PostgreSQL, create the role in a `DO` block that checks `pg_roles` first.
+
 ### Server requirements
 
 | System                      | Run before the first use                                     |
