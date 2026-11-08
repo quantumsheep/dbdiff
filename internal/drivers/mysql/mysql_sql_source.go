@@ -144,7 +144,11 @@ func (d *MySQLDriver) scratchServerConfig(
 
 	otherConnectionSource, isConnectionString := otherSource.(driversshared.ConnectionStringDataSource)
 	if isConnectionString {
-		otherVersion, mariadb := DetectMySQLScratchVersion(ctx, otherConnectionSource.ConnectionString)
+		otherVersion, mariadb, err := DetectMySQLScratchVersion(ctx, otherConnectionSource.ConnectionString)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read the server version of the database: %w", err)
+		}
+
 		if mariadb {
 			flavor = embeddedmysql.MariaDB
 		}
@@ -183,10 +187,10 @@ func (d *MySQLDriver) ScratchServer(flavor embeddedmysql.Flavor, version string)
 	return server, nil
 }
 
-func DetectMySQLScratchVersion(ctx context.Context, connectionString string) (string, bool) {
+func DetectMySQLScratchVersion(ctx context.Context, connectionString string) (string, bool, error) {
 	connection, err := OpenMySQLConnection(connectionString)
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
 
 	defer func() { _ = connection.Close() }()
@@ -195,7 +199,7 @@ func DetectMySQLScratchVersion(ctx context.Context, connectionString string) (st
 
 	err = connection.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version)
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
 
 	mariadb := isMariaDB(version)
@@ -204,7 +208,7 @@ func DetectMySQLScratchVersion(ctx context.Context, connectionString string) (st
 	// and the download reads the three numbers alone.
 	numericVersion, _, _ := strings.Cut(version, "-")
 
-	return numericVersion, mariadb
+	return numericVersion, mariadb, nil
 }
 
 func (d *MySQLDriver) StopScratchServer() error {

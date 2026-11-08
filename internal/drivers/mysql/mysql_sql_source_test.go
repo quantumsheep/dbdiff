@@ -1,6 +1,7 @@
 package driversmysql
 
 import (
+	"net"
 	"runtime"
 	"testing"
 	"time"
@@ -85,6 +86,26 @@ func TestMySQLSQLSource(t *testing.T) {
 		defer release()
 
 		require.Equal(t, 1, driver.DesiredDatabaseConnection.Stats().MaxOpenConnections)
+	})
+
+	t.Run("UnreachableServerOfTheDatabaseSide", func(t *testing.T) {
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "desired.sql", "CREATE TABLE t (id int);")
+
+		// The text of the error depends on the operating system.
+		_, dialError := net.Dial("tcp", "127.0.0.1:1")
+		require.Error(t, dialError)
+
+		driver := NewMySQLDriver(&MySQLDriverConfig{})
+
+		_, err := driver.Diff(t.Context(),
+			driversshared.ConnectionStringDataSource{
+				ConnectionString: "mysql://root:password@127.0.0.1:1/db",
+			},
+			driversshared.FileDataSource{
+				Path: desiredPath,
+			},
+			driversshared.DiffOptions{})
+		require.EqualError(t, err, "failed to read the server version of the database: "+dialError.Error())
 	})
 
 	t.Run("TwoSQLSources", func(t *testing.T) {
