@@ -27,6 +27,10 @@ type PostgresTable struct {
 	// A table of INHERITS is no partition, so it keeps its own columns and its own statement.
 	Inherits []string
 
+	// The diff names a parent without its schema, so a statement that names a parent of
+	// another schema can name a table of the same name in the schema of the diff.
+	ParentInAnotherSchema bool
+
 	// A child of INHERITS keeps its own default, NOT NULL flag, storage mode, and statistics
 	// target of each column. A change of the parent without ONLY changes them in each child too.
 	HasInheritanceChildren bool
@@ -1158,6 +1162,12 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		currentTable, found := lo.Find(currentTables, func(table *PostgresTable) bool {
 			return table.Name == desiredTable.Name
 		})
+
+		err := refuseParentInAnotherSchema(desiredTable, currentTable, found)
+		if err != nil {
+			return nil, err
+		}
+
 		if !found {
 			additions = append(additions, desiredTable.Instructions()...)
 
@@ -1318,6 +1328,32 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 		Additions:     additions,
 		Removals:      removals,
 	}, nil
+}
+
+func refuseParentInAnotherSchema(desiredTable *PostgresTable, currentTable *PostgresTable, found bool) error {
+	refusal := fmt.Errorf("the table %q has a parent table in another schema. dbdiff compares one schema "+
+		"per run, so it cannot create the table or change its parents", desiredTable.Name)
+
+	if !found {
+		if desiredTable.ParentInAnotherSchema {
+			return refusal
+		}
+
+		return nil
+	}
+
+	if !desiredTable.ParentInAnotherSchema && !currentTable.ParentInAnotherSchema {
+		return nil
+	}
+
+	parentsChange := !slices.Equal(desiredTable.Inherits, currentTable.Inherits) ||
+		desiredTable.PartitionParent != currentTable.PartitionParent ||
+		desiredTable.PartitionBound != currentTable.PartitionBound
+	if parentsChange {
+		return refusal
+	}
+
+	return nil
 }
 
 // The current table holds the state before the parents change, and the copy holds the state
@@ -1869,6 +1905,12 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 				FROM pg_inherits i
 				JOIN pg_class child ON child.oid = i.inhrelid
 				WHERE i.inhparent = c.oid AND NOT child.relispartition
+			),
+			EXISTS (
+				SELECT 1
+				FROM pg_inherits i
+				JOIN pg_class parent ON parent.oid = i.inhparent
+				WHERE i.inhrelid = c.oid AND parent.relnamespace <> c.relnamespace
 			)
 		FROM pg_class c
 		WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
@@ -1887,7 +1929,8 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 		err := rows.Scan(&table.Name, &table.PartitionKey, &table.PartitionParent,
 			&table.PartitionBound, &inherits, &table.Comment, &table.RowLevelSecurity,
 			&table.ForceRowLevelSecurity, &table.Unlogged, &storageParameters,
-			&table.ReplicaIdentity, &table.ReplicaIdentityIndex, &table.HasInheritanceChildren)
+			&table.ReplicaIdentity, &table.ReplicaIdentityIndex, &table.HasInheritanceChildren,
+			&table.ParentInAnotherSchema)
 		if err != nil {
 			return nil, err
 		}

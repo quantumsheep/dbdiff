@@ -258,7 +258,7 @@ err = migrator.Up(ctx)
 
 ## Limits
 
-- PostgreSQL: dbdiff compares one schema per run. It does not print `CREATE SCHEMA`.
+- PostgreSQL: dbdiff compares one schema per run. It does not print `CREATE SCHEMA`. If a table of the schema has a parent table in another schema, dbdiff cannot create that table or change its parents.
 - SQLite: SQLite cannot change a virtual table. If the module or its arguments change, dbdiff drops the virtual table and creates it again, and the new table holds no row.
 - MySQL: dbdiff compares one database per run. `--privileges` compares only the grants of the database and of the tables.
 - The `mysql` client splits the bodies of triggers and routines at each semicolon. To apply such a diff, use `dbdiff migrate up`.

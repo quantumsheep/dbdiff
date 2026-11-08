@@ -31,6 +31,95 @@ func TestPostgresTable(t *testing.T) {
 		})
 	})
 
+	t.Run("KeepAParentTableInAnotherSchema", func(t *testing.T) {
+		harness := NewTestPostgresDriverWithTwoDatabases(t)
+
+		harness.ExecOnCurrent(`
+			CREATE SCHEMA app;
+			CREATE TABLE base (id INT);
+			CREATE TABLE app.child (note TEXT) INHERITS (base);
+		`)
+		harness.ExecOnDesired(`
+			CREATE SCHEMA app;
+			CREATE TABLE base (id INT);
+			CREATE TABLE app.child (note TEXT, extra INT) INHERITS (base);
+		`)
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{
+			Schema: "app",
+		})
+
+		instructions, err := driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Equal(t, driversshared.Instructions{
+			&PostgresSetSearchPathInstruction{
+				Schema: "app",
+			},
+			&PostgresAlterTableInstruction{
+				Name: "child",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "extra",
+							Type: "integer",
+						},
+					},
+				},
+			},
+		}, instructions)
+
+		harness.ExecOnCurrent(instructions.String())
+
+		instructions, err = driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Empty(t, instructions)
+	})
+
+	t.Run("CreateAChildOfAParentTableInAnotherSchema", func(t *testing.T) {
+		harness := NewTestPostgresDriverWithTwoDatabases(t)
+
+		harness.ExecOnCurrent(`
+			CREATE SCHEMA app;
+			CREATE TABLE base (id INT);
+		`)
+		harness.ExecOnDesired(`
+			CREATE SCHEMA app;
+			CREATE TABLE base (id INT);
+			CREATE TABLE app.child (note TEXT) INHERITS (base);
+		`)
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{
+			Schema: "app",
+		})
+
+		_, err := driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
+		require.EqualError(t, err, `the table "child" has a parent table in another schema. dbdiff compares one schema `+
+			`per run, so it cannot create the table or change its parents`)
+	})
+
+	t.Run("AttachAPartitionOfAParentTableInAnotherSchema", func(t *testing.T) {
+		harness := NewTestPostgresDriverWithTwoDatabases(t)
+
+		harness.ExecOnCurrent(`
+			CREATE SCHEMA app;
+			CREATE TABLE events (day INT) PARTITION BY RANGE (day);
+			CREATE TABLE app.events_low PARTITION OF events FOR VALUES FROM (0) TO (10);
+		`)
+		harness.ExecOnDesired(`
+			CREATE SCHEMA app;
+			CREATE TABLE events (day INT) PARTITION BY RANGE (day);
+			CREATE TABLE app.events_low PARTITION OF events FOR VALUES FROM (0) TO (20);
+		`)
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{
+			Schema: "app",
+		})
+
+		_, err := driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
+		require.EqualError(t, err, `the table "events_low" has a parent table in another schema. dbdiff compares one `+
+			`schema per run, so it cannot create the table or change its parents`)
+	})
+
 	t.Run("DropTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
