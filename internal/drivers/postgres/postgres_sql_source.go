@@ -294,12 +294,14 @@ func (d *PostgresDriver) openScratchDatabase(ctx context.Context, schema string,
 
 	name := driversshared.ScratchDatabaseName(role)
 
+	// The server can create the database after the context stops, so the cleanup drops the
+	// name before the creation is known.
+	d.scratchDatabaseNames = append(d.scratchDatabaseNames, name)
+
 	err = executeOnPostgresServer(ctx, d.ScratchDatabase, "CREATE DATABASE "+driversshared.QuoteIdentifier(name))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create the temporary database %q: %w", name, err)
 	}
-
-	d.scratchDatabaseNames = append(d.scratchDatabaseNames, name)
 
 	connectionConfig.Database = name
 
@@ -332,7 +334,7 @@ func (d *PostgresDriver) releaseScratchResources(ctx context.Context) error {
 	var firstError error
 
 	for _, name := range d.scratchDatabaseNames {
-		err := executeOnPostgresServer(cleanupContext, d.ScratchDatabase, "DROP DATABASE "+driversshared.QuoteIdentifier(name))
+		err := executeOnPostgresServer(cleanupContext, d.ScratchDatabase, "DROP DATABASE IF EXISTS "+driversshared.QuoteIdentifier(name))
 		if err != nil && firstError == nil {
 			firstError = fmt.Errorf("failed to drop the temporary database %q: %w", name, err)
 		}

@@ -352,7 +352,7 @@ func TestPostgresSQLSource(t *testing.T) {
 		require.Len(t, scratchDatabaseNames, 1)
 		require.True(t, strings.HasPrefix(scratchDatabaseNames[0], "dbdiff_desired_"))
 
-		release()
+		require.NoError(t, release())
 
 		var remainingDatabases int
 
@@ -360,5 +360,34 @@ func TestPostgresSQLSource(t *testing.T) {
 			"SELECT count(*) FROM pg_database WHERE datname = $1", scratchDatabaseNames[0]).Scan(&remainingDatabases)
 		require.NoError(t, err)
 		require.Equal(t, 0, remainingDatabases)
+	})
+	t.Run("ScratchDatabaseThatTheCleanupCannotDrop", func(t *testing.T) {
+		harness := NewTestPostgresDriver(t)
+
+		desiredPath := sqltest.WriteSQLFile(t, t.TempDir(), "schema.sql", `CREATE TABLE users (id INT NOT NULL);`)
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{
+			ScratchDatabase: postgresTestConnectionString,
+		})
+
+		release, err := driver.openSides(t.Context(), harness.current, driversshared.ParseDataSource(desiredPath))
+		require.NoError(t, err)
+
+		scratchDatabaseName := driver.scratchDatabaseNames[0]
+
+		blockingConnection, err := sql.Open("pgx",
+			strings.Replace(postgresTestConnectionString, "/dbdiff?", "/"+scratchDatabaseName+"?", 1))
+		require.NoError(t, err)
+		require.NoError(t, blockingConnection.PingContext(t.Context()))
+
+		err = release()
+		require.EqualError(t, err, fmt.Sprintf(
+			"failed to drop the temporary database %q: ERROR: database %q is being accessed by other users (SQLSTATE 55006)",
+			scratchDatabaseName, scratchDatabaseName))
+
+		require.NoError(t, blockingConnection.Close())
+
+		_, err = harness.conn.ExecContext(t.Context(), "DROP DATABASE "+driversshared.QuoteIdentifier(scratchDatabaseName))
+		require.NoError(t, err)
 	})
 }

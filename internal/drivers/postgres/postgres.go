@@ -3,6 +3,7 @@ package driverspostgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -99,13 +100,20 @@ func (d *PostgresDriver) Diff(
 	current driversshared.DataSource,
 	desired driversshared.DataSource,
 	options driversshared.DiffOptions,
-) (driversshared.Instructions, error) {
+) (instructions driversshared.Instructions, err error) {
 	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
 	}
 
-	defer release()
+	// A temporary database that stays on the scratch server needs a drop by hand, so the
+	// error of the cleanup reaches the user.
+	defer func() {
+		err = errors.Join(err, release())
+		if err != nil {
+			instructions = nil
+		}
+	}()
 
 	d.recreatedObjectNames = nil
 	d.droppedColumnDefaults = nil
@@ -153,8 +161,6 @@ func (d *PostgresDriver) Diff(
 		sectionDiffs = append(sectionDiffs, sectionDiff)
 	}
 
-	var instructions []driversshared.Instruction
-
 	// PostgreSQL refuses a DROP statement while another object uses the object, so a removal
 	// takes the reverse section order. An early removal runs before every addition.
 	for _, sectionDiff := range slices.Backward(sectionDiffs) {
@@ -190,15 +196,14 @@ func (d *PostgresDriver) openSides(
 	ctx context.Context,
 	current driversshared.DataSource,
 	desired driversshared.DataSource,
-) (func(), error) {
+) (func() error, error) {
 	if d.ScratchDatabase == "" {
 		d.ScratchVersion = d.scratchVersionOfSources(ctx, current, desired)
 	}
 
 	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, d.DesiredSchema, "desired")
 	if err != nil {
-		_ = d.releaseScratchResources(ctx)
-		return nil, err
+		return nil, errors.Join(err, d.releaseScratchResources(ctx))
 	}
 
 	d.DesiredDatabaseConnection = desiredDatabaseConnection
@@ -206,19 +211,19 @@ func (d *PostgresDriver) openSides(
 	currentDatabaseConnection, err := d.OpenSide(ctx, current, d.CurrentSchema, "current")
 	if err != nil {
 		_ = d.DesiredDatabaseConnection.Close()
-		_ = d.releaseScratchResources(ctx)
 
-		return nil, err
+		return nil, errors.Join(err, d.releaseScratchResources(ctx))
 	}
 
 	d.CurrentDatabaseConnection = currentDatabaseConnection
 
-	return func() {
+	return func() error {
 		_ = d.DesiredDatabaseConnection.Close()
 		_ = d.CurrentDatabaseConnection.Close()
 		d.DesiredDatabaseConnection = nil
 		d.CurrentDatabaseConnection = nil
-		_ = d.releaseScratchResources(ctx)
+
+		return d.releaseScratchResources(ctx)
 	}, nil
 }
 
