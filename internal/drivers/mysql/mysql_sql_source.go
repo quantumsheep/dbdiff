@@ -109,12 +109,14 @@ func (d *MySQLDriver) OpenSide(
 		name:         driversshared.ScratchDatabaseName(role),
 	}
 
+	// The server can create the database after the context stops, so the cleanup drops the
+	// name before the creation is known.
+	d.scratchDatabases = append(d.scratchDatabases, scratch)
+
 	err = scratch.create(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	d.scratchDatabases = append(d.scratchDatabases, scratch)
 
 	connection, err := scratch.open(scratch.name)
 	if err != nil {
@@ -246,7 +248,7 @@ func (s *mysqlScratchDatabase) drop(ctx context.Context) error {
 
 	defer func() { _ = connection.Close() }()
 
-	_, err = connection.ExecContext(ctx, "DROP DATABASE "+QuoteIdentifier(s.name)+";")
+	_, err = connection.ExecContext(ctx, "DROP DATABASE IF EXISTS "+QuoteIdentifier(s.name)+";")
 	if err != nil {
 		return fmt.Errorf("failed to drop the temporary database %q: %w", s.name, err)
 	}

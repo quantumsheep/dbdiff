@@ -83,7 +83,7 @@ func TestMySQLSQLSource(t *testing.T) {
 		release, err := driver.openSides(t.Context(), driver.current, driver.desired)
 		require.NoError(t, err)
 
-		defer release()
+		defer func() { require.NoError(t, release()) }()
 
 		require.Equal(t, 1, driver.DesiredDatabaseConnection.Stats().MaxOpenConnections)
 	})

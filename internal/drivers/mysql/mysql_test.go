@@ -323,7 +323,7 @@ func requireDiffOnScratchDatabase(
 	require.True(t, strings.HasPrefix(scratchDatabaseName, "dbdiff_desired_"))
 	require.Nil(t, driver.scratchServer)
 
-	release()
+	require.NoError(t, release())
 
 	var remainingDatabases int
 

@@ -3,6 +3,7 @@ package driversmysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -86,13 +87,12 @@ func (d *MySQLDriver) openSides(
 	ctx context.Context,
 	current driversshared.DataSource,
 	desired driversshared.DataSource,
-) (func(), error) {
+) (func() error, error) {
 	d.detailsByConnection = make(map[*sql.DB]*mysqlConnectionDetails)
 
 	desiredDatabaseConnection, err := d.OpenSide(ctx, desired, current, "desired")
 	if err != nil {
-		_ = d.releaseScratchResources(ctx)
-		return nil, err
+		return nil, errors.Join(err, d.releaseScratchResources(ctx))
 	}
 
 	d.DesiredDatabaseConnection = desiredDatabaseConnection
@@ -100,17 +100,15 @@ func (d *MySQLDriver) openSides(
 	err = d.registerConnection(ctx, desiredDatabaseConnection)
 	if err != nil {
 		_ = d.DesiredDatabaseConnection.Close()
-		_ = d.releaseScratchResources(ctx)
 
-		return nil, err
+		return nil, errors.Join(err, d.releaseScratchResources(ctx))
 	}
 
 	currentDatabaseConnection, err := d.OpenSide(ctx, current, desired, "current")
 	if err != nil {
 		_ = d.DesiredDatabaseConnection.Close()
-		_ = d.releaseScratchResources(ctx)
 
-		return nil, err
+		return nil, errors.Join(err, d.releaseScratchResources(ctx))
 	}
 
 	d.CurrentDatabaseConnection = currentDatabaseConnection
@@ -119,17 +117,17 @@ func (d *MySQLDriver) openSides(
 	if err != nil {
 		_ = d.DesiredDatabaseConnection.Close()
 		_ = d.CurrentDatabaseConnection.Close()
-		_ = d.releaseScratchResources(ctx)
 
-		return nil, err
+		return nil, errors.Join(err, d.releaseScratchResources(ctx))
 	}
 
-	return func() {
+	return func() error {
 		_ = d.DesiredDatabaseConnection.Close()
 		_ = d.CurrentDatabaseConnection.Close()
 		d.DesiredDatabaseConnection = nil
 		d.CurrentDatabaseConnection = nil
-		_ = d.releaseScratchResources(ctx)
+
+		return d.releaseScratchResources(ctx)
 	}, nil
 }
 
@@ -163,13 +161,20 @@ func (d *MySQLDriver) Diff(
 	current driversshared.DataSource,
 	desired driversshared.DataSource,
 	options driversshared.DiffOptions,
-) (driversshared.Instructions, error) {
+) (instructions driversshared.Instructions, err error) {
 	release, err := d.openSides(ctx, current, desired)
 	if err != nil {
 		return nil, err
 	}
 
-	defer release()
+	// A temporary database that stays on the scratch server needs a drop by hand, so the
+	// error of the cleanup reaches the user.
+	defer func() {
+		err = errors.Join(err, release())
+		if err != nil {
+			instructions = nil
+		}
+	}()
 
 	desiredTables, err := d.GetTables(ctx, d.DesiredDatabaseConnection)
 	if err != nil {
@@ -203,8 +208,6 @@ func (d *MySQLDriver) Diff(
 			return d.DiffData(ctx, desiredTables, currentTables)
 		})
 	}
-
-	var instructions []driversshared.Instruction
 
 	for _, step := range steps {
 		stepInstructions, err := step(ctx)
