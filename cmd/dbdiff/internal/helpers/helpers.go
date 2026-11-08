@@ -39,7 +39,10 @@ func DetectDriverName(
 	desired driversshared.DataSource,
 	scratchDatabase string,
 ) (driversshared.DriverName, error) {
-	if scratchDatabase != "" && driversshared.IsSQLSource(current) && driversshared.IsSQLSource(desired) {
+	_, currentIsSQLSource := driversshared.SQLSourcePath(current)
+	_, desiredIsSQLSource := driversshared.SQLSourcePath(desired)
+
+	if scratchDatabase != "" && currentIsSQLSource && desiredIsSQLSource {
 		scratchDriverName, err := driversshared.DetectDriverOfDatabase(driversshared.ConnectionStringDataSource{
 			ConnectionString: scratchDatabase,
 		})

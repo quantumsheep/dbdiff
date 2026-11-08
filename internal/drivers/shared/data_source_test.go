@@ -59,12 +59,6 @@ func TestParseDataSource(t *testing.T) {
 	})
 }
 
-func TestIsSQLSource(t *testing.T) {
-	require.True(t, IsSQLSource(FileDataSource{Path: "schema.sql"}))
-	require.True(t, IsSQLSource(FolderDataSource{Path: "migrations"}))
-	require.False(t, IsSQLSource(ConnectionStringDataSource{ConnectionString: "app.db"}))
-}
-
 func TestSQLSourcePath(t *testing.T) {
 	path, ok := SQLSourcePath(FileDataSource{Path: "schema.sql"})
 	require.True(t, ok)

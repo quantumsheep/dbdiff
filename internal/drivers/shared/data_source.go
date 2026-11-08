@@ -74,12 +74,6 @@ func ParseDataSource(argument string) DataSource {
 	}
 }
 
-func IsSQLSource(dataSource DataSource) bool {
-	_, ok := SQLSourcePath(dataSource)
-
-	return ok
-}
-
 func SQLSourcePath(dataSource DataSource) (string, bool) {
 	return dataSource.sqlSourcePath()
 }

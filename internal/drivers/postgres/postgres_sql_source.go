@@ -186,8 +186,8 @@ func (d *PostgresDriver) scratchVersionOfSources(
 	current driversshared.DataSource,
 	desired driversshared.DataSource,
 ) embeddedpostgres.PostgresVersion {
-	currentHoldsSQL := driversshared.IsSQLSource(current)
-	desiredHoldsSQL := driversshared.IsSQLSource(desired)
+	_, currentHoldsSQL := driversshared.SQLSourcePath(current)
+	_, desiredHoldsSQL := driversshared.SQLSourcePath(desired)
 
 	if desiredHoldsSQL && !currentHoldsSQL {
 		connectionString, _ := driversshared.ConnectionString(current)

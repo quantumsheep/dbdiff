@@ -161,7 +161,8 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, desiredPath string, currentPath
 	tb.Helper()
 
 	for _, path := range []string{desiredPath, currentPath} {
-		if driversshared.IsSQLSource(driversshared.ParseDataSource(path)) {
+		_, isSQLSource := driversshared.SQLSourcePath(driversshared.ParseDataSource(path))
+		if isSQLSource {
 			continue
 		}
 
@@ -182,7 +183,8 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, desiredPath string, currentPath
 		desired:      desired,
 	}
 
-	if !driversshared.IsSQLSource(current) {
+	_, currentIsSQLSource := driversshared.SQLSourcePath(current)
+	if !currentIsSQLSource {
 		connection, err := sql.Open("sqlite", TrimSQLitePrefix(currentPath))
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
@@ -192,7 +194,8 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, desiredPath string, currentPath
 		testingDriver.currentConnection = connection
 	}
 
-	if !driversshared.IsSQLSource(desired) {
+	_, desiredIsSQLSource := driversshared.SQLSourcePath(desired)
+	if !desiredIsSQLSource {
 		connection, err := sql.Open("sqlite", TrimSQLitePrefix(desiredPath))
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
