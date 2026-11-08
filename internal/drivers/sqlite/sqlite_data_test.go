@@ -571,6 +571,112 @@ func TestSQLiteData(t *testing.T) {
 		require.Equal(t, []map[string]any{{"email": nil, "name": "Alice"}}, rows)
 	})
 
+	t.Run("CompareRowsWithAnAddedColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnCurrent(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`)
+		driver.ExecOnCurrent(`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
+
+		driver.ExecOnDesired(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, color TEXT);`)
+		driver.ExecOnDesired(`INSERT INTO users (id, name, color) VALUES (1, 'Alice', 'red');`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &SQLiteAddColumnAction{
+					Column: &SQLiteColumn{
+						Name: "color",
+						Type: "TEXT",
+					},
+				},
+			},
+			&driversshared.SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*driversshared.SQLSetClause{
+					{
+						ColumnName: "color",
+						Expression: "'red'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "color": "red"},
+		}, rows)
+	})
+
+	t.Run("CompareRowsWithARenamedColumn", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnCurrent(`CREATE TABLE users (id INTEGER PRIMARY KEY, Name TEXT);`)
+		driver.ExecOnCurrent(`INSERT INTO users (id, Name) VALUES (1, 'Alice'), (2, 'Bob');`)
+
+		driver.ExecOnDesired(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`)
+		driver.ExecOnDesired(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Robert');`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &driversshared.SQLRenameColumnAction{
+					ColumnName:    "Name",
+					NewColumnName: "name",
+				},
+			},
+			&driversshared.SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*driversshared.SQLSetClause{
+					{
+						ColumnName: "name",
+						Expression: "'Alice'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+			&driversshared.SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*driversshared.SQLSetClause{
+					{
+						ColumnName: "name",
+						Expression: "'Robert'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "2",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice"},
+			{"id": int64(2), "name": "Robert"},
+		}, rows)
+	})
+
 	t.Run("CompareNoRowWithoutTheDataFlag", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 

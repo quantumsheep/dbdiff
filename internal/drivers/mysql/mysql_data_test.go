@@ -63,6 +63,53 @@ func TestMySQLData(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", "ORDER BY id"))
 	})
 
+	t.Run("DataWithAnAddedColumn", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id int NOT NULL, name varchar(100), color varchar(20), PRIMARY KEY (id));
+			INSERT INTO users (id, name, color) VALUES (1, 'Alice', 'red');
+		`)
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id int NOT NULL, name varchar(100), PRIMARY KEY (id));
+			INSERT INTO users (id, name) VALUES (1, 'Alice');
+		`)
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name: "color",
+						Type: "varchar(20)",
+					},
+				},
+			},
+			&MySQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*MySQLSetClause{
+					{
+						ColumnName: "color",
+						Expression: "'red'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&MySQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "color": "red"},
+		}, driver.FetchAllFromCurrent("users", ""))
+	})
+
 	t.Run("DataOfANewTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true

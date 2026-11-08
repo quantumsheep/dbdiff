@@ -1,6 +1,7 @@
 package driverspostgres
 
 import (
+	"database/sql"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -588,6 +589,57 @@ func TestPostgresData(t *testing.T) {
 				Expressions: []string{"1", "'first'"},
 			},
 		})
+	})
+
+	t.Run("CompareRowsWithAnAddedColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT PRIMARY KEY, name TEXT);`)
+		driver.ExecOnCurrent(`INSERT INTO users (id, name) VALUES (1, 'Alice');`)
+
+		driver.ExecOnDesired(`CREATE TABLE users (id INT PRIMARY KEY, name TEXT, color TEXT DEFAULT 'blue');`)
+		driver.ExecOnDesired(`INSERT INTO users (id, name, color) VALUES (1, 'Alice', 'red');`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name: "color",
+							Type: "text",
+							Default: sql.NullString{
+								String: "'blue'::text",
+								Valid:  true,
+							},
+						},
+					},
+				},
+			},
+			&driversshared.SQLUpdateInstruction{
+				TableName: "users",
+				SetClauses: []*driversshared.SQLSetClause{
+					{
+						ColumnName: "color",
+						Expression: "'red'",
+					},
+				},
+				Condition: &driversshared.SQLConjunctionCondition{
+					Conditions: []driversshared.Condition{
+						&driversshared.SQLEqualityCondition{
+							ColumnName: "id",
+							Expression: "1",
+						},
+					},
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "name": "Alice", "color": "red"},
+		}, rows)
 	})
 
 	t.Run("CompareNoRowWithoutTheDataFlag", func(t *testing.T) {

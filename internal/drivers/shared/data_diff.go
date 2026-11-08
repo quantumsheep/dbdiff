@@ -158,7 +158,10 @@ func diffTableData[Table any, Quoter IdentifierQuoter](
 
 		var setClauses []*SetClause[Quoter]
 
-		for _, name := range commonColumnNames {
+		// The current row holds no value of a column that the schema section adds or renames.
+		// The comparison then always gives that column a SET clause, because its value after the
+		// schema section is unknown here.
+		for _, name := range desiredColumnNames {
 			if desiredRow[name] == currentRow[name] {
 				continue
 			}
