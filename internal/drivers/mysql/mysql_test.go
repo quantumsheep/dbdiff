@@ -334,6 +334,96 @@ func requireDiffOnScratchDatabase(
 }
 
 func TestMySQLDriver(t *testing.T) {
+	t.Run("TableNameCaseOfServersWithAnotherSetting", func(t *testing.T) {
+		desiredConnection := &sql.DB{}
+		currentConnection := &sql.DB{}
+
+		driver := &MySQLDriver{
+			DesiredDatabaseConnection: desiredConnection,
+			CurrentDatabaseConnection: currentConnection,
+			detailsByConnection: map[*sql.DB]*mysqlConnectionDetails{
+				desiredConnection: {
+					lowerCaseTableNames: 1,
+				},
+				currentConnection: {
+					lowerCaseTableNames: 0,
+				},
+			},
+		}
+
+		err := driver.checkTableNameCase(
+			[]*MySQLTable{
+				{
+					Name: "orders",
+				},
+				{
+					Name: "users",
+				},
+			},
+			[]*MySQLTable{
+				{
+					Name: "Users",
+				},
+				{
+					Name: "orders",
+				},
+			})
+		require.EqualError(t, err, `the current server stores the table "Users", and the desired server stores it as "users", `+
+			`because the servers have a different lower_case_table_names setting (0 and 1). `+
+			`If the desired schema is a .sql file or a directory, use --scratch-database with a server `+
+			`that has the setting of the current server`)
+
+		err = driver.checkTableNameCase(
+			[]*MySQLTable{
+				{
+					Name: "users",
+				},
+			},
+			[]*MySQLTable{
+				{
+					Name: "Users",
+				},
+				{
+					Name: "users",
+				},
+			})
+		require.NoError(t, err)
+
+		driver.detailsByConnection[currentConnection].lowerCaseTableNames = 2
+
+		err = driver.checkTableNameCase(
+			[]*MySQLTable{
+				{
+					Name: "users",
+				},
+			},
+			[]*MySQLTable{
+				{
+					Name: "Users",
+				},
+			})
+		require.EqualError(t, err, `the current server stores the table "Users", and the desired server stores it as "users", `+
+			`because the servers have a different lower_case_table_names setting (2 and 1). `+
+			`If the desired schema is a .sql file or a directory, use --scratch-database with a server `+
+			`that has the setting of the current server`)
+
+		driver.detailsByConnection[desiredConnection].lowerCaseTableNames = 2
+		driver.detailsByConnection[currentConnection].lowerCaseTableNames = 0
+
+		err = driver.checkTableNameCase(
+			[]*MySQLTable{
+				{
+					Name: "users",
+				},
+			},
+			[]*MySQLTable{
+				{
+					Name: "Users",
+				},
+			})
+		require.NoError(t, err)
+	})
+
 	t.Run("NoDifference", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 

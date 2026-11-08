@@ -35,10 +35,11 @@ type MySQLDriver struct {
 }
 
 type mysqlConnectionDetails struct {
-	mariadb          bool
-	databaseName     string
-	defaultEngine    string
-	defaultCollation string
+	mariadb             bool
+	databaseName        string
+	defaultEngine       string
+	defaultCollation    string
+	lowerCaseTableNames int
 }
 
 func isMariaDB(version string) bool {
@@ -58,13 +59,15 @@ func (d *MySQLDriver) registerConnection(ctx context.Context, db *sql.DB) error 
 	row := db.QueryRowContext(ctx, `
 		SELECT VERSION(), DATABASE(), @@default_storage_engine,
 			(SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA
-				WHERE SCHEMA_NAME = DATABASE());
+				WHERE SCHEMA_NAME = DATABASE()),
+			@@lower_case_table_names;
 	`)
 
 	var version, defaultEngine string
 	var databaseName, defaultCollation sql.NullString
+	var lowerCaseTableNames int
 
-	err := row.Scan(&version, &databaseName, &defaultEngine, &defaultCollation)
+	err := row.Scan(&version, &databaseName, &defaultEngine, &defaultCollation, &lowerCaseTableNames)
 	if err != nil {
 		return err
 	}
@@ -74,10 +77,49 @@ func (d *MySQLDriver) registerConnection(ctx context.Context, db *sql.DB) error 
 	}
 
 	d.detailsByConnection[db] = &mysqlConnectionDetails{
-		mariadb:          isMariaDB(version),
-		databaseName:     databaseName.String,
-		defaultEngine:    defaultEngine,
-		defaultCollation: defaultCollation.String,
+		mariadb:             isMariaDB(version),
+		databaseName:        databaseName.String,
+		defaultEngine:       defaultEngine,
+		defaultCollation:    defaultCollation.String,
+		lowerCaseTableNames: lowerCaseTableNames,
+	}
+
+	return nil
+}
+
+// With lower_case_table_names 1, a server stores each table name in lowercase, and with 0
+// or 2 it keeps the case of the CREATE TABLE statement. If the two sides store the names in
+// a different way, a table name that differs in case only gives a DROP TABLE statement and a
+// CREATE TABLE statement, and the drop deletes the rows.
+func (d *MySQLDriver) checkTableNameCase(desiredTables []*MySQLTable, currentTables []*MySQLTable) error {
+	desiredSetting := d.detailsByConnection[d.DesiredDatabaseConnection].lowerCaseTableNames
+	currentSetting := d.detailsByConnection[d.CurrentDatabaseConnection].lowerCaseTableNames
+
+	if (desiredSetting == 1) == (currentSetting == 1) {
+		return nil
+	}
+
+	currentTablesByName := driversshared.FirstByKey(currentTables, func(table *MySQLTable) string {
+		return table.Name
+	})
+	currentTablesByLowerName := driversshared.FirstByKey(currentTables, func(table *MySQLTable) string {
+		return strings.ToLower(table.Name)
+	})
+
+	for _, desiredTable := range desiredTables {
+		_, exactMatch := currentTablesByName[desiredTable.Name]
+		if exactMatch {
+			continue
+		}
+
+		currentTable, found := currentTablesByLowerName[strings.ToLower(desiredTable.Name)]
+		if found {
+			return fmt.Errorf("the current server stores the table %q, and the desired server stores it as %q, "+
+				"because the servers have a different lower_case_table_names setting (%d and %d). "+
+				"If the desired schema is a .sql file or a directory, use --scratch-database with a server "+
+				"that has the setting of the current server",
+				currentTable.Name, desiredTable.Name, currentSetting, desiredSetting)
+		}
 	}
 
 	return nil
@@ -182,6 +224,11 @@ func (d *MySQLDriver) Diff(
 	}
 
 	currentTables, err := d.GetTables(ctx, d.CurrentDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	err = d.checkTableNameCase(desiredTables, currentTables)
 	if err != nil {
 		return nil, err
 	}
