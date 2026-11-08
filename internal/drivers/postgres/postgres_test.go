@@ -69,6 +69,10 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 			IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dbdiff_reader') THEN
 				CREATE ROLE dbdiff_reader;
 			END IF;
+
+			IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dbdiff,writer') THEN
+				CREATE ROLE "dbdiff,writer";
+			END IF;
 		END
 		$$;
 	`)

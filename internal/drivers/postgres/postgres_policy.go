@@ -3,8 +3,8 @@ package driverspostgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"slices"
-	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
@@ -66,7 +66,7 @@ func (d *PostgresDriver) GetTablePolicies(
 			policyname,
 			permissive,
 			cmd,
-			array_to_string(roles, ','),
+			to_json(roles)::text,
 			coalesce(qual, ''),
 			coalesce(with_check, '')
 		FROM pg_policies
@@ -83,8 +83,9 @@ func (d *PostgresDriver) GetTablePolicies(
 			return nil, err
 		}
 
-		if roles != "" {
-			policy.Roles = strings.Split(roles, ",")
+		err = json.Unmarshal([]byte(roles), &policy.Roles)
+		if err != nil {
+			return nil, err
 		}
 
 		return policy, nil

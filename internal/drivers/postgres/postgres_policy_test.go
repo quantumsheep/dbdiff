@@ -42,6 +42,34 @@ func TestPostgresPolicy(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateAPolicyForARoleWithACommaInItsName", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE docs (id INT);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE docs (id INT);
+			ALTER TABLE docs ENABLE ROW LEVEL SECURITY;
+			CREATE POLICY docs_write ON docs FOR INSERT TO "dbdiff,writer", dbdiff_reader WITH CHECK (id > 0);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreatePolicyInstruction{
+				Name:       "docs_write",
+				TableName:  "docs",
+				Permissive: "PERMISSIVE",
+				Command:    "INSERT",
+				Roles: []string{
+					"dbdiff,writer",
+					"dbdiff_reader",
+				},
+				WithCheck: "(id > 0)",
+			},
+		})
+	})
+
 	t.Run("AddAPolicyThatReadsANewTable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
