@@ -19,6 +19,7 @@ type PostgresPrivilege struct {
 	Column     string
 	Grantee    string
 	Privileges []string
+	Grantable  []string
 }
 
 func (p *PostgresPrivilege) Key() string {
@@ -57,25 +58,76 @@ func (d *PostgresDriver) markDroppedColumns(instructions []driversshared.Instruc
 	}
 }
 
-func (p *PostgresPrivilege) GrantInstruction(privileges []string) *PostgresGrantInstruction {
+func (p *PostgresPrivilege) GrantInstruction(privileges []string, withGrantOption bool) *PostgresGrantInstruction {
 	return &PostgresGrantInstruction{
-		Privileges: privileges,
-		ObjectType: p.ObjectType,
-		ObjectName: p.ObjectName,
-		Arguments:  p.Arguments,
-		Column:     p.Column,
-		Grantee:    p.Grantee,
+		Privileges:      privileges,
+		ObjectType:      p.ObjectType,
+		ObjectName:      p.ObjectName,
+		Arguments:       p.Arguments,
+		Column:          p.Column,
+		Grantee:         p.Grantee,
+		WithGrantOption: withGrantOption,
 	}
 }
 
-func (p *PostgresPrivilege) RevokeInstruction(privileges []string) *PostgresRevokeInstruction {
+func (p *PostgresPrivilege) RevokeInstruction(privileges []string, grantOptionFor bool) *PostgresRevokeInstruction {
 	return &PostgresRevokeInstruction{
-		Privileges: privileges,
-		ObjectType: p.ObjectType,
-		ObjectName: p.ObjectName,
-		Arguments:  p.Arguments,
-		Column:     p.Column,
-		Grantee:    p.Grantee,
+		Privileges:     privileges,
+		ObjectType:     p.ObjectType,
+		ObjectName:     p.ObjectName,
+		Arguments:      p.Arguments,
+		Column:         p.Column,
+		Grantee:        p.Grantee,
+		GrantOptionFor: grantOptionFor,
+	}
+}
+
+func (p *PostgresPrivilege) changeInstructions(current *PostgresPrivilege) []driversshared.Instruction {
+	changes := diffGrants(p.Privileges, p.Grantable, current.Privileges, current.Grantable)
+
+	var instructions []driversshared.Instruction
+
+	if len(changes.granted) > 0 {
+		instructions = append(instructions, p.GrantInstruction(changes.granted, false))
+	}
+
+	if len(changes.grantedWithGrantOption) > 0 {
+		instructions = append(instructions, p.GrantInstruction(changes.grantedWithGrantOption, true))
+	}
+
+	if len(changes.revokedGrantOption) > 0 {
+		instructions = append(instructions, p.RevokeInstruction(changes.revokedGrantOption, true))
+	}
+
+	if len(changes.revoked) > 0 {
+		instructions = append(instructions, p.RevokeInstruction(changes.revoked, false))
+	}
+
+	return instructions
+}
+
+type grantChanges struct {
+	granted                []string
+	grantedWithGrantOption []string
+	revokedGrantOption     []string
+	revoked                []string
+}
+
+// A REVOKE of a privilege also removes its grant option. A GRANT WITH GRANT OPTION of a held
+// privilege adds only the grant option.
+func diffGrants(
+	desiredPrivileges []string,
+	desiredGrantable []string,
+	currentPrivileges []string,
+	currentGrantable []string,
+) grantChanges {
+	return grantChanges{
+		granted:                lo.Without(desiredPrivileges, slices.Concat(currentPrivileges, desiredGrantable)...),
+		grantedWithGrantOption: lo.Without(desiredGrantable, currentGrantable...),
+		revokedGrantOption: lo.Filter(currentGrantable, func(privilege string, _ int) bool {
+			return slices.Contains(desiredPrivileges, privilege) && !slices.Contains(desiredGrantable, privilege)
+		}),
+		revoked: lo.Without(currentPrivileges, desiredPrivileges...),
 	}
 }
 
@@ -181,6 +233,21 @@ func sortedPrivileges(privileges []string) []string {
 	return sorted
 }
 
+func splitPrivileges(privileges string) []string {
+	if privileges == "" {
+		return nil
+	}
+
+	return sortedPrivileges(strings.Split(privileges, ","))
+}
+
+// The second column holds the privileges that the grantee can grant to other roles.
+const privilegeAggregates = `
+	array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ','),
+	coalesce(array_to_string(
+		array_agg(acl.privilege_type ORDER BY acl.privilege_type) FILTER (WHERE acl.is_grantable), ','), '')
+`
+
 func joinPrivileges(privileges []string) string {
 	return strings.Join(privileges, ", ")
 }
@@ -256,21 +323,10 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 			return privilege.Key() == desiredPrivilege.Key()
 		})
 		if !found {
-			additions = append(additions,
-				desiredPrivilege.GrantInstruction(desiredPrivilege.Privileges))
-
-			continue
+			currentPrivilege = &PostgresPrivilege{}
 		}
 
-		granted := lo.Without(desiredPrivilege.Privileges, currentPrivilege.Privileges...)
-		if len(granted) > 0 {
-			additions = append(additions, desiredPrivilege.GrantInstruction(granted))
-		}
-
-		revoked := lo.Without(currentPrivilege.Privileges, desiredPrivilege.Privileges...)
-		if len(revoked) > 0 {
-			additions = append(additions, desiredPrivilege.RevokeInstruction(revoked))
-		}
+		additions = append(additions, desiredPrivilege.changeInstructions(currentPrivilege)...)
 	}
 
 	desiredObjectKeys := lo.Map(desiredOwners, func(owner *PostgresOwner, _ int) string {
@@ -291,7 +347,7 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		})
 		if !found {
 			additions = append(additions,
-				currentPrivilege.RevokeInstruction(currentPrivilege.Privileges))
+				currentPrivilege.RevokeInstruction(currentPrivilege.Privileges, false))
 		}
 	}
 
@@ -365,7 +421,7 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 			c.relname,
 			c.relkind,
 			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
-			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+			`+privilegeAggregates+`
 		FROM pg_class c, aclexplode(c.relacl) acl
 		WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
 		AND c.relkind IN ('r', 'p', 'v', 'm', 'S')
@@ -387,9 +443,9 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 	var privileges []*PostgresPrivilege
 
 	for rows.Next() {
-		var name, relkind, grantee, granted string
+		var name, relkind, grantee, granted, grantable string
 
-		err := rows.Scan(&name, &relkind, &grantee, &granted)
+		err := rows.Scan(&name, &relkind, &grantee, &granted, &grantable)
 		if err != nil {
 			return nil, err
 		}
@@ -402,7 +458,8 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 			ObjectType: privilegeObjectType(relkind),
 			ObjectName: name,
 			Grantee:    grantee,
-			Privileges: sortedPrivileges(strings.Split(granted, ",")),
+			Privileges: splitPrivileges(granted),
+			Grantable:  splitPrivileges(grantable),
 		})
 	}
 
@@ -461,7 +518,7 @@ func getRoutinePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege
 			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
 			oidvectortypes(p.proargtypes) AS argument_types,
 			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
-			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+			`+privilegeAggregates+`
 		FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
 		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
 		AND p.prokind IN ('f', 'p', 'a')
@@ -474,14 +531,15 @@ func getRoutinePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege
 	`, func(rows *sql.Rows) (*PostgresPrivilege, error) {
 		privilege := &PostgresPrivilege{}
 
-		var granted string
+		var granted, grantable string
 
-		err := rows.Scan(&privilege.ObjectName, &privilege.ObjectType, &privilege.Arguments, &privilege.Grantee, &granted)
+		err := rows.Scan(&privilege.ObjectName, &privilege.ObjectType, &privilege.Arguments, &privilege.Grantee, &granted, &grantable)
 		if err != nil {
 			return nil, err
 		}
 
-		privilege.Privileges = sortedPrivileges(strings.Split(granted, ","))
+		privilege.Privileges = splitPrivileges(granted)
+		privilege.Grantable = splitPrivileges(grantable)
 
 		return privilege, nil
 	})
@@ -525,7 +583,7 @@ func getTypePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, e
 			t.typname,
 			CASE t.typtype WHEN 'd' THEN 'DOMAIN' ELSE 'TYPE' END,
 			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
-			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+			`+privilegeAggregates+`
 		FROM pg_type t, aclexplode(coalesce(t.typacl, acldefault('T', t.typowner))) acl
 		WHERE `+managedTypeFilter+`
 		AND acl.grantee <> t.typowner
@@ -534,14 +592,15 @@ func getTypePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, e
 	`, func(rows *sql.Rows) (*PostgresPrivilege, error) {
 		privilege := &PostgresPrivilege{}
 
-		var granted string
+		var granted, grantable string
 
-		err := rows.Scan(&privilege.ObjectName, &privilege.ObjectType, &privilege.Grantee, &granted)
+		err := rows.Scan(&privilege.ObjectName, &privilege.ObjectType, &privilege.Grantee, &granted, &grantable)
 		if err != nil {
 			return nil, err
 		}
 
-		privilege.Privileges = sortedPrivileges(strings.Split(granted, ","))
+		privilege.Privileges = splitPrivileges(granted)
+		privilege.Grantable = splitPrivileges(grantable)
 
 		return privilege, nil
 	})
@@ -554,7 +613,7 @@ func (d *PostgresDriver) getColumnPrivileges(ctx context.Context, db *sql.DB) ([
 			c.relkind,
 			a.attname,
 			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
-			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+			`+privilegeAggregates+`
 		FROM pg_class c
 		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped,
 		aclexplode(a.attacl) acl
@@ -571,15 +630,16 @@ func (d *PostgresDriver) getColumnPrivileges(ctx context.Context, db *sql.DB) ([
 	`, func(rows *sql.Rows) (*PostgresPrivilege, error) {
 		privilege := &PostgresPrivilege{}
 
-		var relkind, granted string
+		var relkind, granted, grantable string
 
-		err := rows.Scan(&privilege.ObjectName, &relkind, &privilege.Column, &privilege.Grantee, &granted)
+		err := rows.Scan(&privilege.ObjectName, &relkind, &privilege.Column, &privilege.Grantee, &granted, &grantable)
 		if err != nil {
 			return nil, err
 		}
 
 		privilege.ObjectType = privilegeObjectType(relkind)
-		privilege.Privileges = sortedPrivileges(strings.Split(granted, ","))
+		privilege.Privileges = splitPrivileges(granted)
+		privilege.Grantable = splitPrivileges(grantable)
 
 		return privilege, nil
 	}, driversshared.MigrationHistoryTableName)

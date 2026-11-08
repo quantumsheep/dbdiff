@@ -658,4 +658,78 @@ func TestPostgresPrivilege(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("ChangeTheGrantOption", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		setup := `
+			CREATE TABLE users (id INT, email TEXT);
+			CREATE FUNCTION add_one(value integer) RETURNS integer LANGUAGE sql AS $$ SELECT value + 1 $$;
+			CREATE TYPE mood AS ENUM ('happy', 'sad');
+			CREATE DOMAIN short_text AS text;
+		`
+
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`
+			GRANT SELECT ON users TO dbdiff_reader;
+			GRANT UPDATE (email) ON users TO dbdiff_reader WITH GRANT OPTION;
+			GRANT EXECUTE ON FUNCTION add_one(integer) TO dbdiff_reader;
+			GRANT USAGE ON TYPE mood TO dbdiff_reader WITH GRANT OPTION;
+		`)
+
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`
+			GRANT DELETE ON users TO dbdiff_reader;
+			GRANT SELECT, INSERT ON users TO dbdiff_reader WITH GRANT OPTION;
+			GRANT UPDATE (email) ON users TO dbdiff_reader;
+			GRANT EXECUTE ON FUNCTION add_one(integer) TO dbdiff_reader WITH GRANT OPTION;
+			GRANT USAGE ON TYPE mood TO dbdiff_reader;
+			GRANT USAGE ON DOMAIN short_text TO "dbdiff,writer" WITH GRANT OPTION;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresGrantInstruction{
+				Privileges: []string{"DELETE"},
+				ObjectType: "TABLE",
+				ObjectName: "users",
+				Grantee:    "dbdiff_reader",
+			},
+			&PostgresGrantInstruction{
+				Privileges:      []string{"INSERT", "SELECT"},
+				ObjectType:      "TABLE",
+				ObjectName:      "users",
+				Grantee:         "dbdiff_reader",
+				WithGrantOption: true,
+			},
+			&PostgresRevokeInstruction{
+				Privileges:     []string{"UPDATE"},
+				ObjectType:     "TABLE",
+				ObjectName:     "users",
+				Column:         "email",
+				Grantee:        "dbdiff_reader",
+				GrantOptionFor: true,
+			},
+			&PostgresGrantInstruction{
+				Privileges:      []string{"EXECUTE"},
+				ObjectType:      "FUNCTION",
+				ObjectName:      "add_one",
+				Arguments:       "integer",
+				Grantee:         "dbdiff_reader",
+				WithGrantOption: true,
+			},
+			&PostgresRevokeInstruction{
+				Privileges:     []string{"USAGE"},
+				ObjectType:     "TYPE",
+				ObjectName:     "mood",
+				Grantee:        "dbdiff_reader",
+				GrantOptionFor: true,
+			},
+			&PostgresGrantInstruction{
+				Privileges:      []string{"USAGE"},
+				ObjectType:      "DOMAIN",
+				ObjectName:      "short_text",
+				Grantee:         "dbdiff,writer",
+				WithGrantOption: true,
+			},
+		})
+	})
 }

@@ -236,18 +236,20 @@ func (i *PostgresDropStatisticsInstruction) Comment() string {
 }
 
 type PostgresGrantInstruction struct {
-	Privileges []string
-	ObjectType string
-	ObjectName string
-	Arguments  string
-	Column     string
-	Grantee    string
+	Privileges      []string
+	ObjectType      string
+	ObjectName      string
+	Arguments       string
+	Column          string
+	Grantee         string
+	WithGrantOption bool
 }
 
 func (i *PostgresGrantInstruction) String() string {
-	return fmt.Sprintf("GRANT %s ON %s %s TO %s;",
+	return fmt.Sprintf("GRANT %s ON %s %s TO %s%s;",
 		privilegeList(i.Privileges, i.Column), i.ObjectType,
-		quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments), quoteGrantee(i.Grantee))
+		quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments), quoteGrantee(i.Grantee),
+		withGrantOptionClause(i.WithGrantOption))
 }
 
 func (i *PostgresGrantInstruction) Comment() string {
@@ -255,17 +257,18 @@ func (i *PostgresGrantInstruction) Comment() string {
 }
 
 type PostgresRevokeInstruction struct {
-	Privileges []string
-	ObjectType string
-	ObjectName string
-	Arguments  string
-	Column     string
-	Grantee    string
+	Privileges     []string
+	ObjectType     string
+	ObjectName     string
+	Arguments      string
+	Column         string
+	Grantee        string
+	GrantOptionFor bool
 }
 
 func (i *PostgresRevokeInstruction) String() string {
-	return fmt.Sprintf("REVOKE %s ON %s %s FROM %s;",
-		privilegeList(i.Privileges, i.Column), i.ObjectType,
+	return fmt.Sprintf("REVOKE %s%s ON %s %s FROM %s;",
+		grantOptionForClause(i.GrantOptionFor), privilegeList(i.Privileges, i.Column), i.ObjectType,
 		quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments), quoteGrantee(i.Grantee))
 }
 
@@ -322,4 +325,20 @@ func quoteGrantee(grantee string) string {
 	}
 
 	return driversshared.QuoteIdentifier(grantee)
+}
+
+func withGrantOptionClause(withGrantOption bool) string {
+	if withGrantOption {
+		return " WITH GRANT OPTION"
+	}
+
+	return ""
+}
+
+func grantOptionForClause(grantOptionFor bool) string {
+	if grantOptionFor {
+		return "GRANT OPTION FOR "
+	}
+
+	return ""
 }
