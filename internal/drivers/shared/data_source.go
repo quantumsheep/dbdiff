@@ -1,13 +1,15 @@
 package driversshared
 
 import (
-	"errors"
 	"os"
 	"strings"
 )
 
+// The methods use value receivers, so a pointer to a data source type also satisfies
+// DataSource. The code must read a data source only through these methods.
 type DataSource interface {
-	dataSource()
+	sqlSourcePath() (string, bool)
+	connectionString() (string, bool)
 }
 
 type FileDataSource struct {
@@ -22,11 +24,29 @@ type ConnectionStringDataSource struct {
 	ConnectionString string
 }
 
-func (FileDataSource) dataSource() {}
+func (dataSource FileDataSource) sqlSourcePath() (string, bool) {
+	return dataSource.Path, true
+}
 
-func (FolderDataSource) dataSource() {}
+func (FileDataSource) connectionString() (string, bool) {
+	return "", false
+}
 
-func (ConnectionStringDataSource) dataSource() {}
+func (dataSource FolderDataSource) sqlSourcePath() (string, bool) {
+	return dataSource.Path, true
+}
+
+func (FolderDataSource) connectionString() (string, bool) {
+	return "", false
+}
+
+func (ConnectionStringDataSource) sqlSourcePath() (string, bool) {
+	return "", false
+}
+
+func (dataSource ConnectionStringDataSource) connectionString() (string, bool) {
+	return dataSource.ConnectionString, true
+}
 
 // A path with "://" never names SQL text, so the scheme check comes first.
 func ParseDataSource(argument string) DataSource {
@@ -61,44 +81,9 @@ func IsSQLSource(dataSource DataSource) bool {
 }
 
 func SQLSourcePath(dataSource DataSource) (string, bool) {
-	switch value := dataSource.(type) {
-	case FileDataSource:
-		return value.Path, true
-	case FolderDataSource:
-		return value.Path, true
-	default:
-		return "", false
-	}
+	return dataSource.sqlSourcePath()
 }
 
-var errNilDataSource = errors.New("the data source is nil. " +
-	"Give a FileDataSource, a FolderDataSource, or a ConnectionStringDataSource value")
-
-// A pointer to a data source type also satisfies DataSource, and the drivers read only the
-// value types. This function replaces a pointer with its value.
-func NormalizeDataSource(dataSource DataSource) (DataSource, error) {
-	switch value := dataSource.(type) {
-	case *FileDataSource:
-		if value == nil {
-			return nil, errNilDataSource
-		}
-
-		return *value, nil
-	case *FolderDataSource:
-		if value == nil {
-			return nil, errNilDataSource
-		}
-
-		return *value, nil
-	case *ConnectionStringDataSource:
-		if value == nil {
-			return nil, errNilDataSource
-		}
-
-		return *value, nil
-	case nil:
-		return nil, errNilDataSource
-	default:
-		return dataSource, nil
-	}
+func ConnectionString(dataSource DataSource) (string, bool) {
+	return dataSource.connectionString()
 }

@@ -90,9 +90,9 @@ func (d *MySQLDriver) OpenSide(
 	otherSource driversshared.DataSource,
 	role string,
 ) (*sql.DB, error) {
-	connectionSource, isConnectionString := dataSource.(driversshared.ConnectionStringDataSource)
+	connectionString, isConnectionString := driversshared.ConnectionString(dataSource)
 	if isConnectionString {
-		return OpenMySQLConnection(connectionSource.ConnectionString)
+		return OpenMySQLConnection(connectionString)
 	}
 
 	path, _ := driversshared.SQLSourcePath(dataSource)
@@ -149,9 +149,9 @@ func (d *MySQLDriver) scratchServerConfig(
 	flavor := embeddedmysql.MySQL
 	version := d.ScratchServerVersion
 
-	otherConnectionSource, isConnectionString := otherSource.(driversshared.ConnectionStringDataSource)
+	otherConnectionString, isConnectionString := driversshared.ConnectionString(otherSource)
 	if isConnectionString {
-		otherVersion, mariadb, err := DetectMySQLScratchVersion(ctx, otherConnectionSource.ConnectionString)
+		otherVersion, mariadb, err := DetectMySQLScratchVersion(ctx, otherConnectionString)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read the server version of the database: %w", err)
 		}

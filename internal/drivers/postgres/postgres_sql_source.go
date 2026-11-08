@@ -190,13 +190,13 @@ func (d *PostgresDriver) scratchVersionOfSources(
 	desiredHoldsSQL := driversshared.IsSQLSource(desired)
 
 	if desiredHoldsSQL && !currentHoldsSQL {
-		connectionSource := current.(driversshared.ConnectionStringDataSource)
-		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString)
+		connectionString, _ := driversshared.ConnectionString(current)
+		return DetectPostgresScratchVersion(ctx, connectionString)
 	}
 
 	if currentHoldsSQL && !desiredHoldsSQL {
-		connectionSource := desired.(driversshared.ConnectionStringDataSource)
-		return DetectPostgresScratchVersion(ctx, connectionSource.ConnectionString)
+		connectionString, _ := driversshared.ConnectionString(desired)
+		return DetectPostgresScratchVersion(ctx, connectionString)
 	}
 
 	if desiredHoldsSQL && currentHoldsSQL && d.ScratchServerVersion != "" {
@@ -246,9 +246,9 @@ func (d *PostgresDriver) OpenSide(
 	schema string,
 	role string,
 ) (*sql.DB, error) {
-	connectionSource, isConnectionString := dataSource.(driversshared.ConnectionStringDataSource)
+	connectionString, isConnectionString := driversshared.ConnectionString(dataSource)
 	if isConnectionString {
-		return OpenPostgresConnection(connectionSource.ConnectionString, schema)
+		return OpenPostgresConnection(connectionString, schema)
 	}
 
 	path, _ := driversshared.SQLSourcePath(dataSource)

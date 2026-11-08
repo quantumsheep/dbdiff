@@ -19,8 +19,8 @@ func (d *SQLiteDriver) OpenSide(
 ) (*sql.DB, error) {
 	path, isSQLSource := driversshared.SQLSourcePath(dataSource)
 	if !isSQLSource {
-		connectionSource := dataSource.(driversshared.ConnectionStringDataSource)
-		filePath := TrimSQLitePrefix(connectionSource.ConnectionString)
+		connectionString, _ := driversshared.ConnectionString(dataSource)
+		filePath := TrimSQLitePrefix(connectionString)
 
 		// sql.Open creates a file that is absent, and a wrong path then reads an empty
 		// schema without an error. A file: name can hold options, so the check skips it.

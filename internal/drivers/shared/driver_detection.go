@@ -53,16 +53,14 @@ func DetectDriverOfDatabase(database DataSource) (DriverName, error) {
 // dataSourceArgument names the value that the user gave for a data source, so the
 // detection error can name what defeated it.
 func dataSourceArgument(dataSource DataSource) string {
-	switch value := dataSource.(type) {
-	case FileDataSource:
-		return value.Path
-	case FolderDataSource:
-		return value.Path
-	case ConnectionStringDataSource:
-		return redactConnectionString(value.ConnectionString)
-	default:
-		return ""
+	connectionString, isConnectionString := dataSource.connectionString()
+	if isConnectionString {
+		return redactConnectionString(connectionString)
 	}
+
+	path, _ := dataSource.sqlSourcePath()
+
+	return path
 }
 
 // An error message goes to a terminal or to the log of a CI job, so it must not show a
@@ -96,13 +94,7 @@ func redactConnectionString(connectionString string) string {
 }
 
 func detectDriverOfDataSource(dataSource DataSource) DriverName {
-	connection, ok := dataSource.(ConnectionStringDataSource)
-	if !ok {
-		return ""
-	}
-
-	argument := connection.ConnectionString
-
+	argument, _ := dataSource.connectionString()
 	if argument == "" {
 		return ""
 	}

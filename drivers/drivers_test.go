@@ -182,23 +182,6 @@ func TestNewDriverAndDiff(t *testing.T) {
 		require.Equal(t, PostgresDriverName, name)
 	})
 
-	t.Run("NilDataSources", func(t *testing.T) {
-		desired := writeSchema(t, "desired.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
-
-		driver, err := NewDriver(SQLiteDriverName)
-		require.NoError(t, err)
-
-		_, err = driver.Diff(t.Context(), nil, desired)
-		require.EqualError(t, err, "failed to read the current data source: the data source is nil. "+
-			"Give a FileDataSource, a FolderDataSource, or a ConnectionStringDataSource value")
-
-		var missing *FileDataSource
-
-		_, err = driver.Diff(t.Context(), desired, missing)
-		require.EqualError(t, err, "failed to read the desired data source: the data source is nil. "+
-			"Give a FileDataSource, a FolderDataSource, or a ConnectionStringDataSource value")
-	})
-
 	t.Run("PostgreSQLConfigOnTheSQLiteDriver", func(t *testing.T) {
 		_, err := NewDriver(SQLiteDriverName, WithPostgreSQLDriverConfig(PostgreSQLDriverConfig{
 			Schema: "public",

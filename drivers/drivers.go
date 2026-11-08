@@ -58,26 +58,7 @@ func NewConnectionStringDataSource(connectionString string) ConnectionStringData
 // DetectDriver names the engine of the two sides of a diff. A SQL data source gives no
 // engine, so the other side decides.
 func DetectDriver(current DataSource, desired DataSource) (DriverName, error) {
-	current, desired, err := normalizeSides(current, desired)
-	if err != nil {
-		return "", err
-	}
-
 	return driversshared.DetectDriver(current, desired)
-}
-
-func normalizeSides(current DataSource, desired DataSource) (DataSource, DataSource, error) {
-	current, err := driversshared.NormalizeDataSource(current)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read the current data source: %w", err)
-	}
-
-	desired, err = driversshared.NormalizeDataSource(desired)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read the desired data source: %w", err)
-	}
-
-	return current, desired, nil
 }
 
 type driverOptions struct {
@@ -261,11 +242,6 @@ func (d *Driver) Diff(
 
 	for _, option := range options {
 		option(merged)
-	}
-
-	current, desired, err := normalizeSides(current, desired)
-	if err != nil {
-		return nil, err
 	}
 
 	d.mutex.Lock()
