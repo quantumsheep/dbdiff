@@ -405,12 +405,23 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		return owner.Key()
 	})
 
+	desiredColumnKeys, err := getColumnKeys(ctx, d.DesiredDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, currentPrivilege := range currentPrivileges {
 		// The diff drops an object that the desired schema does not hold, and the drop removes
-		// every privilege of the object.
+		// every privilege of the object. This also applies to the column of a child that the
+		// drop of a parent column removes.
 		currentObjectKey := privilegeObjectKey(
 			currentPrivilege.ObjectType, currentPrivilege.ObjectName, currentPrivilege.Arguments)
 		if !slices.Contains(desiredObjectKeys, currentObjectKey) {
+			continue
+		}
+
+		if currentPrivilege.Column != "" &&
+			!desiredColumnKeys[columnKey(currentPrivilege.ObjectName, currentPrivilege.Column)] {
 			continue
 		}
 
@@ -761,6 +772,30 @@ func getTypePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, e
 
 		return privilege, nil
 	})
+}
+
+func getColumnKeys(ctx context.Context, db *sql.DB) (map[string]bool, error) {
+	keys, err := driversshared.QueryAll(ctx, db, `
+		SELECT c.relname, a.attname
+		FROM pg_class c
+		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+		WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
+		AND c.relkind IN ('r', 'p', 'v', 'm')
+		ORDER BY c.relname, a.attnum
+	`, func(rows *sql.Rows) (string, error) {
+		var tableName, columnName string
+
+		err := rows.Scan(&tableName, &columnName)
+
+		return columnKey(tableName, columnName), err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return lo.SliceToMap(keys, func(key string) (string, bool) {
+		return key, true
+	}), nil
 }
 
 func (d *PostgresDriver) getColumnPrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {

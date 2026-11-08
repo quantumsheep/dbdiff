@@ -622,6 +622,31 @@ func TestPostgresPrivilege(t *testing.T) {
 		})
 	})
 
+	t.Run("NoRevokeForTheColumnOfAChildThatItsParentDrops", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (id INT, email TEXT);
+			CREATE TABLE children () INHERITS (parents);
+			GRANT SELECT (email) ON children TO dbdiff_reader;
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (id INT);
+			CREATE TABLE children () INHERITS (parents);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{
+						ColumnName: "email",
+					},
+				},
+			},
+		})
+	})
+
 	t.Run("ARebuiltColumnKeepsItsGrants", func(t *testing.T) {
 		driver := NewTestPostgresDriverWithPrivileges(t)
 
