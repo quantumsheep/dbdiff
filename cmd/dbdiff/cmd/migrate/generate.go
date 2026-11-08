@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
@@ -85,27 +84,7 @@ func generateAction(ctx context.Context, command *cli.Command) error {
 	current := driversshared.ParseDataSource(config.Migrations)
 	desired := driversshared.ParseDataSource(config.Desired)
 
-	driverName := config.Driver
-	if driverName == "" {
-		detected, err := helpers.DetectDriverName(current, desired, config.ScratchDatabase)
-		if err != nil {
-			return err
-		}
-
-		driverName = detected
-	}
-
-	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, config.ScratchDatabase, path)
-	if err != nil {
-		return err
-	}
-
-	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
-		ServerVersion:   config.ServerVersion,
-		ScratchDatabase: config.ScratchDatabase,
-		Schema:          config.Schema,
-		IgnoreTables:    config.IgnoreTables,
-	})
+	driver, err := helpers.NewDriver(config, path, current, desired, false)
 	if err != nil {
 		return err
 	}

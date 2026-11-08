@@ -13,14 +13,9 @@ const ConfigFlagUsage = "Path of the configuration file. The default is dbdiff.y
 // ReadConfigWithFlags reads the configuration file and lets the flags driver, schema,
 // server-version, scratch-database, and ignore-table replace their keys.
 func ReadConfigWithFlags(command *cli.Command) (*internalmigrations.Config, string, error) {
-	path := command.String("config")
+	path := ConfigPath(command)
 
-	optional := path == ""
-	if optional {
-		path = internalmigrations.DefaultConfigPath
-	}
-
-	config, err := internalmigrations.ReadConfig(path, optional)
+	config, err := internalmigrations.ReadConfig(path, command.String("config") == "")
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read the configuration file: %w", err)
 	}
@@ -51,4 +46,13 @@ func ReadConfigWithFlags(command *cli.Command) (*internalmigrations.Config, stri
 	}
 
 	return config, path, nil
+}
+
+func ConfigPath(command *cli.Command) string {
+	path := command.String("config")
+	if path == "" {
+		return internalmigrations.DefaultConfigPath
+	}
+
+	return path
 }

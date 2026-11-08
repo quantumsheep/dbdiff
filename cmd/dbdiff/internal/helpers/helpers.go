@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"runtime/debug"
 
+	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
 )
 
@@ -96,4 +98,35 @@ func CheckDriverSettings(
 
 func settingName(name string, configPath string) string {
 	return fmt.Sprintf("the --%s flag and the key %q of %s", name, name, configPath)
+}
+
+func NewDriver(
+	config *internalmigrations.Config,
+	configPath string,
+	current driversshared.DataSource,
+	desired driversshared.DataSource,
+	comparePrivileges bool,
+) (driversshared.Driver, error) {
+	driverName := config.Driver
+	if driverName == "" {
+		detected, err := DetectDriverName(current, desired, config.ScratchDatabase)
+		if err != nil {
+			return nil, err
+		}
+
+		driverName = detected
+	}
+
+	err := CheckDriverSettings(driverName, config.Schema, config.ServerVersion, config.ScratchDatabase, configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
+		ServerVersion:     config.ServerVersion,
+		ScratchDatabase:   config.ScratchDatabase,
+		Schema:            config.Schema,
+		ComparePrivileges: comparePrivileges,
+		IgnoreTables:      config.IgnoreTables,
+	})
 }

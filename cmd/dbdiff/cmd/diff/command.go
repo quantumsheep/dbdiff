@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/urfave/cli/v3"
 )
@@ -79,28 +78,7 @@ func action(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	driverName := config.Driver
-	if driverName == "" {
-		detected, err := helpers.DetectDriverName(current, desired, config.ScratchDatabase)
-		if err != nil {
-			return err
-		}
-
-		driverName = detected
-	}
-
-	err = helpers.CheckDriverSettings(driverName, config.Schema, config.ServerVersion, config.ScratchDatabase, path)
-	if err != nil {
-		return err
-	}
-
-	driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
-		ServerVersion:     config.ServerVersion,
-		ScratchDatabase:   config.ScratchDatabase,
-		Schema:            config.Schema,
-		ComparePrivileges: command.Bool("privileges"),
-		IgnoreTables:      config.IgnoreTables,
-	})
+	driver, err := helpers.NewDriver(config, path, current, desired, command.Bool("privileges"))
 	if err != nil {
 		return err
 	}

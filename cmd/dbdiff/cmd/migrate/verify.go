@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/quantumsheep/dbdiff/cmd/dbdiff/internal/helpers"
-	internaldrivers "github.com/quantumsheep/dbdiff/internal/drivers"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/urfave/cli/v3"
@@ -29,22 +28,7 @@ func verifyAction(
 	database := driversshared.ParseDataSource(config.Database)
 
 	return runner.Verify(ctx, func(ctx context.Context, replay driversshared.DataSource) (driversshared.Instructions, error) {
-		driverName := config.Driver
-		if driverName == "" {
-			detected, err := helpers.DetectDriverName(database, replay, config.ScratchDatabase)
-			if err != nil {
-				return nil, err
-			}
-
-			driverName = detected
-		}
-
-		driver, err := internaldrivers.NewDriver(driverName, internaldrivers.DriverOptions{
-			ServerVersion:   config.ServerVersion,
-			ScratchDatabase: config.ScratchDatabase,
-			Schema:          config.Schema,
-			IgnoreTables:    config.IgnoreTables,
-		})
+		driver, err := helpers.NewDriver(config, helpers.ConfigPath(command), database, replay, false)
 		if err != nil {
 			return nil, err
 		}
