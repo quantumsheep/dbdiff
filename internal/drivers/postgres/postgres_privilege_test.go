@@ -436,4 +436,137 @@ func TestPostgresPrivilege(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("GrantUsageOnATypeAndADomain", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		setup := `
+			CREATE TYPE mood AS ENUM ('happy', 'sad');
+			CREATE DOMAIN short_text AS varchar(10);
+		`
+		driver.ExecOnCurrent(setup)
+
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`
+			GRANT USAGE ON TYPE mood TO dbdiff_reader;
+			REVOKE USAGE ON DOMAIN short_text FROM PUBLIC;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresGrantInstruction{
+				Privileges: []string{"USAGE"},
+				ObjectType: "TYPE",
+				ObjectName: "mood",
+				Grantee:    "dbdiff_reader",
+			},
+			&PostgresRevokeInstruction{
+				Privileges: []string{"USAGE"},
+				ObjectType: "DOMAIN",
+				ObjectName: "short_text",
+				Grantee:    "public",
+			},
+		})
+	})
+
+	t.Run("ARecreatedDomainKeepsItsGrants", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		grants := `
+			REVOKE USAGE ON DOMAIN short_text FROM PUBLIC;
+			GRANT USAGE ON DOMAIN short_text TO dbdiff_reader;
+		`
+		driver.ExecOnCurrent(`CREATE DOMAIN short_text AS integer;`)
+		driver.ExecOnCurrent(grants)
+
+		driver.ExecOnDesired(`CREATE DOMAIN short_text AS varchar(10);`)
+		driver.ExecOnDesired(grants)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropDomainInstruction{
+				Name: "short_text",
+			},
+			&PostgresCreateDomainInstruction{
+				Name:     "short_text",
+				BaseType: "character varying(10)",
+			},
+			&PostgresSetOwnerInstruction{
+				ObjectType: "DOMAIN",
+				ObjectName: "short_text",
+				Owner:      "user",
+			},
+			&PostgresGrantInstruction{
+				Privileges: []string{"USAGE"},
+				ObjectType: "DOMAIN",
+				ObjectName: "short_text",
+				Grantee:    "dbdiff_reader",
+			},
+			&PostgresRevokeInstruction{
+				Privileges: []string{"USAGE"},
+				ObjectType: "DOMAIN",
+				ObjectName: "short_text",
+				Grantee:    "public",
+			},
+		})
+	})
+
+	t.Run("ANewTypeHoldsTheDefaultGrantToPublic", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnDesired(`
+			CREATE TYPE mood AS ENUM ('happy', 'sad');
+			REVOKE USAGE ON TYPE mood FROM PUBLIC;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateEnumTypeInstruction{
+				Name: "mood",
+				Labels: []string{
+					"happy",
+					"sad",
+				},
+			},
+			&PostgresSetOwnerInstruction{
+				ObjectType: "TYPE",
+				ObjectName: "mood",
+				Owner:      "user",
+			},
+			&PostgresRevokeInstruction{
+				Privileges: []string{"USAGE"},
+				ObjectType: "TYPE",
+				ObjectName: "mood",
+				Grantee:    "public",
+			},
+		})
+	})
+
+	t.Run("ARecreatedEnumTypeKeepsItsGrants", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		grants := `GRANT USAGE ON TYPE mood TO dbdiff_reader;`
+		driver.ExecOnCurrent(`CREATE TYPE mood AS ENUM ('happy', 'sad');`)
+		driver.ExecOnCurrent(grants)
+
+		driver.ExecOnDesired(`CREATE TYPE mood AS ENUM ('sad', 'happy');`)
+		driver.ExecOnDesired(grants)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropTypeInstruction{
+				Name: "mood",
+			},
+			&PostgresCreateEnumTypeInstruction{
+				Name: "mood",
+				Labels: []string{
+					"sad",
+					"happy",
+				},
+			},
+			&PostgresSetOwnerInstruction{
+				ObjectType: "TYPE",
+				ObjectName: "mood",
+				Owner:      "user",
+			},
+			&PostgresGrantInstruction{
+				Privileges: []string{"USAGE"},
+				ObjectType: "TYPE",
+				ObjectName: "mood",
+				Grantee:    "dbdiff_reader",
+			},
+		})
+	})
 }

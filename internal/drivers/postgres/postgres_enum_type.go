@@ -104,6 +104,8 @@ func (d *PostgresDriver) DiffEnumTypes(ctx context.Context) (*SectionDiff, error
 			},
 			Change: func(desired *PostgresEnumType, current *PostgresEnumType) ([]driversshared.Instruction, error) {
 				if !desired.KeepsOrderOf(current) {
+					d.markRecreated(desired.Name)
+
 					instructions, err := d.replaceUsedType(ctx, "TYPE", desired.Name, desired.Instructions(), "text")
 					if err != nil || instructions != nil {
 						return instructions, err

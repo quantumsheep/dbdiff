@@ -126,6 +126,8 @@ func (d *PostgresDriver) diffCompositeType(
 		return dependent.Kind == "relation"
 	})
 	if onlyRelations {
+		d.markRecreated(desired.Name)
+
 		for _, dependent := range dependents {
 			d.markRecreated(dependent.TableName)
 		}

@@ -101,6 +101,19 @@ func (d *PostgresDriver) isRecreated(objectType string, objectName string, argum
 	return d.droppedFunctionKeys[key] || d.recreatedObjectNames[key]
 }
 
+// The default privileges of a routine give EXECUTE to PUBLIC, and the default privileges of
+// a type give USAGE to PUBLIC. The default privileges of a relation give nothing to PUBLIC.
+func defaultPublicPrivilege(ownerObjectType string) string {
+	switch ownerObjectType {
+	case "FUNCTION", "PROCEDURE", "AGGREGATE":
+		return "EXECUTE"
+	case "TYPE", "DOMAIN":
+		return "USAGE"
+	}
+
+	return ""
+}
+
 // PostgreSQL names a view and a materialized view with the keyword TABLE in a GRANT.
 func privilegeObjectType(relkind string) string {
 	if relkind == "S" {
@@ -177,7 +190,6 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 	}
 
 	// A new object and an object that the diff creates again hold the default privileges.
-	// The default privileges of a routine give EXECUTE to PUBLIC.
 	currentPrivileges = lo.Reject(currentPrivileges, func(privilege *PostgresPrivilege, _ int) bool {
 		return d.isRecreated(privilege.ObjectType, privilege.ObjectName, privilege.Arguments)
 	})
@@ -187,7 +199,8 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 	})
 
 	for _, desiredOwner := range desiredOwners {
-		if !isRoutineObjectType(desiredOwner.ObjectType) {
+		publicPrivilege := defaultPublicPrivilege(desiredOwner.ObjectType)
+		if publicPrivilege == "" {
 			continue
 		}
 
@@ -198,7 +211,7 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 				ObjectName: desiredOwner.ObjectName,
 				Arguments:  desiredOwner.Arguments,
 				Grantee:    "public",
-				Privileges: []string{"EXECUTE"},
+				Privileges: []string{publicPrivilege},
 			})
 		}
 	}
@@ -301,7 +314,12 @@ func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*Postgres
 		return nil, err
 	}
 
-	return slices.Concat(owners, routineOwners), nil
+	typeOwners, err := getTypeOwners(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.Concat(owners, routineOwners, typeOwners), nil
 }
 
 // PostgreSQL gives the privileges of the owner with the object. The grantee 0 is PUBLIC, and
@@ -363,7 +381,12 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 		return nil, err
 	}
 
-	return slices.Concat(privileges, routinePrivileges), nil
+	typePrivileges, err := getTypePrivileges(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.Concat(privileges, routinePrivileges, typePrivileges), nil
 }
 
 func getRoutineOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {
@@ -414,6 +437,66 @@ func getRoutinePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege
 		var granted string
 
 		err := rows.Scan(&privilege.ObjectName, &privilege.ObjectType, &privilege.Arguments, &privilege.Grantee, &granted)
+		if err != nil {
+			return nil, err
+		}
+
+		privilege.Privileges = sortedPrivileges(strings.Split(granted, ","))
+
+		return privilege, nil
+	})
+}
+
+// The filter keeps the types that DiffEnumTypes, DiffDomains, and DiffCompositeTypes read.
+// The row type of a table and the array type of a type belong to another object.
+const managedTypeFilter = `
+	t.typnamespace = quote_ident(current_schema())::regnamespace
+	AND (t.typtype IN ('e', 'd') OR (t.typtype = 'c' AND EXISTS (
+		SELECT 1 FROM pg_class c WHERE c.oid = t.typrelid AND c.relkind = 'c'
+	)))
+	AND NOT EXISTS (
+		SELECT 1 FROM pg_depend d WHERE d.objid = t.oid AND d.deptype = 'e'
+	)
+`
+
+func getTypeOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT
+			t.typname,
+			CASE t.typtype WHEN 'd' THEN 'DOMAIN' ELSE 'TYPE' END,
+			pg_get_userbyid(t.typowner)
+		FROM pg_type t
+		WHERE `+managedTypeFilter+`
+		ORDER BY t.typname
+	`, func(rows *sql.Rows) (*PostgresOwner, error) {
+		owner := &PostgresOwner{}
+
+		err := rows.Scan(&owner.ObjectName, &owner.ObjectType, &owner.Owner)
+
+		return owner, err
+	})
+}
+
+// A NULL ACL holds the default privileges, and the default privileges of a type give USAGE
+// to PUBLIC. acldefault gives these privileges, so a REVOKE FROM PUBLIC shows.
+func getTypePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT
+			t.typname,
+			CASE t.typtype WHEN 'd' THEN 'DOMAIN' ELSE 'TYPE' END,
+			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
+			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+		FROM pg_type t, aclexplode(coalesce(t.typacl, acldefault('T', t.typowner))) acl
+		WHERE `+managedTypeFilter+`
+		AND acl.grantee <> t.typowner
+		GROUP BY t.typname, t.typtype, acl.grantee
+		ORDER BY t.typname, grantee_name
+	`, func(rows *sql.Rows) (*PostgresPrivilege, error) {
+		privilege := &PostgresPrivilege{}
+
+		var granted string
+
+		err := rows.Scan(&privilege.ObjectName, &privilege.ObjectType, &privilege.Grantee, &granted)
 		if err != nil {
 			return nil, err
 		}

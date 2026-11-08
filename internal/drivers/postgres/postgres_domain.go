@@ -197,6 +197,8 @@ func (d *PostgresDriver) DiffDomains(ctx context.Context) (*SectionDiff, error) 
 			},
 			Change: func(desired *PostgresDomain, current *PostgresDomain) ([]driversshared.Instruction, error) {
 				if desired.BaseType != current.BaseType {
+					d.markRecreated(desired.Name)
+
 					instructions, err := d.replaceUsedType(ctx, "DOMAIN", desired.Name, desired.Instructions(), "")
 					if err != nil || instructions != nil {
 						return instructions, err
