@@ -478,7 +478,7 @@ func TestSQLiteForeignKey(t *testing.T) {
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_t_temp",
 					ColumnNames:       []string{"id", "c"},
-					SelectExpressions: []string{`"id"`, `"c"`},
+					SelectExpressions: []string{`"id"`, `COALESCE("c", '')`},
 					FromTableName:     "t",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "t"},

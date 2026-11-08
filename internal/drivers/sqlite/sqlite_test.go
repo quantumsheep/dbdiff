@@ -207,6 +207,9 @@ func NewTestSQLiteDriverWithPaths(tb testing.TB, desiredPath string, currentPath
 
 func recreationPrologue() []driversshared.Instruction {
 	return []driversshared.Instruction{
+		&driversshared.SQLCommentInstruction{
+			Text: recreationWarning,
+		},
 		&SQLitePragmaForeignKeysInstruction{},
 		&SQLiteSavepointInstruction{},
 	}

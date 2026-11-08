@@ -22,6 +22,9 @@ type SQLiteDriver struct {
 	temporaryDirectory string
 }
 
+const recreationWarning = "This script recreates a table. Apply it with sqlite3 -bail. " +
+	"Without -bail, a failed copy deletes the rows of the table."
+
 func NewSQLiteDriver(config *SQLiteDriverConfig) *SQLiteDriver {
 	return &SQLiteDriver{
 		IgnoreTables: config.IgnoreTables,
@@ -74,8 +77,13 @@ func (d *SQLiteDriver) Diff(
 	// off, only the check finds a broken foreign key, so it comes before the release.
 	recreatedTableNames := recreatedTableNames(instructions)
 	if len(recreatedTableNames) > 0 {
+		// Without -bail, the sqlite3 shell runs the next statement after a failed statement. A
+		// failed copy then lets the DROP TABLE statement and the RELEASE statement run.
 		instructions = slices.Concat(
 			[]driversshared.Instruction{
+				&driversshared.SQLCommentInstruction{
+					Text: recreationWarning,
+				},
 				&SQLitePragmaForeignKeysInstruction{},
 				&SQLiteSavepointInstruction{},
 			},

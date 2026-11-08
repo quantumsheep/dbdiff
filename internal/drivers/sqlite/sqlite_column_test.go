@@ -296,7 +296,7 @@ func TestSQLiteColumn(t *testing.T) {
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_users_temp",
 					ColumnNames:       []string{"id", "email"},
-					SelectExpressions: []string{`"id"`, `"Email"`},
+					SelectExpressions: []string{`"id"`, `COALESCE("Email", '')`},
 					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},
@@ -376,6 +376,62 @@ func TestSQLiteColumn(t *testing.T) {
 
 		require.Equal(t, []map[string]any{
 			{"id": int64(1), "b": "b", "a": "a"},
+		}, rows)
+	})
+
+	t.Run("SetNotNullWithADefaultOnRowsThatHoldNull", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT);
+
+			INSERT INTO t (id, c) VALUES (1, NULL), (2, 'x');
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE t (id INTEGER PRIMARY KEY, c TEXT NOT NULL DEFAULT 'none');`)
+		driver.RequireDiffApplies(slices.Concat(
+			recreationPrologue(),
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name:    "c",
+							Type:    "TEXT",
+							NotNull: true,
+							Default: sql.NullString{
+								String: "'none'",
+								Valid:  true,
+							},
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "c"},
+					SelectExpressions: []string{`"id"`, `COALESCE("c", 'none')`},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			recreationEpilogue("t"),
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "c": "none"},
+			{"id": int64(2), "c": "x"},
 		}, rows)
 	})
 
@@ -1559,7 +1615,7 @@ func TestSQLiteColumn(t *testing.T) {
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_t_temp",
 					ColumnNames:       []string{"id", "c"},
-					SelectExpressions: []string{`"id"`, `"c"`},
+					SelectExpressions: []string{`"id"`, `COALESCE("c", '')`},
 					FromTableName:     "t",
 				},
 				&SQLiteDeleteSequenceInstruction{TableName: "_t_temp"},
@@ -1626,7 +1682,7 @@ func TestSQLiteColumn(t *testing.T) {
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_t_temp",
 					ColumnNames:       []string{"id", "c"},
-					SelectExpressions: []string{`"id"`, `"c"`},
+					SelectExpressions: []string{`"id"`, `COALESCE("c", '')`},
 					FromTableName:     "t",
 				},
 				&SQLiteDeleteSequenceInstruction{TableName: "_t_temp"},

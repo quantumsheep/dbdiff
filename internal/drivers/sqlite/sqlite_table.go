@@ -462,6 +462,18 @@ func temporaryTableName(tableName string, reservedNames map[string]bool) string 
 	return name
 }
 
+// A NULL value fails the NOT NULL constraint of the copy. The default gives the value that
+// ADD COLUMN gives to a NOT NULL column.
+func copyExpression(newColumn *SQLiteColumn, currentColumn *SQLiteColumn) string {
+	expression := driversshared.QuoteIdentifier(currentColumn.Name)
+
+	if newColumn.NotNull && !currentColumn.NotNull && newColumn.Default.Valid {
+		return fmt.Sprintf("COALESCE(%s, %s)", expression, newColumn.Default.String)
+	}
+
+	return expression
+}
+
 func (t *SQLiteTable) recreationInstructions(
 	current *SQLiteTable,
 	renamedFrom map[string]string,
@@ -481,15 +493,16 @@ func (t *SQLiteTable) recreationInstructions(
 
 		insertColumns = append(insertColumns, newColumn.Name)
 
-		_, found := current.ColumnByName(newColumn.Name)
-		if found {
-			selectColumns = append(selectColumns, driversshared.QuoteIdentifier(newColumn.Name))
-			continue
-		}
+		sourceName := newColumn.Name
 
 		oldName, renamed := renamedFrom[newColumn.Name]
 		if renamed {
-			selectColumns = append(selectColumns, driversshared.QuoteIdentifier(oldName))
+			sourceName = oldName
+		}
+
+		currentColumn, found := current.ColumnByName(sourceName)
+		if found {
+			selectColumns = append(selectColumns, copyExpression(newColumn, currentColumn))
 			continue
 		}
 
