@@ -3,6 +3,7 @@ package internalmigrations
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -156,11 +157,26 @@ type SeparateFileInstruction interface {
 	SeparateMigrationFile()
 }
 
+// Each file runs alone, so every file starts with these instructions. They never make a file
+// of their own.
+type SessionInstruction interface {
+	driversshared.Instruction
+	SessionSetting()
+}
+
 func splitMigrationInstructions(instructions []driversshared.Instruction) [][]driversshared.Instruction {
+	var session []driversshared.Instruction
 	var separate []driversshared.Instruction
 	var others []driversshared.Instruction
 
 	for _, instruction := range instructions {
+		_, isSession := instruction.(SessionInstruction)
+		if isSession {
+			session = append(session, instruction)
+
+			continue
+		}
+
 		_, isSeparate := instruction.(SeparateFileInstruction)
 		if isSeparate {
 			separate = append(separate, instruction)
@@ -174,11 +190,11 @@ func splitMigrationInstructions(instructions []driversshared.Instruction) [][]dr
 	var groups [][]driversshared.Instruction
 
 	if len(separate) > 0 {
-		groups = append(groups, separate)
+		groups = append(groups, slices.Concat(session, separate))
 	}
 
 	if len(others) > 0 {
-		groups = append(groups, others)
+		groups = append(groups, slices.Concat(session, others))
 	}
 
 	return groups

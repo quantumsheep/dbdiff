@@ -369,13 +369,59 @@ func TestPostgresDriver(t *testing.T) {
 		require.NoError(t, err)
 
 		diff := instructions.String()
-		require.Equal(t, `CREATE TABLE "users" (
+		require.Equal(t, `SET search_path TO "`+harness.currentSchema+`";
+CREATE TABLE "users" (
 	"id" integer NOT NULL
 );`, diff)
 
 		harness.ExecOnCurrent(diff)
 
 		instructions, err = driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Empty(t, instructions)
+	})
+
+	t.Run("SchemaOutsideTheSearchPathOfTheSession", func(t *testing.T) {
+		harness := NewTestPostgresDriverWithTwoDatabases(t)
+
+		harness.ExecOnCurrent(`CREATE SCHEMA app;`)
+		harness.ExecOnDesired(`
+			CREATE SCHEMA app;
+			CREATE TABLE app.users (id INT NOT NULL);
+		`)
+
+		driver := NewPostgresDriver(&PostgresDriverConfig{
+			Schema: "app",
+		})
+
+		instructions, err := driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
+		require.NoError(t, err)
+		require.Equal(t, driversshared.Instructions{
+			&PostgresSetSearchPathInstruction{
+				Schema: "app",
+			},
+			&PostgresCreateTableInstruction{
+				Name: "users",
+				Columns: []*PostgresColumn{
+					{
+						Name:    "id",
+						Type:    "integer",
+						NotNull: true,
+					},
+				},
+			},
+		}, instructions)
+
+		harness.ExecOnCurrent(instructions.String())
+
+		var tableSchema string
+
+		err = harness.currentConnection.QueryRowContext(t.Context(),
+			"SELECT table_schema FROM information_schema.tables WHERE table_name = 'users'").Scan(&tableSchema)
+		require.NoError(t, err)
+		require.Equal(t, "app", tableSchema)
+
+		instructions, err = driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
 		require.Empty(t, instructions)
 	})

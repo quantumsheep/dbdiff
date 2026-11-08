@@ -189,6 +189,12 @@ func (d *PostgresDriver) Diff(
 		instructions = append(instructions, dataInstructions...)
 	}
 
+	if len(instructions) > 0 && d.CurrentSchema != "" {
+		instructions = slices.Insert(instructions, 0, driversshared.Instruction(&PostgresSetSearchPathInstruction{
+			Schema: d.CurrentSchema,
+		}))
+	}
+
 	return instructions, nil
 }
 

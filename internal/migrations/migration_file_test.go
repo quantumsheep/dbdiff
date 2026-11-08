@@ -160,4 +160,58 @@ func TestSplitMigrationInstructions(t *testing.T) {
 		require.Equal(t, "-- dbdiff test\n-- generated 2026-08-22T14:30:01Z\n\n"+
 			"-- Drop the table \"users\"\nDROP TABLE \"users\";\n", string(second))
 	})
+	t.Run("EachFileStartsWithTheSessionInstructions", func(t *testing.T) {
+		directory := t.TempDir()
+
+		searchPath := &driverspostgres.PostgresSetSearchPathInstruction{
+			Schema: "app",
+		}
+
+		enumValue := &driverspostgres.PostgresAlterTypeAddValueInstruction{
+			Name:  "mood",
+			Value: "happy",
+		}
+
+		other := &driversshared.SQLDropTableInstruction{Name: "users"}
+
+		paths, err := internalmigrations.WriteFiles(directory, "add_mood", moment, "test",
+			[]driversshared.Instruction{searchPath, other, enumValue})
+		require.NoError(t, err)
+		require.Equal(t, []string{
+			filepath.Join(directory, "20260822143000_add_mood_types.sql"),
+			filepath.Join(directory, "20260822143001_add_mood.sql"),
+		}, paths)
+
+		first, err := os.ReadFile(paths[0])
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff test\n-- generated 2026-08-22T14:30:00Z\n\n"+
+			"-- Use the schema \"app\"\nSET search_path TO \"app\";\n\n"+
+			"-- Modify the type \"mood\"\nALTER TYPE \"mood\" ADD VALUE 'happy';\n", string(first))
+
+		second, err := os.ReadFile(paths[1])
+		require.NoError(t, err)
+		require.Equal(t, "-- dbdiff test\n-- generated 2026-08-22T14:30:01Z\n\n"+
+			"-- Use the schema \"app\"\nSET search_path TO \"app\";\n\n"+
+			"-- Drop the table \"users\"\nDROP TABLE \"users\";\n", string(second))
+	})
+
+	t.Run("TheSessionInstructionsMakeNoFileOfTheirOwn", func(t *testing.T) {
+		directory := t.TempDir()
+
+		searchPath := &driverspostgres.PostgresSetSearchPathInstruction{
+			Schema: "app",
+		}
+
+		enumValue := &driverspostgres.PostgresAlterTypeAddValueInstruction{
+			Name:  "mood",
+			Value: "happy",
+		}
+
+		paths, err := internalmigrations.WriteFiles(directory, "add_mood", moment, "test",
+			[]driversshared.Instruction{searchPath, enumValue})
+		require.NoError(t, err)
+		require.Equal(t, []string{
+			filepath.Join(directory, "20260822143000_add_mood.sql"),
+		}, paths)
+	})
 }

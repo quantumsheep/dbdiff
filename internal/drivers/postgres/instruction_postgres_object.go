@@ -9,6 +9,22 @@ import (
 	"github.com/samber/lo"
 )
 
+// The statements name each object without its schema, so the session must use the schema
+// of the diff.
+type PostgresSetSearchPathInstruction struct {
+	Schema string
+}
+
+func (i *PostgresSetSearchPathInstruction) String() string {
+	return "SET search_path TO " + driversshared.QuoteIdentifier(i.Schema) + ";"
+}
+
+func (i *PostgresSetSearchPathInstruction) Comment() string {
+	return driversshared.ObjectComment("Use", "schema", i.Schema)
+}
+
+func (i *PostgresSetSearchPathInstruction) SessionSetting() {}
+
 type PostgresCreateExtensionInstruction struct {
 	Name string
 }

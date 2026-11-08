@@ -8,6 +8,15 @@ import (
 )
 
 func TestPostgresObjectInstructions(t *testing.T) {
+	t.Run("PostgresSetSearchPath", func(t *testing.T) {
+		instruction := &PostgresSetSearchPathInstruction{
+			Schema: `app "one"`,
+		}
+
+		require.Equal(t, `SET search_path TO "app ""one""";`, instruction.String())
+		require.Equal(t, `Use the schema "app ""one"""`, instruction.Comment())
+	})
+
 	t.Run("PostgresCreateStatistics", func(t *testing.T) {
 		instruction := &PostgresCreateStatisticsInstruction{
 			Definition: "CREATE STATISTICS st_ab ON a, b FROM t",
