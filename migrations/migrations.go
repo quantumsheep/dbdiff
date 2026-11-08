@@ -25,7 +25,7 @@ type ConnectionStringDataSource = driversshared.ConnectionStringDataSource
 type Migrator struct {
 	driver     DriverName
 	schema     string
-	database   ConnectionStringDataSource
+	database   *ConnectionStringDataSource
 	migrations string
 }
 
@@ -48,7 +48,7 @@ func NewMigrator(driver DriverName, schema string, options ...MigratorOption) *M
 type MigratorOption func(*Migrator)
 
 // WithDatabase names the database that the migrator reads or changes.
-func WithDatabase(database ConnectionStringDataSource) MigratorOption {
+func WithDatabase(database *ConnectionStringDataSource) MigratorOption {
 	return func(migrator *Migrator) {
 		migrator.database = database
 	}
@@ -176,7 +176,7 @@ func stateOf(state internalmigrations.State) State {
 }
 
 func (m *Migrator) open(ctx context.Context) (internalmigrations.Migrator, *internalmigrations.Set, error) {
-	if m.database.ConnectionString == "" {
+	if m.database == nil || m.database.ConnectionString == "" {
 		return nil, nil, fmt.Errorf("name the database with the WithDatabase option")
 	}
 

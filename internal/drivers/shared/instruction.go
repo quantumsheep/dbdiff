@@ -49,7 +49,7 @@ type IdentifierQuoter interface {
 
 type DoubleQuote struct{}
 
-func (DoubleQuote) QuoteIdentifier(name string) string {
+func (*DoubleQuote) QuoteIdentifier(name string) string {
 	return QuoteIdentifier(name)
 }
 
@@ -182,12 +182,12 @@ func (i *DeleteInstruction[Quoter]) Comment() string {
 }
 
 type (
-	SQLEqualityCondition = EqualityCondition[DoubleQuote]
-	SQLIsNullCondition   = IsNullCondition[DoubleQuote]
-	SQLSetClause         = SetClause[DoubleQuote]
-	SQLInsertInstruction = InsertInstruction[DoubleQuote]
-	SQLUpdateInstruction = UpdateInstruction[DoubleQuote]
-	SQLDeleteInstruction = DeleteInstruction[DoubleQuote]
+	SQLEqualityCondition = EqualityCondition[*DoubleQuote]
+	SQLIsNullCondition   = IsNullCondition[*DoubleQuote]
+	SQLSetClause         = SetClause[*DoubleQuote]
+	SQLInsertInstruction = InsertInstruction[*DoubleQuote]
+	SQLUpdateInstruction = UpdateInstruction[*DoubleQuote]
+	SQLDeleteInstruction = DeleteInstruction[*DoubleQuote]
 )
 
 type SQLDropTableInstruction struct {

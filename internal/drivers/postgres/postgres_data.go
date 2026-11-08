@@ -26,7 +26,7 @@ func (d *PostgresDriver) DiffData(ctx context.Context) ([]driversshared.Instruct
 	}
 
 	return driversshared.DiffData(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection,
-		desiredTables, currentTables, driversshared.DataRules[*PostgresTable, driversshared.DoubleQuote]{
+		desiredTables, currentTables, driversshared.DataRules[*PostgresTable, *driversshared.DoubleQuote]{
 			TableName: func(table *PostgresTable) string {
 				return table.Name
 			},

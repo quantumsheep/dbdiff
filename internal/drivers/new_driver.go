@@ -89,7 +89,7 @@ func validateScratchDatabase(driverName driversshared.DriverName, options Driver
 		return fmt.Errorf("the scratch database option and the server version option cannot go together, because dbdiff starts no temporary server for a scratch database")
 	}
 
-	scratchDriverName, err := driversshared.DetectDriverOfDatabase(driversshared.ConnectionStringDataSource{
+	scratchDriverName, err := driversshared.DetectDriverOfDatabase(&driversshared.ConnectionStringDataSource{
 		ConnectionString: options.ScratchDatabase,
 	})
 	if err != nil || scratchDriverName != driverName {
@@ -102,7 +102,7 @@ func validateScratchDatabase(driverName driversshared.DriverName, options Driver
 func NewMigrator(
 	ctx context.Context,
 	driverName driversshared.DriverName,
-	database driversshared.ConnectionStringDataSource,
+	database *driversshared.ConnectionStringDataSource,
 	schema string,
 ) (internalmigrations.Migrator, error) {
 	if driverName == "" {
@@ -143,7 +143,7 @@ func (openDatabaseError *OpenDatabaseError) Unwrap() error {
 func OpenMigrationSet(
 	ctx context.Context,
 	driverName driversshared.DriverName,
-	database driversshared.ConnectionStringDataSource,
+	database *driversshared.ConnectionStringDataSource,
 	schema string,
 	directory string,
 ) (internalmigrations.Migrator, *internalmigrations.Set, error) {

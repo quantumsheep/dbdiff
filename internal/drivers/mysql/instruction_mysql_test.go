@@ -601,7 +601,7 @@ func TestMySQLInstructions(t *testing.T) {
 					Expression: "'Alice'",
 				},
 			},
-			Condition: driversshared.RowKeyCondition[Backtick]([]string{"id", "tenant"},
+			Condition: driversshared.RowKeyCondition[*Backtick]([]string{"id", "tenant"},
 				map[string]string{"id": "1", "tenant": "NULL"}),
 		}
 
@@ -612,7 +612,7 @@ func TestMySQLInstructions(t *testing.T) {
 	t.Run("MySQLDelete", func(t *testing.T) {
 		instruction := &MySQLDeleteInstruction{
 			TableName: "users",
-			Condition: driversshared.RowKeyCondition[Backtick]([]string{"id"}, map[string]string{"id": "2"}),
+			Condition: driversshared.RowKeyCondition[*Backtick]([]string{"id"}, map[string]string{"id": "2"}),
 		}
 
 		require.Equal(t, "DELETE FROM `users` WHERE `id` = 2;", instruction.String())

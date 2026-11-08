@@ -34,23 +34,23 @@ type FolderDataSource = driversshared.FolderDataSource
 type ConnectionStringDataSource = driversshared.ConnectionStringDataSource
 
 // NewFileDataSource names one .sql file.
-func NewFileDataSource(path string) FileDataSource {
-	return FileDataSource{
+func NewFileDataSource(path string) *FileDataSource {
+	return &FileDataSource{
 		Path: path,
 	}
 }
 
 // NewFolderDataSource names a directory of .sql files.
-func NewFolderDataSource(path string) FolderDataSource {
-	return FolderDataSource{
+func NewFolderDataSource(path string) *FolderDataSource {
+	return &FolderDataSource{
 		Path: path,
 	}
 }
 
 // NewConnectionStringDataSource names a database. The argument holds a URL, a DSN, a
 // libpq keyword string, or a SQLite path.
-func NewConnectionStringDataSource(connectionString string) ConnectionStringDataSource {
-	return ConnectionStringDataSource{
+func NewConnectionStringDataSource(connectionString string) *ConnectionStringDataSource {
+	return &ConnectionStringDataSource{
 		ConnectionString: connectionString,
 	}
 }

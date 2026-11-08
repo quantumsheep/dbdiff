@@ -24,52 +24,52 @@ type ConnectionStringDataSource struct {
 	ConnectionString string
 }
 
-func (dataSource FileDataSource) sqlSourcePath() (string, bool) {
+func (dataSource *FileDataSource) sqlSourcePath() (string, bool) {
 	return dataSource.Path, true
 }
 
-func (FileDataSource) connectionString() (string, bool) {
+func (*FileDataSource) connectionString() (string, bool) {
 	return "", false
 }
 
-func (dataSource FolderDataSource) sqlSourcePath() (string, bool) {
+func (dataSource *FolderDataSource) sqlSourcePath() (string, bool) {
 	return dataSource.Path, true
 }
 
-func (FolderDataSource) connectionString() (string, bool) {
+func (*FolderDataSource) connectionString() (string, bool) {
 	return "", false
 }
 
-func (ConnectionStringDataSource) sqlSourcePath() (string, bool) {
+func (*ConnectionStringDataSource) sqlSourcePath() (string, bool) {
 	return "", false
 }
 
-func (dataSource ConnectionStringDataSource) connectionString() (string, bool) {
+func (dataSource *ConnectionStringDataSource) connectionString() (string, bool) {
 	return dataSource.ConnectionString, true
 }
 
 // A path with "://" never names SQL text, so the scheme check comes first.
 func ParseDataSource(argument string) DataSource {
 	if strings.Contains(argument, "://") {
-		return ConnectionStringDataSource{
+		return &ConnectionStringDataSource{
 			ConnectionString: argument,
 		}
 	}
 
 	if hasSQLExtension(argument) {
-		return FileDataSource{
+		return &FileDataSource{
 			Path: argument,
 		}
 	}
 
 	information, err := os.Stat(argument)
 	if err == nil && information.IsDir() {
-		return FolderDataSource{
+		return &FolderDataSource{
 			Path: argument,
 		}
 	}
 
-	return ConnectionStringDataSource{
+	return &ConnectionStringDataSource{
 		ConnectionString: argument,
 	}
 }

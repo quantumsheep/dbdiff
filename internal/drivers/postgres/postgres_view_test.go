@@ -170,10 +170,10 @@ func TestPostgresView(t *testing.T) {
 
 		readerConnectionString := strings.Replace(postgresTestConnectionString,
 			"user:password", "dbdiff_view_reader:password", 1)
-		driver.current = driversshared.ConnectionStringDataSource{
+		driver.current = &driversshared.ConnectionStringDataSource{
 			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.currentSchema),
 		}
-		driver.desired = driversshared.ConnectionStringDataSource{
+		driver.desired = &driversshared.ConnectionStringDataSource{
 			ConnectionString: fmt.Sprintf("%s&search_path=%s", readerConnectionString, driver.desiredSchema),
 		}
 

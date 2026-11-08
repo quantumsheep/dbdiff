@@ -117,8 +117,8 @@ func NewTestPostgresDriver(tb testing.TB) *TestingPostgresDriver {
 		PostgresDriver:    driver,
 		tb:                tb,
 		conn:              conn,
-		current:           driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
-		desired:           driversshared.ConnectionStringDataSource{ConnectionString: desiredConnectionString},
+		current:           &driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
+		desired:           &driversshared.ConnectionStringDataSource{ConnectionString: desiredConnectionString},
 		desiredSchema:     desiredSchema,
 		currentSchema:     currentSchema,
 		currentConnection: currentConnection,
@@ -182,8 +182,8 @@ func NewTestPostgresDriverWithTwoDatabases(tb testing.TB) *TestingPostgresDriver
 		PostgresDriver:    driver,
 		tb:                tb,
 		conn:              adminConn,
-		current:           driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
-		desired:           driversshared.ConnectionStringDataSource{ConnectionString: desiredConnectionString},
+		current:           &driversshared.ConnectionStringDataSource{ConnectionString: currentConnectionString},
+		desired:           &driversshared.ConnectionStringDataSource{ConnectionString: desiredConnectionString},
 		desiredSchema:     "public",
 		currentSchema:     "public",
 		currentConnection: currentConnection,
@@ -304,7 +304,7 @@ func requireDiffAppliesToSQLSource(
 	driver := NewPostgresDriver(&PostgresDriverConfig{
 		ScratchDatabase: postgresTestConnectionString,
 	})
-	current := driversshared.ConnectionStringDataSource{
+	current := &driversshared.ConnectionStringDataSource{
 		ConnectionString: verifyConnectionString,
 	}
 
@@ -362,8 +362,8 @@ func TestPostgresDriver(t *testing.T) {
 		driver.DesiredSchema = harness.desiredSchema
 		driver.CurrentSchema = harness.currentSchema
 
-		current := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
-		desired := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		current := &driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		desired := &driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
 
 		instructions, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.NoError(t, err)
@@ -431,8 +431,8 @@ CREATE TABLE "users" (
 			Schema: "schema_that_does_not_exist",
 		})
 
-		current := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
-		desired := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		current := &driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		desired := &driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
 
 		_, err := driver.Diff(t.Context(), current, desired, driversshared.DiffOptions{})
 		require.EqualError(t, err, `the desired database has no schema with the name "schema_that_does_not_exist"`)
@@ -540,7 +540,7 @@ CREATE TABLE "users" (
 		driver.DesiredSchema = desiredSchema
 		driver.CurrentSchema = currentSchema
 
-		source := driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
+		source := &driversshared.ConnectionStringDataSource{ConnectionString: postgresTestConnectionString}
 
 		instructions, err := driver.Diff(t.Context(), source, source, driversshared.DiffOptions{})
 		require.NoError(t, err)

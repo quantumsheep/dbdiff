@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewDriverAndDiff(t *testing.T) {
-	writeSchema := func(t *testing.T, name string, content string) FileDataSource {
+	writeSchema := func(t *testing.T, name string, content string) *FileDataSource {
 		t.Helper()
 
 		path := filepath.Join(t.TempDir(), name)
@@ -18,7 +18,7 @@ func TestNewDriverAndDiff(t *testing.T) {
 		err := os.WriteFile(path, []byte(content), 0o600)
 		require.NoError(t, err)
 
-		return FileDataSource{
+		return &FileDataSource{
 			Path: path,
 		}
 	}
@@ -85,7 +85,7 @@ func TestNewDriverAndDiff(t *testing.T) {
 		err := os.WriteFile(filepath.Join(desiredDirectory, "schema.sql"), []byte("CREATE TABLE users (id INTEGER PRIMARY KEY);\n"), 0o600)
 		require.NoError(t, err)
 
-		desired := FolderDataSource{
+		desired := &FolderDataSource{
 			Path: desiredDirectory,
 		}
 
@@ -156,32 +156,6 @@ func TestNewDriverAndDiff(t *testing.T) {
 		}, statements)
 	})
 
-	t.Run("PointerDataSources", func(t *testing.T) {
-		current := writeSchema(t, "current.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY);\n")
-		desired := writeSchema(t, "desired.sql", "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n")
-
-		driver, err := NewDriver(SQLiteDriverName)
-		require.NoError(t, err)
-
-		statements, err := driver.Diff(t.Context(), &current, &desired)
-		require.NoError(t, err)
-		require.Equal(t, Statements{
-			{
-				SQL:     `ALTER TABLE "users" ADD COLUMN "email" TEXT;`,
-				Comment: `Modify the table "users"`,
-			},
-		}, statements)
-	})
-
-	t.Run("DetectTheDriverOfAPointerDataSource", func(t *testing.T) {
-		current := NewConnectionStringDataSource("postgres://localhost/app")
-		desired := NewFileDataSource("schema.sql")
-
-		name, err := DetectDriver(&current, &desired)
-		require.NoError(t, err)
-		require.Equal(t, PostgresDriverName, name)
-	})
-
 	t.Run("PostgreSQLConfigOnTheSQLiteDriver", func(t *testing.T) {
 		_, err := NewDriver(SQLiteDriverName, WithPostgreSQLDriverConfig(PostgreSQLDriverConfig{
 			Schema: "public",
@@ -218,9 +192,9 @@ func TestNewDriverAndDiff(t *testing.T) {
 }
 
 func TestDetectDriver(t *testing.T) {
-	name, err := DetectDriver(ConnectionStringDataSource{
+	name, err := DetectDriver(&ConnectionStringDataSource{
 		ConnectionString: "postgres://localhost/db",
-	}, FileDataSource{
+	}, &FileDataSource{
 		Path: "schema.sql",
 	})
 	require.NoError(t, err)

@@ -132,10 +132,10 @@ func TestMySQLSQLSource(t *testing.T) {
 		driver := NewMySQLDriver(&MySQLDriverConfig{})
 
 		_, err := driver.Diff(t.Context(),
-			driversshared.ConnectionStringDataSource{
+			&driversshared.ConnectionStringDataSource{
 				ConnectionString: "mysql://root:password@127.0.0.1:1/db",
 			},
-			driversshared.FileDataSource{
+			&driversshared.FileDataSource{
 				Path: desiredPath,
 			},
 			driversshared.DiffOptions{})

@@ -73,7 +73,7 @@ func openSet(
 	}
 
 	// A SQL source here gives an opaque driver error without this check.
-	database, ok := driversshared.ParseDataSource(config.Database).(driversshared.ConnectionStringDataSource)
+	database, ok := driversshared.ParseDataSource(config.Database).(*driversshared.ConnectionStringDataSource)
 	if !ok {
 		return nil, nil, nil, fmt.Errorf(`the database %q names SQL text, and this command needs a connection URL. Give the connection URL with the --database flag, or with the key "database" of %s`, config.Database, path)
 	}

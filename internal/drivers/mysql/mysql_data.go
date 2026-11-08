@@ -15,16 +15,16 @@ import (
 
 type Backtick struct{}
 
-func (Backtick) QuoteIdentifier(name string) string {
+func (*Backtick) QuoteIdentifier(name string) string {
 	return QuoteIdentifier(name)
 }
 
 type (
-	MySQLEqualityCondition = driversshared.EqualityCondition[Backtick]
-	MySQLSetClause         = driversshared.SetClause[Backtick]
-	MySQLInsertInstruction = driversshared.InsertInstruction[Backtick]
-	MySQLUpdateInstruction = driversshared.UpdateInstruction[Backtick]
-	MySQLDeleteInstruction = driversshared.DeleteInstruction[Backtick]
+	MySQLEqualityCondition = driversshared.EqualityCondition[*Backtick]
+	MySQLSetClause         = driversshared.SetClause[*Backtick]
+	MySQLInsertInstruction = driversshared.InsertInstruction[*Backtick]
+	MySQLUpdateInstruction = driversshared.UpdateInstruction[*Backtick]
+	MySQLDeleteInstruction = driversshared.DeleteInstruction[*Backtick]
 )
 
 // The schema section already creates or drops the other tables.
@@ -34,7 +34,7 @@ func (d *MySQLDriver) DiffData(
 	currentTables []*MySQLTable,
 ) ([]driversshared.Instruction, error) {
 	return driversshared.DiffData(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection,
-		desiredTables, currentTables, driversshared.DataRules[*MySQLTable, Backtick]{
+		desiredTables, currentTables, driversshared.DataRules[*MySQLTable, *Backtick]{
 			TableName: func(table *MySQLTable) string {
 				return table.Name
 			},

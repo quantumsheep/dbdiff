@@ -41,7 +41,7 @@ func (d *SQLiteDriver) DiffData(ctx context.Context) ([]driversshared.Instructio
 	}
 
 	return driversshared.DiffData(ctx, d.DesiredDatabaseConnection, d.CurrentDatabaseConnection,
-		desiredTables, currentTables, driversshared.DataRules[*SQLiteTable, driversshared.DoubleQuote]{
+		desiredTables, currentTables, driversshared.DataRules[*SQLiteTable, *driversshared.DoubleQuote]{
 			TableName: func(table *SQLiteTable) string {
 				return table.Name
 			},
