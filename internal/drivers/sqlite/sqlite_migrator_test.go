@@ -1,4 +1,4 @@
-package driverssqlite
+package driverssqlite_test
 
 import (
 	"os"
@@ -7,13 +7,15 @@ import (
 	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	"github.com/quantumsheep/dbdiff/internal/migrationtest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSQLiteMigrator(t *testing.T) {
 	t.Run("AppliedMigrationsWithNoHistoryTable", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		applied, err := migrator.AppliedMigrations(t.Context())
 		require.NoError(t, err)
@@ -22,7 +24,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("EnsureHistoryTableRunsTwice", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
@@ -30,7 +32,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("LockAndUnlock", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		require.NoError(t, migrator.Lock(t.Context()))
 
@@ -42,7 +44,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("RecordDirtyAndClearDirty", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
@@ -67,7 +69,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("EnsureHistoryTableAddsTheDirtyColumnToAnOldTable", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		_, err := migrator.Connection.ExecContext(t.Context(), `
 			CREATE TABLE "dbdiff_migrations" (
@@ -93,7 +95,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("CommitWritesTheStatementAndTheRow", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
 		transaction, err := migrator.Begin(t.Context())
@@ -119,7 +121,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("RollbackWritesNothing", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
 		transaction, err := migrator.Begin(t.Context())
@@ -141,7 +143,7 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("ApplyReportsABadStatement", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
 		transaction, err := migrator.Begin(t.Context())
@@ -153,12 +155,12 @@ func TestSQLiteMigrator(t *testing.T) {
 	})
 
 	t.Run("SatisfiesTheMigratorInterface", func(t *testing.T) {
-		var migrator internalmigrations.Migrator = &SQLiteMigrator{}
+		var migrator internalmigrations.Migrator = &driverssqlite.SQLiteMigrator{}
 		require.NotNil(t, migrator)
 	})
 
 	t.Run("ExecRunsTheStatementOutsideATransaction", func(t *testing.T) {
-		migrator := NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		require.NoError(t, migrator.EnsureHistoryTable(t.Context()))
 
 		require.NoError(t, migrator.Exec(t.Context(), `CREATE TABLE "users" ("id" INTEGER PRIMARY KEY);`))
@@ -171,7 +173,7 @@ func TestSQLiteMigrator(t *testing.T) {
 		currentPath := filepath.Join(directory, "current.sqlite")
 		desiredPath := filepath.Join(directory, "desired.sql")
 
-		migrator, err := NewSQLiteMigrator(currentPath + "?_pragma=foreign_keys(1)")
+		migrator, err := driverssqlite.NewSQLiteMigrator(currentPath + "?_pragma=foreign_keys(1)")
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			require.NoError(t, migrator.Close())
@@ -191,7 +193,7 @@ func TestSQLiteMigrator(t *testing.T) {
 			CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id) ON DELETE CASCADE);
 		`), 0o600))
 
-		instructions, err := NewSQLiteDriver(&SQLiteDriverConfig{}).Diff(t.Context(),
+		instructions, err := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{}).Diff(t.Context(),
 			driversshared.ParseDataSource(currentPath), driversshared.ParseDataSource(desiredPath),
 			driversshared.DiffOptions{})
 		require.NoError(t, err)

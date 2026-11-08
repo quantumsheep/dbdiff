@@ -8,8 +8,8 @@ import (
 
 	driverspostgres "github.com/quantumsheep/dbdiff/internal/drivers/postgres"
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
-	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	"github.com/quantumsheep/dbdiff/internal/migrationtest"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +24,7 @@ func TestGenerateMigration(t *testing.T) {
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		paths := driverssqlite.GenerateSQLiteMigration(t, desired, migrations)
+		paths := migrationtest.GenerateSQLiteMigration(t, desired, migrations)
 		require.Len(t, paths, 1)
 		require.Equal(t, filepath.Join(migrations, "20260822143000_add_users.sql"), paths[0])
 
@@ -62,7 +62,7 @@ func TestGenerateMigration(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		paths := driverssqlite.GenerateSQLiteMigration(t, desired, migrations)
+		paths := migrationtest.GenerateSQLiteMigration(t, desired, migrations)
 		require.Empty(t, paths)
 
 		entries, err := os.ReadDir(migrations)
@@ -82,7 +82,7 @@ func TestGenerateMigration(t *testing.T) {
 		sqltest.WriteSQLFile(t, migrations, "20260814101500_init.sql",
 			"CREATE TABLE users (id INTEGER PRIMARY KEY);")
 
-		paths := driverssqlite.GenerateSQLiteMigration(t, desired, migrations)
+		paths := migrationtest.GenerateSQLiteMigration(t, desired, migrations)
 		require.Len(t, paths, 1)
 
 		content, err := os.ReadFile(paths[0])

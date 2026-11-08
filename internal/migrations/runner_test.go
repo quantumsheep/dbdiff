@@ -12,13 +12,14 @@ import (
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
+	"github.com/quantumsheep/dbdiff/internal/migrationtest"
 	"github.com/quantumsheep/dbdiff/internal/sqltest"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRunnerStatusAndPreview(t *testing.T) {
 	t.Run("StatusOfADatabaseWithNoHistoryTable", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -37,7 +38,7 @@ func TestRunnerStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("PreviewPrintsEachPendingFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -54,7 +55,7 @@ func TestRunnerStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("PreviewOfNoPendingMigration", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		set, err := internalmigrations.LoadSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)
@@ -95,7 +96,7 @@ func TestRunnerStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("RunPreviewChangesNothing", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -109,7 +110,7 @@ func TestRunnerStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("RunPreviewReportsABadStatement", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -122,7 +123,7 @@ func TestRunnerStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("RunPreviewSeesTheFilesBeforeIt", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -138,7 +139,7 @@ func TestRunnerStatusAndPreview(t *testing.T) {
 	})
 
 	t.Run("RunPreviewSkipsAFileThatOptsOutOfTheTransaction", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -157,7 +158,7 @@ func TestRunnerStatusAndPreview(t *testing.T) {
 
 func TestRunnerUp(t *testing.T) {
 	t.Run("ApplyOneFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -179,7 +180,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("ApplyRunsOnlyThePendingFiles", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -200,7 +201,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("ApplyStopsAfterTheNamedVersion", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -224,7 +225,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("ApplyRefusesAVersionThatNoFileHolds", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -240,7 +241,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("ApplyWithNoPendingFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		set, err := internalmigrations.LoadSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)
@@ -251,7 +252,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("ABadStatementRollsTheWholeFileBack", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -271,7 +272,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("AChangedFileStopsTheRun", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -292,7 +293,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("ApplyToleratesAnotherProcessThatAppliedTheFileFirst", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -330,7 +331,7 @@ func TestRunnerUp(t *testing.T) {
 		migrations := filepath.Join(directory, "migrations")
 		require.NoError(t, os.Mkdir(migrations, 0o750))
 
-		paths := driverssqlite.GenerateSQLiteMigration(t, schema, migrations)
+		paths := migrationtest.GenerateSQLiteMigration(t, schema, migrations)
 		require.NotEmpty(t, paths)
 
 		currentPath := filepath.Join(directory, "current.sqlite")
@@ -353,7 +354,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("AFileThatOptsOutOfTheTransaction", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -371,7 +372,7 @@ func TestRunnerUp(t *testing.T) {
 	})
 
 	t.Run("AFileWithoutATransactionThatFailsInTheMiddle", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -405,7 +406,7 @@ func TestRunnerUp(t *testing.T) {
 
 func TestRunnerBaseline(t *testing.T) {
 	t.Run("RecordsEveryFileAndRunsNoFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -435,7 +436,7 @@ func TestRunnerBaseline(t *testing.T) {
 	})
 
 	t.Run("SkipsAnAppliedFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -464,7 +465,7 @@ func TestRunnerBaseline(t *testing.T) {
 	})
 
 	t.Run("RecordsAnOutOfOrderFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260822143000_notes.sql",
@@ -492,7 +493,7 @@ func TestRunnerBaseline(t *testing.T) {
 	})
 
 	t.Run("StopsAfterTheNamedVersion", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -520,7 +521,7 @@ func TestRunnerBaseline(t *testing.T) {
 	})
 
 	t.Run("RefusesAVersionThatNoFileHolds", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -538,7 +539,7 @@ func TestRunnerBaseline(t *testing.T) {
 	})
 
 	t.Run("WithNoUnrecordedFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -558,7 +559,7 @@ func TestRunnerBaseline(t *testing.T) {
 	})
 
 	t.Run("RefusesAChangedFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		path := sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -584,7 +585,7 @@ func TestRunnerBaseline(t *testing.T) {
 
 func TestRunnerRepair(t *testing.T) {
 	t.Run("AChangedFileTakesTheChecksumOfTheFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -611,7 +612,7 @@ func TestRunnerRepair(t *testing.T) {
 	})
 
 	t.Run("AMissingFileLosesItsRow", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -637,7 +638,7 @@ func TestRunnerRepair(t *testing.T) {
 	})
 
 	t.Run("ADirtyFileLosesItsRow", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -666,7 +667,7 @@ func TestRunnerRepair(t *testing.T) {
 	})
 
 	t.Run("ACleanRecordNeedsNoRepair", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -696,7 +697,7 @@ func TestRunnerStep(t *testing.T) {
 	}
 
 	t.Run("ApplyEachFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
@@ -714,7 +715,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("ApplyTheRest", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
@@ -726,7 +727,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("QuitKeepsTheFilesThatCommitted", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
@@ -744,7 +745,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("AFileOfSeveralStatementsAppliesWhole", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -762,7 +763,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("AFileOfAnOlderDbdiffAppliesWhole", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 
 		sqltest.WriteSQLFile(t, directory, "20260814101500_init.sql",
@@ -777,7 +778,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("AnUnknownAnswerAsksAgain", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
@@ -792,7 +793,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("AClosedInputNamesTheUpCommand", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
@@ -805,7 +806,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("AStoppedContextEndsThePrompt", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 		directory := t.TempDir()
 		writeTwoFiles(t, directory)
 
@@ -828,7 +829,7 @@ func TestRunnerStep(t *testing.T) {
 	})
 
 	t.Run("StepWithNoPendingFile", func(t *testing.T) {
-		migrator := driverssqlite.NewTestSQLiteMigrator(t)
+		migrator := migrationtest.NewTestSQLiteMigrator(t)
 
 		set, err := internalmigrations.LoadSet(t.Context(), migrator, t.TempDir())
 		require.NoError(t, err)

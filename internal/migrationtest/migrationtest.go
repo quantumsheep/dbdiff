@@ -1,4 +1,4 @@
-package driverssqlite
+package migrationtest
 
 import (
 	"os"
@@ -7,12 +7,13 @@ import (
 	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	driverssqlite "github.com/quantumsheep/dbdiff/internal/drivers/sqlite"
 	internalmigrations "github.com/quantumsheep/dbdiff/internal/migrations"
 	"github.com/stretchr/testify/require"
 )
 
 type TestingSQLiteMigrator struct {
-	*SQLiteMigrator
+	*driverssqlite.SQLiteMigrator
 
 	tb   testing.TB
 	Path string
@@ -23,7 +24,7 @@ func NewTestSQLiteMigrator(tb testing.TB) *TestingSQLiteMigrator {
 
 	path := filepath.Join(tb.TempDir(), "current.sqlite")
 
-	migrator, err := NewSQLiteMigrator(path)
+	migrator, err := driverssqlite.NewSQLiteMigrator(path)
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
 		require.NoError(tb, migrator.Close())
@@ -66,7 +67,7 @@ func GenerateSQLiteMigration(tb testing.TB, desired string, directory string) []
 
 	require.NoError(tb, os.MkdirAll(directory, 0o750))
 
-	driver := NewSQLiteDriver(&SQLiteDriverConfig{})
+	driver := driverssqlite.NewSQLiteDriver(&driverssqlite.SQLiteDriverConfig{})
 
 	instructions, err := driver.Diff(tb.Context(), driversshared.ParseDataSource(directory),
 		driversshared.ParseDataSource(desired), driversshared.DiffOptions{})
