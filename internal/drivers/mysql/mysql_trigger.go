@@ -3,6 +3,7 @@ package driversmysql
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 )
@@ -62,6 +63,10 @@ func (d *MySQLDriver) GetTableTriggers(ctx context.Context, db *sql.DB, tableNam
 		}
 
 		err := rows.Scan(&trigger.Name, &trigger.Timing, &trigger.Event, &trigger.Statement)
+
+		// The server keeps the terminator of a statement that arrives in a batch, so the
+		// removal of the final semicolon keeps the two texts comparable.
+		trigger.Statement = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(trigger.Statement), ";"))
 
 		return trigger, err
 	}, tableName)

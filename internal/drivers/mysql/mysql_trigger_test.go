@@ -119,6 +119,27 @@ func TestMySQLTrigger(t *testing.T) {
 		})
 	})
 
+	t.Run("TriggerOfABatchKeepsNoSemicolon", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE a (id int NOT NULL, note varchar(20), PRIMARY KEY (id));
+			CREATE TRIGGER trg_note BEFORE INSERT ON a FOR EACH ROW SET NEW.note = 'a';
+			SELECT 1;
+		`)
+		driver.ExecOnCurrent("CREATE TABLE a (id int NOT NULL, note varchar(20), PRIMARY KEY (id));")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateTriggerInstruction{
+				Name:      "trg_note",
+				Timing:    "BEFORE",
+				Event:     "INSERT",
+				TableName: "a",
+				Statement: "SET NEW.note = 'a'",
+			},
+		})
+	})
+
 	t.Run("ChangeTrigger", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
