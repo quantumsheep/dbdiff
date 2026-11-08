@@ -12,15 +12,27 @@ import (
 )
 
 type PostgresFunction struct {
-	Name             string
-	Arguments        string
-	ArgumentTypes    string
-	ReturnType       string
-	Kind             string
-	Def              string
-	Comment          string
-	UsesTableRowType bool
+	Name          string
+	Arguments     string
+	ArgumentTypes string
+	ReturnType    string
+	Kind          string
+	Def           string
+	Comment       string
+	Section       functionSection
+
+	CalledByARelation bool
 }
+
+// A function that names the row type of a relation runs after the section that creates
+// that relation.
+type functionSection int
+
+const (
+	plainFunctionSection functionSection = iota
+	tableRowTypeFunctionSection
+	viewRowTypeFunctionSection
+)
 
 func (f *PostgresFunction) CommentInstruction() *PostgresCommentOnRoutineInstruction {
 	return &PostgresCommentOnRoutineInstruction{
@@ -61,14 +73,18 @@ func (f *PostgresFunction) DropInstruction() driversshared.Instruction {
 }
 
 func (d *PostgresDriver) DiffFunctions(ctx context.Context) (*SectionDiff, error) {
-	return d.diffFunctions(ctx, false)
+	return d.diffFunctions(ctx, plainFunctionSection)
 }
 
 func (d *PostgresDriver) DiffTableRowTypeFunctions(ctx context.Context) (*SectionDiff, error) {
-	return d.diffFunctions(ctx, true)
+	return d.diffFunctions(ctx, tableRowTypeFunctionSection)
 }
 
-func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType bool) (*SectionDiff, error) {
+func (d *PostgresDriver) DiffViewRowTypeFunctions(ctx context.Context) (*SectionDiff, error) {
+	return d.diffFunctions(ctx, viewRowTypeFunctionSection)
+}
+
+func (d *PostgresDriver) diffFunctions(ctx context.Context, section functionSection) (*SectionDiff, error) {
 	var additions []driversshared.Instruction
 	var removals []driversshared.Instruction
 
@@ -84,16 +100,14 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType boo
 
 	// A function and its match on the other side go into one section, so that the DROP
 	// statement of a changed signature comes before the CREATE statement.
-	tableRowTypeKeys := map[string]bool{}
+	sectionByKey := map[string]functionSection{}
 
 	for _, function := range slices.Concat(desiredFunctions, currentFunctions) {
-		if function.UsesTableRowType {
-			tableRowTypeKeys[function.MatchKey()] = true
-		}
+		sectionByKey[function.MatchKey()] = max(sectionByKey[function.MatchKey()], function.Section)
 	}
 
 	inSection := func(function *PostgresFunction) bool {
-		return tableRowTypeKeys[function.MatchKey()] == usesTableRowType
+		return sectionByKey[function.MatchKey()] == section
 	}
 
 	desiredFunctions = lo.Filter(desiredFunctions, func(function *PostgresFunction, _ int) bool {
@@ -146,18 +160,32 @@ func (d *PostgresDriver) diffFunctions(ctx context.Context, usesTableRowType boo
 		}
 	}
 
+	var earlyRemovals []driversshared.Instruction
+
 	for _, currentFunction := range currentFunctions {
 		_, found := lo.Find(desiredFunctions, func(function *PostgresFunction) bool {
 			return function.MatchKey() == currentFunction.MatchKey()
 		})
-		if !found && !d.droppedFunctionKeys[currentFunction.MatchKey()] {
-			removals = append(removals, currentFunction.DropInstruction())
+		if found || d.droppedFunctionKeys[currentFunction.MatchKey()] {
+			continue
 		}
+
+		// The views section drops a view before every addition, and PostgreSQL refuses that
+		// drop while a function names the row type of the view. A view that calls the function
+		// must go first, so that function keeps the late drop.
+		if section == viewRowTypeFunctionSection && !currentFunction.CalledByARelation {
+			earlyRemovals = append(earlyRemovals, currentFunction.DropInstruction())
+
+			continue
+		}
+
+		removals = append(removals, currentFunction.DropInstruction())
 	}
 
 	return &SectionDiff{
-		Additions: additions,
-		Removals:  removals,
+		EarlyRemovals: earlyRemovals,
+		Additions:     additions,
+		Removals:      removals,
 	}, nil
 }
 
@@ -189,7 +217,7 @@ func (d *PostgresDriver) dropFunction(
 // drop each default, check constraint, index, and policy that uses the function, and DiffTables
 // creates them again. DiffViewsAndMaterializedViews drops and creates again each relation that
 // this function marks. The kind blocker names an object that the diff cannot drop and create
-// again. A table object of a function that uses a table row type is a blocker, because
+// again. A table object of a function that uses a row type is a blocker, because
 // DiffTables runs before the section of that function. A parent statement reaches an inherited
 // check constraint, but a child table that also declares the constraint keeps it, so that
 // constraint is a blocker.
@@ -261,7 +289,7 @@ func (d *PostgresDriver) dropFunctionDependents(
 		err := rows.Scan(&dependent.Kind, &dependent.TableName, &dependent.ColumnName, &dependent.Name)
 
 		return dependent, err
-	}, function.Name, function.ArgumentTypes, function.UsesTableRowType)
+	}, function.Name, function.ArgumentTypes, function.Section != plainFunctionSection)
 	if err != nil {
 		return nil, err
 	}
@@ -327,13 +355,21 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 				'CREATE OR REPLACE \1 '
 			),
 			coalesce(obj_description(p.oid, 'pg_proc'), ''),
-			EXISTS (
-				SELECT 1
+			coalesce((
+				SELECT max(CASE WHEN c.relkind IN ('v', 'm') THEN 2 ELSE 1 END)
 				FROM pg_type t
 				LEFT JOIN pg_type e ON e.oid = t.typelem
 				JOIN pg_class c ON c.oid IN (t.typrelid, e.typrelid)
 				WHERE t.oid = ANY (array_append(coalesce(p.proallargtypes, p.proargtypes::oid[]), p.prorettype))
-				AND c.relkind IN ('r', 'p', 'f')
+				AND c.relkind IN ('r', 'p', 'f', 'v', 'm')
+			), 0),
+			EXISTS (
+				SELECT 1
+				FROM pg_depend d
+				JOIN pg_rewrite r ON r.oid = d.objid
+				WHERE d.classid = 'pg_rewrite'::regclass
+				AND d.refclassid = 'pg_proc'::regclass
+				AND d.refobjid = p.oid
 			)
 		FROM pg_proc p
 		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
@@ -346,7 +382,7 @@ func (d *PostgresDriver) GetFunctions(ctx context.Context, db *sql.DB) ([]*Postg
 		function := &PostgresFunction{}
 
 		err := rows.Scan(&function.Name, &function.Arguments, &function.ArgumentTypes,
-			&function.ReturnType, &function.Kind, &function.Def, &function.Comment, &function.UsesTableRowType)
+			&function.ReturnType, &function.Kind, &function.Def, &function.Comment, &function.Section, &function.CalledByARelation)
 		if err != nil {
 			return nil, err
 		}

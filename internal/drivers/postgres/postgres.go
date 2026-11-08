@@ -138,6 +138,7 @@ func (d *PostgresDriver) Diff(
 		d.DiffSequenceOwners,
 		d.DiffStatistics,
 		d.DiffViewsAndMaterializedViews,
+		d.DiffViewRowTypeFunctions,
 		d.DiffPrivileges,
 	}
 

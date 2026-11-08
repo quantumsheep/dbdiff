@@ -94,6 +94,107 @@ func TestPostgresFunction(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateFunctionThatReturnsTheRowsOfANewView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`CREATE TABLE users (id INT);`)
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW user_ids AS SELECT id FROM users;
+			CREATE FUNCTION all_user_ids() RETURNS SETOF user_ids LANGUAGE sql AS 'SELECT * FROM user_ids';
+			CREATE FUNCTION first_ids(user_ids[]) RETURNS TABLE (id int) LANGUAGE sql AS 'SELECT 1';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&PostgresCreateViewInstruction{
+				Name:  "user_ids",
+				Query: " SELECT id\n   FROM users;",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION all_user_ids()\n RETURNS SETOF user_ids\n LANGUAGE sql\nAS $function$SELECT * FROM user_ids$function$",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION first_ids(user_ids[])\n RETURNS TABLE(id integer)\n LANGUAGE sql\nAS $function$SELECT 1$function$",
+			},
+		})
+	})
+
+	t.Run("DropAViewAndAFunctionThatReturnsItsRows", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id INT);
+			CREATE VIEW user_ids AS SELECT id FROM users;
+			CREATE FUNCTION all_user_ids() RETURNS SETOF user_ids LANGUAGE sql AS 'SELECT * FROM user_ids';
+		`)
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropFunctionInstruction{
+				Name: "all_user_ids",
+			},
+			&driversshared.SQLDropViewInstruction{Name: "user_ids"},
+		})
+	})
+
+	t.Run("DropAFunctionThatReturnsTheRowsOfAView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE users (id INT);
+			CREATE VIEW user_ids AS SELECT id FROM users;
+		`
+
+		driver.ExecOnCurrent(schema + `CREATE FUNCTION all_user_ids() RETURNS SETOF user_ids LANGUAGE sql AS 'SELECT * FROM user_ids';`)
+		driver.ExecOnDesired(schema)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropFunctionInstruction{
+				Name: "all_user_ids",
+			},
+		})
+	})
+
+	t.Run("DropAViewThatCallsAFunctionThatReturnsTheRowsOfAView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE users (id INT);
+			CREATE VIEW user_ids AS SELECT id FROM users;
+		`
+
+		driver.ExecOnCurrent(schema + `
+			CREATE FUNCTION all_user_ids() RETURNS SETOF user_ids LANGUAGE sql AS 'SELECT * FROM user_ids';
+			CREATE VIEW first_user_ids AS SELECT id FROM all_user_ids() LIMIT 1;
+		`)
+		driver.ExecOnDesired(schema)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&driversshared.SQLDropViewInstruction{Name: "first_user_ids"},
+			&PostgresDropFunctionInstruction{
+				Name: "all_user_ids",
+			},
+		})
+	})
+
+	t.Run("FunctionThatStartsToReturnTheRowsOfAView", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		schema := `
+			CREATE TABLE users (id INT);
+			CREATE VIEW user_ids AS SELECT id FROM users;
+		`
+
+		driver.ExecOnCurrent(schema + `CREATE FUNCTION all_ids() RETURNS SETOF users LANGUAGE sql AS 'SELECT * FROM users';`)
+		driver.ExecOnDesired(schema + `CREATE FUNCTION all_ids() RETURNS SETOF user_ids LANGUAGE sql AS 'SELECT * FROM user_ids';`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDisableFunctionBodyCheckInstruction{},
+			&PostgresDropFunctionInstruction{
+				Name: "all_ids",
+			},
+			&PostgresCreateFunctionInstruction{
+				Definition: "CREATE OR REPLACE FUNCTION all_ids()\n RETURNS SETOF user_ids\n LANGUAGE sql\nAS $function$SELECT * FROM user_ids$function$",
+			},
+		})
+	})
+
 	t.Run("FunctionThatStartsToReturnTheRowsOfATable", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
