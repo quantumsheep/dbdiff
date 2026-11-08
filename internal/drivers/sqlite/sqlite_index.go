@@ -173,7 +173,7 @@ func (d *SQLiteDriver) GetIndexDefinitions(
 	db *sql.DB,
 	tableName string,
 ) (map[string]string, error) {
-	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL", tableName)
+	rows, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL ORDER BY name", tableName)
 	if err != nil {
 		return nil, err
 	}
