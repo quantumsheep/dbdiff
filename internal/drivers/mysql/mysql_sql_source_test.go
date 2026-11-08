@@ -245,7 +245,7 @@ func TestParseMySQLConnectionString(t *testing.T) {
 		require.Equal(t, "skip-verify", config.TLSConfig)
 		require.Empty(t, config.Params)
 		require.True(t, config.MultiStatements)
-		require.True(t, config.ParseTime)
+		require.False(t, config.ParseTime)
 	})
 
 	t.Run("URLWithDriverParameters", func(t *testing.T) {

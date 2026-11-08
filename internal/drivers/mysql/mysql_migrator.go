@@ -56,7 +56,16 @@ type MySQLMigrator struct {
 // GET_LOCK holds a lock of the session, so every statement runs on one connection. A lock
 // that one pooled connection takes, and that another releases, does nothing.
 func NewMySQLMigrator(ctx context.Context, connectionString string) (*MySQLMigrator, error) {
-	database, err := OpenMySQLConnection(connectionString)
+	config, err := ParseMySQLConnectionString(connectionString)
+	if err != nil {
+		return nil, err
+	}
+
+	// The history table holds DATETIME values, and the scan of applied_at needs time.Time.
+	// The diff connections read text instead, so a zero date keeps its value.
+	config.ParseTime = true
+
+	database, err := openMySQLConnectionWithConfig(config)
 	if err != nil {
 		return nil, err
 	}

@@ -21,7 +21,6 @@ func ParseMySQLConnectionString(connectionString string) (*mysql.Config, error) 
 	}
 
 	config.MultiStatements = true
-	config.ParseTime = true
 
 	return config, nil
 }
@@ -64,6 +63,10 @@ func OpenMySQLConnection(connectionString string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	return openMySQLConnectionWithConfig(config)
+}
+
+func openMySQLConnectionWithConfig(config *mysql.Config) (*sql.DB, error) {
 	connector, err := mysql.NewConnector(config)
 	if err != nil {
 		return nil, err

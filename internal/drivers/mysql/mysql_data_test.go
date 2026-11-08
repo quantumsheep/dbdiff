@@ -157,6 +157,34 @@ func TestMySQLData(t *testing.T) {
 		}, driver.FetchAllFromCurrent("paths", ""))
 	})
 
+	t.Run("DataWithAZeroDate", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+		driver.CompareData = true
+
+		driver.ExecOnDesired(`
+			SET SESSION sql_mode = '';
+			CREATE TABLE events (id int NOT NULL, happened datetime NOT NULL, PRIMARY KEY (id));
+			INSERT INTO events (id, happened) VALUES (1, '0000-00-00 00:00:00');
+		`)
+		driver.ExecOnCurrent(`CREATE TABLE events (id int NOT NULL, happened datetime NOT NULL, PRIMARY KEY (id));`)
+
+		diff := driver.RequireInstructions([]driversshared.Instruction{
+			&MySQLInsertInstruction{
+				TableName:   "events",
+				ColumnNames: []string{"id", "happened"},
+				Expressions: []string{"1", "'0000-00-00 00:00:00'"},
+			},
+		})
+
+		driver.ExecOnCurrent("SET SESSION sql_mode = '';\n" + diff)
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "happened": "0000-00-00 00:00:00"},
+		}, driver.FetchAllFromCurrent("events", ""))
+
+		driver.RequireInstructions(nil)
+	})
+
 	t.Run("DataOfANewTable", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.CompareData = true

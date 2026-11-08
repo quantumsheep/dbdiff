@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
 	"github.com/samber/lo"
@@ -123,11 +122,6 @@ func formatMySQLValue(value any, databaseTypeName string) string {
 	realValue, isReal := value.(float64)
 	if isReal {
 		return strconv.FormatFloat(realValue, 'g', -1, 64)
-	}
-
-	timeValue, isTime := value.(time.Time)
-	if isTime {
-		return QuoteLiteral(timeValue.Format("2006-01-02 15:04:05.999999"))
 	}
 
 	return QuoteLiteral(fmt.Sprintf("%v", value))
