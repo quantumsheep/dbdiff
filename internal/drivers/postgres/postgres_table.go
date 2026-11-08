@@ -204,6 +204,7 @@ func (t *PostgresTable) DiffTable(
 
 		instructions = append(instructions, diffRowLevelSecurity(t, other)...)
 		instructions = append(instructions, diffComments(t, other)...)
+		instructions = append(instructions, t.inheritedConstraintCommentInstructions(other)...)
 		instructions = append(instructions, diffIndexAdditions(t, other)...)
 		instructions = append(instructions, diffTriggers(t, other)...)
 
@@ -552,6 +553,7 @@ func (t *PostgresTable) DiffTable(
 		instructions = append(instructions, desiredConstraint.CommentInstructions(t.Name, currentConstraint)...)
 	}
 
+	instructions = append(instructions, t.inheritedConstraintCommentInstructions(other)...)
 	instructions = append(instructions, dropNotNullInstructions...)
 
 	instructions = append(instructions, diffIndexAdditions(t, other)...)
@@ -646,6 +648,34 @@ func diffPartitionColumns(desiredTable *PostgresTable, currentTable *PostgresTab
 				StatisticsTarget: statisticsTarget,
 			}))
 		}
+	}
+
+	return instructions
+}
+
+// A child holds its own copy of each constraint of its parent, and the copy has its own
+// comment. A change of the constraint on the parent creates the copy again with no comment.
+// DiffTables adds the foreign keys of the parent after the tables, so the copy of a foreign
+// key is left out. If the diff creates the table, other is nil.
+func (t *PostgresTable) inheritedConstraintCommentInstructions(other *PostgresTable) []driversshared.Instruction {
+	var instructions []driversshared.Instruction
+
+	for _, constraint := range t.Constraints {
+		if !constraint.Inherited || constraint.IsForeignKey() {
+			continue
+		}
+
+		var currentConstraint *PostgresConstraint
+
+		if other != nil {
+			currentConstraint, _ = other.ConstraintByName(constraint.Name)
+		}
+
+		if currentConstraint != nil && currentConstraint.Def != constraint.Def {
+			currentConstraint = nil
+		}
+
+		instructions = append(instructions, constraint.CommentInstructions(t.Name, currentConstraint)...)
 	}
 
 	return instructions
@@ -997,6 +1027,7 @@ func (t *PostgresTable) Instructions() []driversshared.Instruction {
 		}
 
 		instructions = append(instructions, t.CommentInstructions()...)
+		instructions = append(instructions, t.inheritedConstraintCommentInstructions(nil)...)
 		instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 
 		for _, index := range t.Indexes {
@@ -1024,6 +1055,8 @@ func (t *PostgresTable) Instructions() []driversshared.Instruction {
 	for _, constraint := range createTableInstruction.Constraints {
 		instructions = append(instructions, constraint.CommentInstructions(t.Name, nil)...)
 	}
+
+	instructions = append(instructions, t.inheritedConstraintCommentInstructions(nil)...)
 
 	instructions = append(instructions, t.RowLevelSecurityInstructions()...)
 

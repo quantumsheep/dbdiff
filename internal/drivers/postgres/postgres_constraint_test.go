@@ -674,6 +674,94 @@ func TestPostgresConstraint(t *testing.T) {
 		})
 	})
 
+	t.Run("ChangeTheCommentOfAnInheritedConstraint", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			CREATE TABLE children () INHERITS (parents);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			CREATE TABLE children () INHERITS (parents);
+			COMMENT ON CONSTRAINT positive_age ON children IS 'The age of a child must be positive';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "children",
+				Name:      "positive_age",
+				Text:      "The age of a child must be positive",
+			},
+		})
+	})
+
+	t.Run("CommentTheInheritedConstraintOfANewPartition", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measurements (id INT, CONSTRAINT positive_id CHECK (id > 0)) PARTITION BY RANGE (id);
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE measurements (id INT, CONSTRAINT positive_id CHECK (id > 0)) PARTITION BY RANGE (id);
+			CREATE TABLE measurements_low PARTITION OF measurements FOR VALUES FROM (0) TO (100);
+			COMMENT ON CONSTRAINT positive_id ON measurements_low IS 'The low id must be positive';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresCreateTablePartitionInstruction{
+				Name:       "measurements_low",
+				ParentName: "measurements",
+				Bound:      "FOR VALUES FROM (0) TO (100)",
+			},
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "measurements_low",
+				Name:      "positive_id",
+				Text:      "The low id must be positive",
+			},
+		})
+	})
+
+	t.Run("AChangedParentConstraintKeepsTheCommentOfTheChildCopy", func(t *testing.T) {
+		driver := NewTestPostgresDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE parents (age INT, CONSTRAINT positive_age CHECK (age > 0));
+			CREATE TABLE children () INHERITS (parents);
+			COMMENT ON CONSTRAINT positive_age ON children IS 'The age of a child must be valid';
+		`)
+		driver.ExecOnDesired(`
+			CREATE TABLE parents (age INT, CONSTRAINT positive_age CHECK (age > 1));
+			CREATE TABLE children () INHERITS (parents);
+			COMMENT ON CONSTRAINT positive_age ON children IS 'The age of a child must be valid';
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresDropConstraintAction{
+						ConstraintName: "positive_age",
+					},
+				},
+			},
+			&PostgresAlterTableInstruction{
+				Name: "parents",
+				Actions: []driversshared.AlterTableAction{
+					&PostgresAddConstraintAction{
+						Constraint: &PostgresConstraint{
+							Name: "positive_age",
+							Type: "c",
+							Def:  "CHECK ((age > 1))",
+						},
+					},
+				},
+			},
+			&PostgresCommentOnConstraintInstruction{
+				TableName: "children",
+				Name:      "positive_age",
+				Text:      "The age of a child must be valid",
+			},
+		})
+	})
+
 	t.Run("CreateATableWithConstraintComments", func(t *testing.T) {
 		driver := NewTestPostgresDriver(t)
 
