@@ -569,4 +569,93 @@ func TestPostgresPrivilege(t *testing.T) {
 			},
 		})
 	})
+
+	t.Run("GrantAndRevokeColumnPrivileges", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id INT, email TEXT);
+			GRANT INSERT (id) ON users TO dbdiff_reader;
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (id INT, email TEXT);
+			GRANT SELECT (email), UPDATE (email) ON users TO dbdiff_reader;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresGrantInstruction{
+				Privileges: []string{"SELECT", "UPDATE"},
+				ObjectType: "TABLE",
+				ObjectName: "users",
+				Column:     "email",
+				Grantee:    "dbdiff_reader",
+			},
+			&PostgresRevokeInstruction{
+				Privileges: []string{"INSERT"},
+				ObjectType: "TABLE",
+				ObjectName: "users",
+				Column:     "id",
+				Grantee:    "dbdiff_reader",
+			},
+		})
+	})
+
+	t.Run("NoRevokeForADroppedColumn", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (id INT, email TEXT);
+			GRANT SELECT (email) ON users TO dbdiff_reader;
+		`)
+
+		driver.ExecOnDesired(`CREATE TABLE users (id INT);`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "users",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{
+						ColumnName: "email",
+					},
+				},
+			},
+		})
+	})
+
+	t.Run("ARebuiltColumnKeepsItsGrants", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE measures (value INT, doubled INT);
+			GRANT SELECT (doubled) ON measures TO dbdiff_reader;
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE measures (value INT, doubled INT GENERATED ALWAYS AS (value * 2) STORED);
+			GRANT SELECT (doubled) ON measures TO dbdiff_reader;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresAlterTableInstruction{
+				Name: "measures",
+				Actions: []driversshared.AlterTableAction{
+					&driversshared.SQLDropColumnAction{
+						ColumnName: "doubled",
+					},
+					&PostgresAddColumnAction{
+						Column: &PostgresColumn{
+							Name:                "doubled",
+							Type:                "integer",
+							GeneratedExpression: "(value * 2)",
+						},
+					},
+				},
+			},
+			&PostgresGrantInstruction{
+				Privileges: []string{"SELECT"},
+				ObjectType: "TABLE",
+				ObjectName: "measures",
+				Column:     "doubled",
+				Grantee:    "dbdiff_reader",
+			},
+		})
+	})
 }

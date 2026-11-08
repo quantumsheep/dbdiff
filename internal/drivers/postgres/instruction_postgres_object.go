@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
+	"github.com/samber/lo"
 )
 
 type PostgresCreateExtensionInstruction struct {
@@ -239,12 +240,13 @@ type PostgresGrantInstruction struct {
 	ObjectType string
 	ObjectName string
 	Arguments  string
+	Column     string
 	Grantee    string
 }
 
 func (i *PostgresGrantInstruction) String() string {
 	return fmt.Sprintf("GRANT %s ON %s %s TO %s;",
-		joinPrivileges(i.Privileges), i.ObjectType,
+		privilegeList(i.Privileges, i.Column), i.ObjectType,
 		quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments), quoteGrantee(i.Grantee))
 }
 
@@ -257,12 +259,13 @@ type PostgresRevokeInstruction struct {
 	ObjectType string
 	ObjectName string
 	Arguments  string
+	Column     string
 	Grantee    string
 }
 
 func (i *PostgresRevokeInstruction) String() string {
 	return fmt.Sprintf("REVOKE %s ON %s %s FROM %s;",
-		joinPrivileges(i.Privileges), i.ObjectType,
+		privilegeList(i.Privileges, i.Column), i.ObjectType,
 		quotePrivilegeObject(i.ObjectType, i.ObjectName, i.Arguments), quoteGrantee(i.Grantee))
 }
 
@@ -299,6 +302,17 @@ func quotePrivilegeObject(objectType string, objectName string, arguments string
 	}
 
 	return driversshared.QuoteIdentifier(objectName) + "(" + arguments + ")"
+}
+
+// A column privilege names the column after each privilege.
+func privilegeList(privileges []string, column string) string {
+	if column == "" {
+		return joinPrivileges(privileges)
+	}
+
+	return joinPrivileges(lo.Map(privileges, func(privilege string, _ int) string {
+		return privilege + " (" + driversshared.QuoteIdentifier(column) + ")"
+	}))
 }
 
 // PUBLIC is a keyword, and the quoted name "PUBLIC" names a role.

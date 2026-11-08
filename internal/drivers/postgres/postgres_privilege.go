@@ -16,12 +16,45 @@ type PostgresPrivilege struct {
 	ObjectType string
 	ObjectName string
 	Arguments  string
+	Column     string
 	Grantee    string
 	Privileges []string
 }
 
 func (p *PostgresPrivilege) Key() string {
-	return p.ObjectType + " " + privilegeObjectKey(p.ObjectType, p.ObjectName, p.Arguments) + " " + p.Grantee
+	return p.ObjectType + " " + privilegeObjectKey(p.ObjectType, p.ObjectName, p.Arguments) + " " +
+		p.Column + " " + p.Grantee
+}
+
+func (d *PostgresDriver) isPrivilegeRecreated(privilege *PostgresPrivilege) bool {
+	if d.isRecreated(privilege.ObjectType, privilege.ObjectName, privilege.Arguments) {
+		return true
+	}
+
+	return privilege.Column != "" && d.recreatedObjectNames[columnKey(privilege.ObjectName, privilege.Column)]
+}
+
+// An identifier cannot hold the character NUL, so the key of a column matches no relation name.
+func columnKey(tableName string, columnName string) string {
+	return tableName + "\x00" + columnName
+}
+
+// A dropped column loses its privileges. DiffTables calls this function, so DiffPrivileges
+// revokes nothing on a dropped column and gives the grants back to a column that comes back.
+func (d *PostgresDriver) markDroppedColumns(instructions []driversshared.Instruction) {
+	for _, instruction := range instructions {
+		alterTableInstruction, isAlterTable := instruction.(*PostgresAlterTableInstruction)
+		if !isAlterTable {
+			continue
+		}
+
+		for _, action := range alterTableInstruction.Actions {
+			dropColumnAction, isDropColumn := action.(*driversshared.SQLDropColumnAction)
+			if isDropColumn {
+				d.markRecreated(columnKey(alterTableInstruction.Name, dropColumnAction.ColumnName))
+			}
+		}
+	}
 }
 
 func (p *PostgresPrivilege) GrantInstruction(privileges []string) *PostgresGrantInstruction {
@@ -30,6 +63,7 @@ func (p *PostgresPrivilege) GrantInstruction(privileges []string) *PostgresGrant
 		ObjectType: p.ObjectType,
 		ObjectName: p.ObjectName,
 		Arguments:  p.Arguments,
+		Column:     p.Column,
 		Grantee:    p.Grantee,
 	}
 }
@@ -40,6 +74,7 @@ func (p *PostgresPrivilege) RevokeInstruction(privileges []string) *PostgresRevo
 		ObjectType: p.ObjectType,
 		ObjectName: p.ObjectName,
 		Arguments:  p.Arguments,
+		Column:     p.Column,
 		Grantee:    p.Grantee,
 	}
 }
@@ -191,7 +226,7 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 
 	// A new object and an object that the diff creates again hold the default privileges.
 	currentPrivileges = lo.Reject(currentPrivileges, func(privilege *PostgresPrivilege, _ int) bool {
-		return d.isRecreated(privilege.ObjectType, privilege.ObjectName, privilege.Arguments)
+		return d.isPrivilegeRecreated(privilege)
 	})
 
 	currentObjectKeys := lo.Map(currentOwners, func(owner *PostgresOwner, _ int) string {
@@ -386,7 +421,12 @@ func (d *PostgresDriver) GetPrivileges(ctx context.Context, db *sql.DB) ([]*Post
 		return nil, err
 	}
 
-	return slices.Concat(privileges, routinePrivileges, typePrivileges), nil
+	columnPrivileges, err := d.getColumnPrivileges(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.Concat(privileges, columnPrivileges, routinePrivileges, typePrivileges), nil
 }
 
 func getRoutineOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {
@@ -505,4 +545,49 @@ func getTypePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, e
 
 		return privilege, nil
 	})
+}
+
+func (d *PostgresDriver) getColumnPrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege, error) {
+	privileges, err := driversshared.QueryAll(ctx, db, `
+		SELECT
+			c.relname,
+			c.relkind,
+			a.attname,
+			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
+			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
+		FROM pg_class c
+		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped,
+		aclexplode(a.attacl) acl
+		WHERE c.relnamespace = quote_ident(current_schema())::regnamespace
+		AND c.relkind IN ('r', 'p', 'v', 'm')
+		AND acl.grantee <> c.relowner
+		AND NOT EXISTS (
+			SELECT 1 FROM pg_depend d
+			WHERE d.objid = c.oid AND d.deptype IN ('e', 'a', 'i')
+		)
+		AND c.relname <> $1
+		GROUP BY c.relname, c.relkind, a.attnum, a.attname, acl.grantee
+		ORDER BY c.relname, a.attnum, grantee_name
+	`, func(rows *sql.Rows) (*PostgresPrivilege, error) {
+		privilege := &PostgresPrivilege{}
+
+		var relkind, granted string
+
+		err := rows.Scan(&privilege.ObjectName, &relkind, &privilege.Column, &privilege.Grantee, &granted)
+		if err != nil {
+			return nil, err
+		}
+
+		privilege.ObjectType = privilegeObjectType(relkind)
+		privilege.Privileges = sortedPrivileges(strings.Split(granted, ","))
+
+		return privilege, nil
+	}, driversshared.MigrationHistoryTableName)
+	if err != nil {
+		return nil, err
+	}
+
+	return lo.Reject(privileges, func(privilege *PostgresPrivilege, _ int) bool {
+		return slices.Contains(d.IgnoreTables, privilege.ObjectName)
+	}), nil
 }

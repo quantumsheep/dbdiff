@@ -1194,6 +1194,8 @@ func (d *PostgresDriver) DiffTables(ctx context.Context) (*SectionDiff, error) {
 			return nil, err
 		}
 
+		d.markDroppedColumns(subInstructions)
+
 		additions = append(additions, subInstructions...)
 		ruleInstructions = append(ruleInstructions, desiredTable.DiffRules(currentTable)...)
 		keptCurrentTables[desiredTable.Name] = currentTable
