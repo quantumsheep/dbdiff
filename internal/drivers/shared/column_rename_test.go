@@ -1,6 +1,7 @@
 package driversshared
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +12,7 @@ type testColumn struct {
 	Type string
 }
 
-func TestGuessRenamedColumns(t *testing.T) {
+func TestRenamedColumns(t *testing.T) {
 	name := func(column testColumn) string {
 		return column.Name
 	}
@@ -20,7 +21,7 @@ func TestGuessRenamedColumns(t *testing.T) {
 	}
 
 	t.Run("OneCandidate", func(t *testing.T) {
-		renamedFrom := GuessRenamedColumns(
+		renamedFrom := RenamedColumns(
 			[]testColumn{
 				{
 					Name: "id",
@@ -41,14 +42,14 @@ func TestGuessRenamedColumns(t *testing.T) {
 					Type: "TEXT",
 				},
 			},
-			name, equalExceptName)
+			name, strings.ToLower, equalExceptName, true)
 		require.Equal(t, map[string]string{
 			"full_name": "name",
 		}, renamedFrom)
 	})
 
 	t.Run("TwoCandidates", func(t *testing.T) {
-		renamedFrom := GuessRenamedColumns(
+		renamedFrom := RenamedColumns(
 			[]testColumn{
 				{
 					Name: "full_name",
@@ -65,12 +66,12 @@ func TestGuessRenamedColumns(t *testing.T) {
 					Type: "TEXT",
 				},
 			},
-			name, equalExceptName)
+			name, strings.ToLower, equalExceptName, true)
 		require.Equal(t, map[string]string{}, renamedFrom)
 	})
 
 	t.Run("CandidateUsedOnce", func(t *testing.T) {
-		renamedFrom := GuessRenamedColumns(
+		renamedFrom := RenamedColumns(
 			[]testColumn{
 				{
 					Name: "first",
@@ -87,14 +88,14 @@ func TestGuessRenamedColumns(t *testing.T) {
 					Type: "TEXT",
 				},
 			},
-			name, equalExceptName)
+			name, strings.ToLower, equalExceptName, true)
 		require.Equal(t, map[string]string{
 			"first": "old",
 		}, renamedFrom)
 	})
 
 	t.Run("DifferentAttributes", func(t *testing.T) {
-		renamedFrom := GuessRenamedColumns(
+		renamedFrom := RenamedColumns(
 			[]testColumn{
 				{
 					Name: "new",
@@ -107,7 +108,69 @@ func TestGuessRenamedColumns(t *testing.T) {
 					Type: "INTEGER",
 				},
 			},
-			name, equalExceptName)
+			name, strings.ToLower, equalExceptName, true)
+		require.Equal(t, map[string]string{}, renamedFrom)
+	})
+
+	t.Run("NameInOtherCase", func(t *testing.T) {
+		renamedFrom := RenamedColumns(
+			[]testColumn{
+				{
+					Name: "email",
+					Type: "TEXT",
+				},
+			},
+			[]testColumn{
+				{
+					Name: "Email",
+					Type: "INTEGER",
+				},
+			},
+			name, strings.ToLower, equalExceptName, false)
+		require.Equal(t, map[string]string{
+			"email": "Email",
+		}, renamedFrom)
+	})
+
+	t.Run("GuessSkipsANameInOtherCase", func(t *testing.T) {
+		renamedFrom := RenamedColumns(
+			[]testColumn{
+				{
+					Name: "email",
+					Type: "TEXT",
+				},
+				{
+					Name: "contact",
+					Type: "TEXT",
+				},
+			},
+			[]testColumn{
+				{
+					Name: "Email",
+					Type: "TEXT",
+				},
+			},
+			name, strings.ToLower, equalExceptName, true)
+		require.Equal(t, map[string]string{
+			"email": "Email",
+		}, renamedFrom)
+	})
+
+	t.Run("NoGuess", func(t *testing.T) {
+		renamedFrom := RenamedColumns(
+			[]testColumn{
+				{
+					Name: "full_name",
+					Type: "TEXT",
+				},
+			},
+			[]testColumn{
+				{
+					Name: "name",
+					Type: "TEXT",
+				},
+			},
+			name, strings.ToLower, equalExceptName, false)
 		require.Equal(t, map[string]string{}, renamedFrom)
 	})
 }

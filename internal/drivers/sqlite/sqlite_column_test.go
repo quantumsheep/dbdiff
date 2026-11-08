@@ -217,6 +217,168 @@ func TestSQLiteColumn(t *testing.T) {
 		}, rows)
 	})
 
+	t.Run("ColumnNameInOtherCase", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				Email TEXT
+			);
+
+			INSERT INTO users (id, Email) VALUES (1, 'a@b.c');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT
+			);
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&SQLiteAlterTableInstruction{
+				Name: "users",
+				Action: &driversshared.SQLRenameColumnAction{
+					ColumnName:    "Email",
+					NewColumnName: "email",
+				},
+			},
+		})
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": "a@b.c"},
+		}, rows)
+	})
+
+	t.Run("ChangeAColumnNameInOtherCase", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				Email TEXT
+			);
+
+			INSERT INTO users (id, Email) VALUES (1, 'a@b.c');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE users (
+				id INTEGER PRIMARY KEY,
+				email TEXT NOT NULL DEFAULT ''
+			);
+		`)
+		driver.RequireDiffApplies(slices.Concat(
+			recreationPrologue(),
+			recreated("users",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_users_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name:    "email",
+							Type:    "TEXT",
+							NotNull: true,
+							Default: sql.NullString{
+								String: "''",
+								Valid:  true,
+							},
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_users_temp",
+					ColumnNames:       []string{"id", "email"},
+					SelectExpressions: []string{`"id"`, `"Email"`},
+					FromTableName:     "users",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "users"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_users_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "users"},
+				},
+			),
+			recreationEpilogue("users"),
+		))
+
+		rows := driver.FetchAllFromCurrent("users", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": "a@b.c"},
+		}, rows)
+	})
+
+	t.Run("MoveColumnsWithNamesInOtherCase", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE t (
+				id INTEGER PRIMARY KEY,
+				A TEXT,
+				B TEXT
+			);
+
+			INSERT INTO t (id, A, B) VALUES (1, 'a', 'b');
+		`)
+
+		driver.ExecOnDesired(`
+			CREATE TABLE t (
+				id INTEGER PRIMARY KEY,
+				b TEXT,
+				a TEXT
+			);
+		`)
+		driver.RequireDiffApplies(slices.Concat(
+			recreationPrologue(),
+			recreated("t",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_t_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name:       "id",
+							Type:       "INTEGER",
+							PrimaryKey: true,
+						},
+						{
+							Name: "b",
+							Type: "TEXT",
+						},
+						{
+							Name: "a",
+							Type: "TEXT",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_t_temp",
+					ColumnNames:       []string{"id", "b", "a"},
+					SelectExpressions: []string{`"id"`, `"B"`, `"A"`},
+					FromTableName:     "t",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "t"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_t_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "t"},
+				},
+			),
+			recreationEpilogue("t"),
+		))
+
+		rows := driver.FetchAllFromCurrent("t", "ORDER BY id")
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "b": "b", "a": "a"},
+		}, rows)
+	})
+
 	t.Run("RenameColumn", func(t *testing.T) {
 		driver := NewTestSQLiteDriver(t)
 		driver.GuessRenames = true

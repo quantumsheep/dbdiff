@@ -240,31 +240,33 @@ func isIdentifierCharacter(character byte) bool {
 
 // A SELECT * statement and an INSERT statement without column names read the order of
 // the columns, so a new order needs a recreation.
-func columnOrderChanged(desired *SQLiteTable, current *SQLiteTable) bool {
-	return !slices.Equal(
-		commonColumnNamesInOrder(desired, current),
-		commonColumnNamesInOrder(current, desired))
-}
-
-func commonColumnNamesInOrder(first *SQLiteTable, second *SQLiteTable) []string {
-	var names []string
-
-	for _, column := range first.Columns {
-		_, found := second.ColumnByName(column.Name)
-		if found {
-			names = append(names, column.Name)
+// A renamed column keeps its place, so the check compares the current names on both sides.
+func columnOrderChanged(desired *SQLiteTable, current *SQLiteTable, renamedFrom map[string]string) bool {
+	currentNames := lo.Map(desired.Columns, func(column *SQLiteColumn, _ int) string {
+		oldName, renamed := renamedFrom[column.Name]
+		if renamed {
+			return oldName
 		}
-	}
 
-	return names
+		return column.Name
+	})
+
+	desiredOrder := lo.Filter(currentNames, func(name string, _ int) bool {
+		_, found := current.ColumnByName(name)
+
+		return found
+	})
+
+	currentOrder := lo.FilterMap(current.Columns, func(column *SQLiteColumn, _ int) (string, bool) {
+		return column.Name, slices.Contains(currentNames, column.Name)
+	})
+
+	return !slices.Equal(desiredOrder, currentOrder)
 }
 
 func (t *SQLiteTable) DiffColumns(other *SQLiteTable, guessRenames bool) *SQLiteTableColumnsDiff {
-	renamedFrom := map[string]string{}
-
-	if guessRenames {
-		renamedFrom = driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*SQLiteColumn).HasEqualAttributes)
-	}
+	renamedFrom := driversshared.RenamedColumns(t.Columns, other.Columns, columnName, identifierKey,
+		(*SQLiteColumn).HasEqualAttributes, guessRenames)
 
 	diff := &SQLiteTableColumnsDiff{
 		Added:              []string{},
@@ -279,7 +281,7 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable, guessRenames bool) *SQLite
 			!equalUniqueConstraints(t.UniqueConstraints, other.UniqueConstraints),
 		TableOptionsChanged: t.WithoutRowID != other.WithoutRowID || t.Strict != other.Strict ||
 			!equalCheckConstraints(t.CheckConstraints, other.CheckConstraints),
-		ColumnOrderChanged: columnOrderChanged(t, other),
+		ColumnOrderChanged: columnOrderChanged(t, other, renamedFrom),
 	}
 
 	// ADD COLUMN puts the column after every other column, so a column that comes after an
@@ -295,6 +297,11 @@ func (t *SQLiteTable) DiffColumns(other *SQLiteTable, guessRenames bool) *SQLite
 
 		if !found {
 			if renamed {
+				oldColumn, _ := other.ColumnByName(diff.RenamedFrom[desiredColumn.Name])
+				if !desiredColumn.HasEqualAttributes(oldColumn) {
+					diff.Modified = append(diff.Modified, desiredColumn.Name)
+				}
+
 				continue
 			}
 

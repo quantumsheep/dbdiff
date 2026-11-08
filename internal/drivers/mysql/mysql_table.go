@@ -109,12 +109,10 @@ type MySQLTableColumnsDiff struct {
 }
 
 func (t *MySQLTable) DiffColumns(other *MySQLTable, guessRenames bool) *MySQLTableColumnsDiff {
+	// MySQL compares column names without case on every platform.
 	diff := &MySQLTableColumnsDiff{
-		RenamedFrom: map[string]string{},
-	}
-
-	if guessRenames {
-		diff.RenamedFrom = driversshared.GuessRenamedColumns(t.Columns, other.Columns, columnName, (*MySQLColumn).HasEqualAttributes)
+		RenamedFrom: driversshared.RenamedColumns(t.Columns, other.Columns, columnName, strings.ToLower,
+			(*MySQLColumn).HasEqualAttributes, guessRenames),
 	}
 
 	// A table holds at most one AUTO_INCREMENT column. If the current one goes away and the

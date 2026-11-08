@@ -215,6 +215,60 @@ func TestMySQLColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("users", ""))
 	})
 
+	t.Run("ColumnNameInOtherCase", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, email varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, Email varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users (id, Email) VALUES (1, 'a@b.c');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "Email",
+					NewColumnName: "email",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": "a@b.c"},
+		}, driver.FetchAllFromCurrent("users", ""))
+	})
+
+	t.Run("ChangeAColumnNameInOtherCase", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE users (id int NOT NULL, email varchar(200) NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("CREATE TABLE users (id int NOT NULL, Email varchar(100), PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO users (id, Email) VALUES (1, 'a@b.c');")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLRenameColumnAction{
+					ColumnName:    "Email",
+					NewColumnName: "email",
+				},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "users",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "email",
+						Type:    "varchar(200)",
+						NotNull: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "email": "a@b.c"},
+		}, driver.FetchAllFromCurrent("users", ""))
+	})
+
 	t.Run("RenameColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 		driver.GuessRenames = true
