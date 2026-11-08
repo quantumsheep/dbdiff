@@ -77,6 +77,52 @@ func TestPostgresObjectInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresGrantDefaultPrivileges", func(t *testing.T) {
+		instruction := &PostgresGrantDefaultPrivilegesInstruction{
+			Role:            "app owner",
+			Schema:          "sales",
+			Privileges:      []string{"INSERT", "SELECT"},
+			ObjectType:      "TABLES",
+			Grantee:         "app_writer",
+			WithGrantOption: true,
+		}
+
+		require.Equal(t,
+			`ALTER DEFAULT PRIVILEGES FOR ROLE "app owner" IN SCHEMA "sales" `+
+				`GRANT INSERT, SELECT ON TABLES TO "app_writer" WITH GRANT OPTION;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresRevokeDefaultPrivileges", func(t *testing.T) {
+		instruction := &PostgresRevokeDefaultPrivilegesInstruction{
+			Role:       "app_owner",
+			Schema:     "sales",
+			Privileges: []string{"EXECUTE"},
+			ObjectType: "FUNCTIONS",
+			Grantee:    "public",
+		}
+
+		require.Equal(t,
+			`ALTER DEFAULT PRIVILEGES FOR ROLE "app_owner" IN SCHEMA "sales" REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;`,
+			instruction.String())
+	})
+
+	t.Run("PostgresRevokeDefaultPrivilegesGrantOptionFor", func(t *testing.T) {
+		instruction := &PostgresRevokeDefaultPrivilegesInstruction{
+			Role:           "app_owner",
+			Schema:         "sales",
+			Privileges:     []string{"USAGE"},
+			ObjectType:     "TYPES",
+			Grantee:        "app_writer",
+			GrantOptionFor: true,
+		}
+
+		require.Equal(t,
+			`ALTER DEFAULT PRIVILEGES FOR ROLE "app_owner" IN SCHEMA "sales" `+
+				`REVOKE GRANT OPTION FOR USAGE ON TYPES FROM "app_writer";`,
+			instruction.String())
+	})
+
 	t.Run("PostgresGrantToPublic", func(t *testing.T) {
 		instruction := &PostgresGrantInstruction{
 			Privileges: []string{"SELECT"},
@@ -434,6 +480,30 @@ func TestPostgresObjectInstructionComments(t *testing.T) {
 		}
 
 		require.Equal(t, `Change the privileges of the table "users"`, instruction.Comment())
+	})
+
+	t.Run("PostgresGrantDefaultPrivileges", func(t *testing.T) {
+		instruction := &PostgresGrantDefaultPrivilegesInstruction{
+			Role:       "app_owner",
+			Schema:     "sales",
+			Privileges: []string{"SELECT"},
+			ObjectType: "TABLES",
+			Grantee:    "reader",
+		}
+
+		require.Equal(t, `Change the default privileges of the schema "sales"`, instruction.Comment())
+	})
+
+	t.Run("PostgresRevokeDefaultPrivileges", func(t *testing.T) {
+		instruction := &PostgresRevokeDefaultPrivilegesInstruction{
+			Role:       "app_owner",
+			Schema:     "sales",
+			Privileges: []string{"SELECT"},
+			ObjectType: "TABLES",
+			Grantee:    "reader",
+		}
+
+		require.Equal(t, `Change the default privileges of the schema "sales"`, instruction.Comment())
 	})
 
 	t.Run("PostgresSetOwner", func(t *testing.T) {

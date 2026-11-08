@@ -131,6 +131,78 @@ func diffGrants(
 	}
 }
 
+// The default privileges of a schema add to the global default privileges, so a row holds
+// only grants. The two sides can have different schema names, and the statements name the
+// current schema.
+type PostgresDefaultPrivilege struct {
+	Role       string
+	ObjectType string
+	Grantee    string
+	Privileges []string
+	Grantable  []string
+}
+
+func (p *PostgresDefaultPrivilege) Key() string {
+	return p.Role + "\x00" + p.ObjectType + "\x00" + p.Grantee
+}
+
+func (p *PostgresDefaultPrivilege) changeInstructions(
+	current *PostgresDefaultPrivilege,
+	schema string,
+) []driversshared.Instruction {
+	changes := diffGrants(p.Privileges, p.Grantable, current.Privileges, current.Grantable)
+
+	var instructions []driversshared.Instruction
+
+	if len(changes.granted) > 0 {
+		instructions = append(instructions, p.grantInstruction(schema, changes.granted, false))
+	}
+
+	if len(changes.grantedWithGrantOption) > 0 {
+		instructions = append(instructions, p.grantInstruction(schema, changes.grantedWithGrantOption, true))
+	}
+
+	if len(changes.revokedGrantOption) > 0 {
+		instructions = append(instructions, p.revokeInstruction(schema, changes.revokedGrantOption, true))
+	}
+
+	if len(changes.revoked) > 0 {
+		instructions = append(instructions, p.revokeInstruction(schema, changes.revoked, false))
+	}
+
+	return instructions
+}
+
+func (p *PostgresDefaultPrivilege) grantInstruction(
+	schema string,
+	privileges []string,
+	withGrantOption bool,
+) *PostgresGrantDefaultPrivilegesInstruction {
+	return &PostgresGrantDefaultPrivilegesInstruction{
+		Role:            p.Role,
+		Schema:          schema,
+		Privileges:      privileges,
+		ObjectType:      p.ObjectType,
+		Grantee:         p.Grantee,
+		WithGrantOption: withGrantOption,
+	}
+}
+
+func (p *PostgresDefaultPrivilege) revokeInstruction(
+	schema string,
+	privileges []string,
+	grantOptionFor bool,
+) *PostgresRevokeDefaultPrivilegesInstruction {
+	return &PostgresRevokeDefaultPrivilegesInstruction{
+		Role:           p.Role,
+		Schema:         schema,
+		Privileges:     privileges,
+		ObjectType:     p.ObjectType,
+		Grantee:        p.Grantee,
+		GrantOptionFor: grantOptionFor,
+	}
+}
+
 type PostgresOwner struct {
 	ObjectType string
 	ObjectName string
@@ -351,7 +423,92 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		}
 	}
 
-	return &SectionDiff{Additions: additions}, nil
+	// A default privilege changes only the objects that a later statement creates, so these
+	// statements come after the objects of the diff.
+	defaultPrivilegeInstructions, err := d.diffDefaultPrivileges(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SectionDiff{Additions: slices.Concat(additions, defaultPrivilegeInstructions)}, nil
+}
+
+func (d *PostgresDriver) diffDefaultPrivileges(ctx context.Context) ([]driversshared.Instruction, error) {
+	desiredDefaultPrivileges, err := getDefaultPrivileges(ctx, d.DesiredDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	currentDefaultPrivileges, err := getDefaultPrivileges(ctx, d.CurrentDatabaseConnection)
+	if err != nil {
+		return nil, err
+	}
+
+	var currentSchema string
+
+	err = d.CurrentDatabaseConnection.QueryRowContext(ctx, `SELECT current_schema()`).Scan(&currentSchema)
+	if err != nil {
+		return nil, err
+	}
+
+	var instructions []driversshared.Instruction
+
+	for _, desiredDefaultPrivilege := range desiredDefaultPrivileges {
+		currentDefaultPrivilege, found := lo.Find(currentDefaultPrivileges, func(privilege *PostgresDefaultPrivilege) bool {
+			return privilege.Key() == desiredDefaultPrivilege.Key()
+		})
+		if !found {
+			currentDefaultPrivilege = &PostgresDefaultPrivilege{}
+		}
+
+		instructions = append(instructions,
+			desiredDefaultPrivilege.changeInstructions(currentDefaultPrivilege, currentSchema)...)
+	}
+
+	for _, currentDefaultPrivilege := range currentDefaultPrivileges {
+		_, found := lo.Find(desiredDefaultPrivileges, func(privilege *PostgresDefaultPrivilege) bool {
+			return privilege.Key() == currentDefaultPrivilege.Key()
+		})
+		if !found {
+			instructions = append(instructions,
+				currentDefaultPrivilege.revokeInstruction(currentSchema, currentDefaultPrivilege.Privileges, false))
+		}
+	}
+
+	return instructions, nil
+}
+
+// The object type n is the schemas, and a default privilege of the schemas is never part of
+// one schema.
+func getDefaultPrivileges(ctx context.Context, db *sql.DB) ([]*PostgresDefaultPrivilege, error) {
+	return driversshared.QueryAll(ctx, db, `
+		SELECT
+			pg_get_userbyid(d.defaclrole) AS role_name,
+			CASE d.defaclobjtype
+				WHEN 'r' THEN 'TABLES' WHEN 'S' THEN 'SEQUENCES' WHEN 'f' THEN 'FUNCTIONS' ELSE 'TYPES'
+			END AS object_type,
+			CASE acl.grantee WHEN 0 THEN 'public' ELSE pg_get_userbyid(acl.grantee)::text END AS grantee_name,
+			`+privilegeAggregates+`
+		FROM pg_default_acl d, aclexplode(d.defaclacl) acl
+		WHERE d.defaclnamespace = quote_ident(current_schema())::regnamespace
+		AND d.defaclobjtype IN ('r', 'S', 'f', 'T')
+		GROUP BY d.defaclrole, d.defaclobjtype, acl.grantee
+		ORDER BY role_name, object_type, grantee_name
+	`, func(rows *sql.Rows) (*PostgresDefaultPrivilege, error) {
+		privilege := &PostgresDefaultPrivilege{}
+
+		var granted, grantable string
+
+		err := rows.Scan(&privilege.Role, &privilege.ObjectType, &privilege.Grantee, &granted, &grantable)
+		if err != nil {
+			return nil, err
+		}
+
+		privilege.Privileges = splitPrivileges(granted)
+		privilege.Grantable = splitPrivileges(grantable)
+
+		return privilege, nil
+	})
 }
 
 func (d *PostgresDriver) GetOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error) {

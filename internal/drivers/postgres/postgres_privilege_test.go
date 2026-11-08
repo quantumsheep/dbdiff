@@ -2,6 +2,7 @@ package driverspostgres
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -729,6 +730,58 @@ func TestPostgresPrivilege(t *testing.T) {
 				ObjectName:      "short_text",
 				Grantee:         "dbdiff,writer",
 				WithGrantOption: true,
+			},
+		})
+	})
+
+	t.Run("ChangeTheDefaultPrivilegesOfTheSchema", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		driver.ExecOnCurrent(fmt.Sprintf(`
+			ALTER DEFAULT PRIVILEGES FOR ROLE dbdiff_reader IN SCHEMA %[1]s
+				GRANT EXECUTE ON FUNCTIONS TO "dbdiff,writer";
+			ALTER DEFAULT PRIVILEGES FOR ROLE "user" IN SCHEMA %[1]s
+				GRANT USAGE ON TYPES TO dbdiff_reader WITH GRANT OPTION;
+		`, driver.currentSchema))
+
+		driver.ExecOnDesired(fmt.Sprintf(`
+			ALTER DEFAULT PRIVILEGES FOR ROLE "user" IN SCHEMA %[1]s
+				GRANT SELECT, INSERT ON TABLES TO dbdiff_reader WITH GRANT OPTION;
+			ALTER DEFAULT PRIVILEGES FOR ROLE "user" IN SCHEMA %[1]s
+				GRANT USAGE ON SEQUENCES TO "dbdiff,writer";
+			ALTER DEFAULT PRIVILEGES FOR ROLE "user" IN SCHEMA %[1]s
+				GRANT USAGE ON TYPES TO dbdiff_reader;
+		`, driver.desiredSchema))
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresGrantDefaultPrivilegesInstruction{
+				Role:       "user",
+				Schema:     driver.currentSchema,
+				Privileges: []string{"USAGE"},
+				ObjectType: "SEQUENCES",
+				Grantee:    "dbdiff,writer",
+			},
+			&PostgresGrantDefaultPrivilegesInstruction{
+				Role:            "user",
+				Schema:          driver.currentSchema,
+				Privileges:      []string{"INSERT", "SELECT"},
+				ObjectType:      "TABLES",
+				Grantee:         "dbdiff_reader",
+				WithGrantOption: true,
+			},
+			&PostgresRevokeDefaultPrivilegesInstruction{
+				Role:           "user",
+				Schema:         driver.currentSchema,
+				Privileges:     []string{"USAGE"},
+				ObjectType:     "TYPES",
+				Grantee:        "dbdiff_reader",
+				GrantOptionFor: true,
+			},
+			&PostgresRevokeDefaultPrivilegesInstruction{
+				Role:       "dbdiff_reader",
+				Schema:     driver.currentSchema,
+				Privileges: []string{"EXECUTE"},
+				ObjectType: "FUNCTIONS",
+				Grantee:    "dbdiff,writer",
 			},
 		})
 	})

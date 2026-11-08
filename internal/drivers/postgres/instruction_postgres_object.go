@@ -276,6 +276,46 @@ func (i *PostgresRevokeInstruction) Comment() string {
 	return driversshared.OwnedObjectComment("Change", "privileges", i.ObjectType, i.ObjectName)
 }
 
+type PostgresGrantDefaultPrivilegesInstruction struct {
+	Role            string
+	Schema          string
+	Privileges      []string
+	ObjectType      string
+	Grantee         string
+	WithGrantOption bool
+}
+
+func (i *PostgresGrantDefaultPrivilegesInstruction) String() string {
+	return fmt.Sprintf("ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %s GRANT %s ON %s TO %s%s;",
+		driversshared.QuoteIdentifier(i.Role), driversshared.QuoteIdentifier(i.Schema),
+		joinPrivileges(i.Privileges), i.ObjectType, quoteGrantee(i.Grantee),
+		withGrantOptionClause(i.WithGrantOption))
+}
+
+func (i *PostgresGrantDefaultPrivilegesInstruction) Comment() string {
+	return driversshared.OwnedObjectComment("Change", "default privileges", "schema", i.Schema)
+}
+
+type PostgresRevokeDefaultPrivilegesInstruction struct {
+	Role           string
+	Schema         string
+	Privileges     []string
+	ObjectType     string
+	Grantee        string
+	GrantOptionFor bool
+}
+
+func (i *PostgresRevokeDefaultPrivilegesInstruction) String() string {
+	return fmt.Sprintf("ALTER DEFAULT PRIVILEGES FOR ROLE %s IN SCHEMA %s REVOKE %s%s ON %s FROM %s;",
+		driversshared.QuoteIdentifier(i.Role), driversshared.QuoteIdentifier(i.Schema),
+		grantOptionForClause(i.GrantOptionFor), joinPrivileges(i.Privileges), i.ObjectType,
+		quoteGrantee(i.Grantee))
+}
+
+func (i *PostgresRevokeDefaultPrivilegesInstruction) Comment() string {
+	return driversshared.OwnedObjectComment("Change", "default privileges", "schema", i.Schema)
+}
+
 type PostgresSetOwnerInstruction struct {
 	ObjectType string
 	ObjectName string
