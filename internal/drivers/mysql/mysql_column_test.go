@@ -636,6 +636,51 @@ func TestMySQLColumn(t *testing.T) {
 		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
 	})
 
+	t.Run("MoveAndAddAutoIncrementToAColumnWithANewUniqueKey", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (seq bigint NOT NULL AUTO_INCREMENT, id int NOT NULL, " +
+			"PRIMARY KEY (id), UNIQUE KEY u (seq));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, seq bigint NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5, 10), (9, 20);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "seq",
+						Type:    "bigint",
+						NotNull: true,
+					},
+					First: true,
+				},
+			},
+			&MySQLCreateIndexInstruction{
+				Kind:      "UNIQUE",
+				Name:      "u",
+				TableName: "t",
+				Keys:      []string{"`seq`"},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:          "seq",
+						Type:          "bigint",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"seq": int64(10), "id": int64(5)},
+			{"seq": int64(20), "id": int64(9)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
 	t.Run("ReplaceTheOnlyColumn", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -1547,6 +1592,51 @@ func TestMariaDBColumn(t *testing.T) {
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
 		require.EqualError(t, err, `the check "a" of table "t" names no column. Its expression reads no column `+
 			`or more than one column. Change the check manually`)
+	})
+
+	t.Run("MoveAndAddAutoIncrementToAColumnWithANewUniqueKey", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (seq bigint NOT NULL AUTO_INCREMENT, id int NOT NULL, " +
+			"PRIMARY KEY (id), UNIQUE KEY u (seq));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, seq bigint NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (5, 10), (9, 20);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:    "seq",
+						Type:    "bigint(20)",
+						NotNull: true,
+					},
+					First: true,
+				},
+			},
+			&MySQLCreateIndexInstruction{
+				Kind:      "UNIQUE",
+				Name:      "u",
+				TableName: "t",
+				Keys:      []string{"`seq`"},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLModifyColumnAction{
+					Column: &MySQLColumn{
+						Name:          "seq",
+						Type:          "bigint(20)",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"seq": int64(10), "id": int64(5)},
+			{"seq": int64(20), "id": int64(9)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
 	})
 
 	t.Run("ReplaceTheOnlyColumn", func(t *testing.T) {

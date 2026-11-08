@@ -456,6 +456,8 @@ func (t *MySQLTable) DiffTable(
 
 	instructions = append(instructions, triggerRemovals...)
 
+	var autoIncrementLaterColumnNames []string
+
 	// MySQL refuses the removal of the keys of an AUTO_INCREMENT column, so a column loses
 	// the keyword before the removals of the indexes and of the primary key. The other
 	// changes come after the addition of the primary key.
@@ -494,13 +496,14 @@ func (t *MySQLTable) DiffTable(
 		}
 
 		gainsAutoIncrement := column.AutoIncrement && foundInCurrent && !currentColumn.AutoIncrement
-		if gainsAutoIncrement && !slices.Contains(movedColumnNames, columnName) && !t.keepsKeyOf(columnName, indexAdditions) {
+		if gainsAutoIncrement && !t.keepsKeyOf(columnName, indexAdditions) {
 			autoIncrementAdditions = append(autoIncrementAdditions, &MySQLAlterTableInstruction{
 				Name: t.Name,
 				Action: &MySQLModifyColumnAction{
 					Column: column,
 				},
 			})
+			autoIncrementLaterColumnNames = append(autoIncrementLaterColumnNames, columnName)
 
 			continue
 		}
@@ -625,6 +628,14 @@ func (t *MySQLTable) DiffTable(
 
 		action := &MySQLModifyColumnAction{
 			Column: column,
+		}
+
+		// The key of the column does not exist yet, so the move keeps the column without the
+		// keyword. A MODIFY action after the index additions adds the keyword.
+		if slices.Contains(autoIncrementLaterColumnNames, column.Name) {
+			columnWithoutAutoIncrement := *column
+			columnWithoutAutoIncrement.AutoIncrement = false
+			action.Column = &columnWithoutAutoIncrement
 		}
 
 		if moved {
