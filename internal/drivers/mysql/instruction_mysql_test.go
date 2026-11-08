@@ -261,6 +261,36 @@ func TestMySQLInstructions(t *testing.T) {
 			}).TableActionClause())
 	})
 
+	t.Run("MySQLActionList", func(t *testing.T) {
+		action := &MySQLActionList{
+			Actions: []driversshared.AlterTableAction{
+				&MySQLAddColumnAction{
+					Column: &MySQLColumn{
+						Name:          "uid",
+						Type:          "bigint",
+						NotNull:       true,
+						AutoIncrement: true,
+					},
+				},
+				&MySQLAddPrimaryKeyAction{
+					Columns: []string{"a", "uid"},
+				},
+				&MySQLAddIndexAction{
+					Name: "k",
+					Keys: []string{"`uid`"},
+				},
+				&MySQLAddIndexAction{
+					Kind: "UNIQUE",
+					Name: "u",
+					Keys: []string{"`uid`", "`a`"},
+				},
+			},
+		}
+
+		require.Equal(t, "ADD COLUMN `uid` bigint NOT NULL AUTO_INCREMENT, ADD PRIMARY KEY (`a`, `uid`), "+
+			"ADD INDEX `k` (`uid`), ADD UNIQUE INDEX `u` (`uid`, `a`)", action.TableActionClause())
+	})
+
 	t.Run("MySQLCreateView", func(t *testing.T) {
 		instruction := &MySQLCreateViewInstruction{
 			Name:       "adult_users",

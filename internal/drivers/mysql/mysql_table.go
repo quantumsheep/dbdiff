@@ -316,6 +316,7 @@ func (t *MySQLTable) DiffTable(
 	columnOrder := columnsDiff.newNames(lo.Without(currentColumnNames, columnsDiff.Removed...))
 	primaryKeyChanged := !slices.Equal(t.PrimaryKey, columnsDiff.newNames(other.PrimaryKey))
 	primaryKeyAddedWithColumn := false
+	indexAdditions, indexRemovals := t.indexChanges(other, columnsDiff)
 
 	var addInstructions []driversshared.Instruction
 
@@ -336,10 +337,33 @@ func (t *MySQLTable) DiffTable(
 		}
 		primaryKeyAddedWithColumn = primaryKeyAddedWithColumn || action.PrimaryKey
 
+		action.First, action.After, columnOrder = placeColumn(columnOrder, t.Columns, position)
+
+		// MySQL adds a column at the end by default.
+		if columnOrder[len(columnOrder)-1] == columnName {
+			action.First = false
+			action.After = ""
+		}
+
+		var instructionAction driversshared.AlterTableAction = action
+
+		// A new primary key with other columns can hold repeated values in those columns. So
+		// the key comes in the statement that adds the column, and MySQL numbers the rows
+		// before it checks the key. InnoDB also needs a key that starts with the column.
+		keyActions, mergedIndexAdditions, keysReady := t.autoIncrementKeyActions(columnName, columnOrder, indexAdditions)
+		mergesKeys := column.AutoIncrement && !action.PrimaryKey && primaryKeyChanged && keysReady
+		if mergesKeys {
+			instructionAction = &MySQLActionList{
+				Actions: append([]driversshared.AlterTableAction{action}, keyActions...),
+			}
+			primaryKeyAddedWithColumn = true
+			indexAdditions = lo.Without(indexAdditions, mergedIndexAdditions...)
+		}
+
 		// The key of any other new AUTO_INCREMENT column does not exist yet. So the column
 		// comes without the keyword, and a MODIFY action after the index additions adds the
 		// keyword and numbers the rows. A nullable column lets a unique key accept the rows.
-		if column.AutoIncrement && !action.PrimaryKey {
+		if column.AutoIncrement && !action.PrimaryKey && !mergesKeys {
 			columnWithoutAutoIncrement := *column
 			columnWithoutAutoIncrement.AutoIncrement = false
 			columnWithoutAutoIncrement.NotNull = column.NotNull && slices.Contains(t.PrimaryKey, columnName)
@@ -353,17 +377,9 @@ func (t *MySQLTable) DiffTable(
 			})
 		}
 
-		action.First, action.After, columnOrder = placeColumn(columnOrder, t.Columns, position)
-
-		// MySQL adds a column at the end by default.
-		if columnOrder[len(columnOrder)-1] == columnName {
-			action.First = false
-			action.After = ""
-		}
-
 		addInstructions = append(addInstructions, &MySQLAlterTableInstruction{
 			Name:   t.Name,
-			Action: action,
+			Action: instructionAction,
 		})
 	}
 
@@ -445,7 +461,6 @@ func (t *MySQLTable) DiffTable(
 
 	foreignKeyAdditions, foreignKeyRemovals := t.foreignKeyChanges(other, columnsDiffs)
 	checkAdditions, checkRemovals := t.checkConstraintChanges(keptCurrentChecks, columnsDiff.Recreated)
-	indexAdditions, indexRemovals := t.indexChanges(other, columnsDiff)
 
 	triggerAdditions, triggerRemovals, err := driversshared.DiffByKey(t.Triggers, other.Triggers, diffTriggerRules())
 	if err != nil {
@@ -687,6 +702,54 @@ func (t *MySQLTable) keepsKeyOf(columnName string, indexAdditions []driversshare
 
 		return index.Keys[0] == QuoteIdentifier(columnName) && !added
 	})
+}
+
+// The result holds the addition of the primary key and the additions of the indexes that start
+// with the new AUTO_INCREMENT column. The result is false if the primary key does not hold
+// the column, if a key reads a column that does not exist yet, or if no key starts with the
+// column.
+func (t *MySQLTable) autoIncrementKeyActions(
+	columnName string,
+	columnOrder []string,
+	indexAdditions []driversshared.Instruction,
+) ([]driversshared.AlterTableAction, []driversshared.Instruction, bool) {
+	existingKey := func(key string) bool {
+		return lo.SomeBy(columnOrder, func(name string) bool {
+			return strings.HasPrefix(key, QuoteIdentifier(name))
+		})
+	}
+
+	primaryKeyReady := slices.Contains(t.PrimaryKey, columnName) && lo.EveryBy(t.PrimaryKey, func(name string) bool {
+		return slices.Contains(columnOrder, name)
+	})
+	if !primaryKeyReady {
+		return nil, nil, false
+	}
+
+	keyActions := []driversshared.AlterTableAction{
+		&MySQLAddPrimaryKeyAction{
+			Columns: t.PrimaryKey,
+		},
+	}
+
+	var mergedIndexAdditions []driversshared.Instruction
+
+	for _, instruction := range indexAdditions {
+		createInstruction, isCreate := instruction.(*MySQLCreateIndexInstruction)
+		if !isCreate || createInstruction.Keys[0] != QuoteIdentifier(columnName) ||
+			!lo.EveryBy(createInstruction.Keys, existingKey) {
+			continue
+		}
+
+		keyActions = append(keyActions, &MySQLAddIndexAction{
+			Kind: createInstruction.Kind,
+			Name: createInstruction.Name,
+			Keys: createInstruction.Keys,
+		})
+		mergedIndexAdditions = append(mergedIndexAdditions, instruction)
+	}
+
+	return keyActions, mergedIndexAdditions, t.PrimaryKey[0] == columnName || len(mergedIndexAdditions) > 0
 }
 
 // MariaDB names a column check after its column. A rename of the column keeps the old name

@@ -178,6 +178,35 @@ func (a *MySQLAddPrimaryKeyAction) TableActionClause() string {
 	return "ADD PRIMARY KEY (" + strings.Join(QuoteIdentifiers(a.Columns), ", ") + ")"
 }
 
+type MySQLAddIndexAction struct {
+	// Kind holds "UNIQUE", "FULLTEXT", "SPATIAL", or the empty value.
+	Kind string
+	Name string
+	Keys []string
+}
+
+func (a *MySQLAddIndexAction) TableActionClause() string {
+	clause := "ADD "
+
+	if a.Kind != "" {
+		clause += a.Kind + " "
+	}
+
+	return clause + fmt.Sprintf("INDEX %s (%s)", QuoteIdentifier(a.Name), strings.Join(a.Keys, ", "))
+}
+
+type MySQLActionList struct {
+	Actions []driversshared.AlterTableAction
+}
+
+func (a *MySQLActionList) TableActionClause() string {
+	clauses := lo.Map(a.Actions, func(action driversshared.AlterTableAction, _ int) string {
+		return action.TableActionClause()
+	})
+
+	return strings.Join(clauses, ", ")
+}
+
 type MySQLDropPrimaryKeyAction struct{}
 
 func (a *MySQLDropPrimaryKeyAction) TableActionClause() string {

@@ -490,34 +490,24 @@ func TestMySQLColumn(t *testing.T) {
 			},
 			&MySQLAlterTableInstruction{
 				Name: "t",
-				Action: &MySQLAddColumnAction{
-					Column: &MySQLColumn{
-						Name:    "uid",
-						Type:    "bigint",
-						NotNull: true,
-					},
-					After: "id",
-				},
-			},
-			&MySQLAlterTableInstruction{
-				Name: "t",
-				Action: &MySQLAddPrimaryKeyAction{
-					Columns: []string{"id", "uid"},
-				},
-			},
-			&MySQLCreateIndexInstruction{
-				Name:      "k",
-				TableName: "t",
-				Keys:      []string{"`uid`"},
-			},
-			&MySQLAlterTableInstruction{
-				Name: "t",
-				Action: &MySQLModifyColumnAction{
-					Column: &MySQLColumn{
-						Name:          "uid",
-						Type:          "bigint",
-						NotNull:       true,
-						AutoIncrement: true,
+				Action: &MySQLActionList{
+					Actions: []driversshared.AlterTableAction{
+						&MySQLAddColumnAction{
+							Column: &MySQLColumn{
+								Name:          "uid",
+								Type:          "bigint",
+								NotNull:       true,
+								AutoIncrement: true,
+							},
+							After: "id",
+						},
+						&MySQLAddPrimaryKeyAction{
+							Columns: []string{"id", "uid"},
+						},
+						&MySQLAddIndexAction{
+							Name: "k",
+							Keys: []string{"`uid`"},
+						},
 					},
 				},
 			},
@@ -526,6 +516,50 @@ func TestMySQLColumn(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"id": int64(5), "uid": int64(1), "a": int64(1)},
 			{"id": int64(9), "uid": int64(2), "a": int64(2)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("AddAnAutoIncrementColumnToACompositePrimaryKeyWithRepeatedValues", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, a int NOT NULL, uid bigint NOT NULL AUTO_INCREMENT, " +
+			"PRIMARY KEY (a, uid), KEY k (uid));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1, 7), (2, 7), (3, 8);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name:   "t",
+				Action: &MySQLDropPrimaryKeyAction{},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLActionList{
+					Actions: []driversshared.AlterTableAction{
+						&MySQLAddColumnAction{
+							Column: &MySQLColumn{
+								Name:          "uid",
+								Type:          "bigint",
+								NotNull:       true,
+								AutoIncrement: true,
+							},
+						},
+						&MySQLAddPrimaryKeyAction{
+							Columns: []string{"a", "uid"},
+						},
+						&MySQLAddIndexAction{
+							Name: "k",
+							Keys: []string{"`uid`"},
+						},
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "a": int64(7), "uid": int64(1)},
+			{"id": int64(2), "a": int64(7), "uid": int64(2)},
+			{"id": int64(3), "a": int64(8), "uid": int64(3)},
 		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
 	})
 
@@ -1636,6 +1670,50 @@ func TestMariaDBColumn(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"seq": int64(10), "id": int64(5)},
 			{"seq": int64(20), "id": int64(9)},
+		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
+	})
+
+	t.Run("AddAnAutoIncrementColumnToACompositePrimaryKeyWithRepeatedValues", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE t (id int NOT NULL, a int NOT NULL, uid bigint NOT NULL AUTO_INCREMENT, " +
+			"PRIMARY KEY (a, uid), KEY k (uid));")
+		driver.ExecOnCurrent("CREATE TABLE t (id int NOT NULL, a int NOT NULL, PRIMARY KEY (id));")
+		driver.ExecOnCurrent("INSERT INTO t VALUES (1, 7), (2, 7), (3, 8);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name:   "t",
+				Action: &MySQLDropPrimaryKeyAction{},
+			},
+			&MySQLAlterTableInstruction{
+				Name: "t",
+				Action: &MySQLActionList{
+					Actions: []driversshared.AlterTableAction{
+						&MySQLAddColumnAction{
+							Column: &MySQLColumn{
+								Name:          "uid",
+								Type:          "bigint(20)",
+								NotNull:       true,
+								AutoIncrement: true,
+							},
+						},
+						&MySQLAddPrimaryKeyAction{
+							Columns: []string{"a", "uid"},
+						},
+						&MySQLAddIndexAction{
+							Name: "k",
+							Keys: []string{"`uid`"},
+						},
+					},
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "a": int64(7), "uid": int64(1)},
+			{"id": int64(2), "a": int64(7), "uid": int64(2)},
+			{"id": int64(3), "a": int64(8), "uid": int64(3)},
 		}, driver.FetchAllFromCurrent("t", "ORDER BY id"))
 	})
 
