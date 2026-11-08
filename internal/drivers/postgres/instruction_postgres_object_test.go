@@ -115,6 +115,19 @@ func TestPostgresObjectInstructions(t *testing.T) {
 			instruction.String())
 	})
 
+	t.Run("PostgresSetOwnerOfAnAggregateWithNoArguments", func(t *testing.T) {
+		instruction := &PostgresSetOwnerInstruction{
+			ObjectType: "AGGREGATE",
+			ObjectName: "row_total",
+			Arguments:  "",
+			Owner:      "app_owner",
+		}
+
+		require.Equal(t,
+			`ALTER AGGREGATE "row_total"(*) OWNER TO "app_owner";`,
+			instruction.String())
+	})
+
 	t.Run("PostgresSetOwner", func(t *testing.T) {
 		instruction := &PostgresSetOwnerInstruction{
 			ObjectType: "TABLE",

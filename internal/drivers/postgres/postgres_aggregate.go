@@ -11,6 +11,7 @@ import (
 type PostgresAggregate struct {
 	Name               string
 	Arguments          string
+	ArgumentTypes      string
 	StateType          string
 	TransitionFunction string
 	TransitionSpace    int64
@@ -102,7 +103,12 @@ func (d *PostgresDriver) DiffAggregates(ctx context.Context) (*SectionDiff, erro
 			return []driversshared.Instruction{aggregate.CreateInstruction()}
 		},
 		Change: func(desired *PostgresAggregate, current *PostgresAggregate) []driversshared.Instruction {
-			return desired.Diff(current)
+			instructions := desired.Diff(current)
+			if instructions != nil {
+				d.markRecreated(privilegeObjectKey("AGGREGATE", current.Name, current.ArgumentTypes))
+			}
+
+			return instructions
 		},
 		Drop: func(current *PostgresAggregate) driversshared.Instruction {
 			return current.DropInstruction()
@@ -115,6 +121,7 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 		SELECT
 			p.proname,
 			pg_get_function_identity_arguments(p.oid),
+			oidvectortypes(p.proargtypes),
 			format_type(a.aggtranstype, NULL),
 			a.aggtransfn::regproc::text,
 			a.aggtransspace,
@@ -148,6 +155,7 @@ func (d *PostgresDriver) GetAggregates(ctx context.Context, db *sql.DB) ([]*Post
 		err := rows.Scan(
 			&aggregate.Name,
 			&aggregate.Arguments,
+			&aggregate.ArgumentTypes,
 			&aggregate.StateType,
 			&aggregate.TransitionFunction,
 			&aggregate.TransitionSpace,

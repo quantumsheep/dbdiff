@@ -65,11 +65,22 @@ func (o *PostgresOwner) SetInstruction() *PostgresSetOwnerInstruction {
 }
 
 func isRoutineObjectType(objectType string) bool {
-	return objectType == "FUNCTION" || objectType == "PROCEDURE"
+	return objectType == "FUNCTION" || objectType == "PROCEDURE" || objectType == "AGGREGATE"
+}
+
+// A GRANT statement names an aggregate with the keyword FUNCTION, and an ALTER statement
+// names it with the keyword AGGREGATE.
+func privilegeGrantObjectType(ownerObjectType string) string {
+	if ownerObjectType == "AGGREGATE" {
+		return "FUNCTION"
+	}
+
+	return ownerObjectType
 }
 
 // The key of a routine is the match key of DiffFunctions, and droppedFunctionKeys holds
-// that key. The key of a relation is its name, and recreatedObjectNames holds that name.
+// that key. DiffAggregates puts the key of a recreated aggregate in recreatedObjectNames.
+// The key of a relation is its name, and recreatedObjectNames holds that name.
 func privilegeObjectKey(objectType string, objectName string, arguments string) string {
 	if !isRoutineObjectType(objectType) {
 		return objectName
@@ -78,7 +89,7 @@ func privilegeObjectKey(objectType string, objectName string, arguments string) 
 	routine := &PostgresFunction{
 		Name:          objectName,
 		ArgumentTypes: arguments,
-		Kind:          objectType,
+		Kind:          privilegeGrantObjectType(objectType),
 	}
 
 	return routine.MatchKey()
@@ -87,11 +98,7 @@ func privilegeObjectKey(objectType string, objectName string, arguments string) 
 func (d *PostgresDriver) isRecreated(objectType string, objectName string, arguments string) bool {
 	key := privilegeObjectKey(objectType, objectName, arguments)
 
-	if isRoutineObjectType(objectType) {
-		return d.droppedFunctionKeys[key]
-	}
-
-	return d.recreatedObjectNames[key]
+	return d.droppedFunctionKeys[key] || d.recreatedObjectNames[key]
 }
 
 // PostgreSQL names a view and a materialized view with the keyword TABLE in a GRANT.
@@ -187,7 +194,7 @@ func (d *PostgresDriver) DiffPrivileges(ctx context.Context) (*SectionDiff, erro
 		if !slices.Contains(currentObjectKeys, desiredOwner.Key()) ||
 			d.isRecreated(desiredOwner.ObjectType, desiredOwner.ObjectName, desiredOwner.Arguments) {
 			currentPrivileges = append(currentPrivileges, &PostgresPrivilege{
-				ObjectType: desiredOwner.ObjectType,
+				ObjectType: privilegeGrantObjectType(desiredOwner.ObjectType),
 				ObjectName: desiredOwner.ObjectName,
 				Arguments:  desiredOwner.Arguments,
 				Grantee:    "public",
@@ -363,12 +370,12 @@ func getRoutineOwners(ctx context.Context, db *sql.DB) ([]*PostgresOwner, error)
 	return driversshared.QueryAll(ctx, db, `
 		SELECT
 			p.proname,
-			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+			CASE p.prokind WHEN 'p' THEN 'PROCEDURE' WHEN 'a' THEN 'AGGREGATE' ELSE 'FUNCTION' END,
 			oidvectortypes(p.proargtypes),
 			pg_get_userbyid(p.proowner)
 		FROM pg_proc p
 		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
-		AND p.prokind IN ('f', 'p')
+		AND p.prokind IN ('f', 'p', 'a')
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
 		)
@@ -394,7 +401,7 @@ func getRoutinePrivileges(ctx context.Context, db *sql.DB) ([]*PostgresPrivilege
 			array_to_string(array_agg(acl.privilege_type ORDER BY acl.privilege_type), ',')
 		FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
 		WHERE p.pronamespace = quote_ident(current_schema())::regnamespace
-		AND p.prokind IN ('f', 'p')
+		AND p.prokind IN ('f', 'p', 'a')
 		AND acl.grantee <> p.proowner
 		AND NOT EXISTS (
 			SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'

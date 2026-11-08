@@ -1,6 +1,7 @@
 package driverspostgres
 
 import (
+	"database/sql"
 	"testing"
 
 	driversshared "github.com/quantumsheep/dbdiff/internal/drivers/shared"
@@ -345,6 +346,91 @@ func TestPostgresPrivilege(t *testing.T) {
 				Privileges: []string{"EXECUTE"},
 				ObjectType: "FUNCTION",
 				ObjectName: "add_two",
+				Arguments:  "integer",
+				Grantee:    "public",
+			},
+		})
+	})
+
+	t.Run("GrantExecuteOnAnAggregate", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		setup := `
+			CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;
+			CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer);
+		`
+		driver.ExecOnCurrent(setup)
+
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`
+			GRANT EXECUTE ON FUNCTION total(integer) TO dbdiff_reader;
+			REVOKE EXECUTE ON FUNCTION total(integer) FROM PUBLIC;
+		`)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresGrantInstruction{
+				Privileges: []string{"EXECUTE"},
+				ObjectType: "FUNCTION",
+				ObjectName: "total",
+				Arguments:  "integer",
+				Grantee:    "dbdiff_reader",
+			},
+			&PostgresRevokeInstruction{
+				Privileges: []string{"EXECUTE"},
+				ObjectType: "FUNCTION",
+				ObjectName: "total",
+				Arguments:  "integer",
+				Grantee:    "public",
+			},
+		})
+	})
+
+	t.Run("ARecreatedAggregateKeepsItsGrants", func(t *testing.T) {
+		driver := NewTestPostgresDriverWithPrivileges(t)
+
+		setup := `CREATE FUNCTION int_add(integer, integer) RETURNS integer AS $$ SELECT $1 + $2; $$ LANGUAGE sql IMMUTABLE;`
+		grants := `
+			REVOKE EXECUTE ON FUNCTION total(integer) FROM PUBLIC;
+			GRANT EXECUTE ON FUNCTION total(integer) TO dbdiff_reader;
+		`
+		driver.ExecOnCurrent(setup)
+		driver.ExecOnCurrent(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '10');`)
+		driver.ExecOnCurrent(grants)
+
+		driver.ExecOnDesired(setup)
+		driver.ExecOnDesired(`CREATE AGGREGATE total(integer) (SFUNC = int_add, STYPE = integer, INITCOND = '0');`)
+		driver.ExecOnDesired(grants)
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&PostgresDropAggregateInstruction{
+				Name:      "total",
+				Arguments: "integer",
+			},
+			&PostgresCreateAggregateInstruction{
+				Name:               "total",
+				Arguments:          "integer",
+				TransitionFunction: "int_add",
+				StateType:          "integer",
+				InitialCondition: sql.NullString{
+					String: "0",
+					Valid:  true,
+				},
+			},
+			&PostgresSetOwnerInstruction{
+				ObjectType: "AGGREGATE",
+				ObjectName: "total",
+				Arguments:  "integer",
+				Owner:      "user",
+			},
+			&PostgresGrantInstruction{
+				Privileges: []string{"EXECUTE"},
+				ObjectType: "FUNCTION",
+				ObjectName: "total",
+				Arguments:  "integer",
+				Grantee:    "dbdiff_reader",
+			},
+			&PostgresRevokeInstruction{
+				Privileges: []string{"EXECUTE"},
+				ObjectType: "FUNCTION",
+				ObjectName: "total",
 				Arguments:  "integer",
 				Grantee:    "public",
 			},

@@ -288,9 +288,14 @@ func (i *PostgresSetOwnerInstruction) Comment() string {
 }
 
 // Overloads of a routine share one name, so the argument types select the routine.
+// ALTER AGGREGATE refuses an empty argument list, and the star names no argument.
 func quotePrivilegeObject(objectType string, objectName string, arguments string) string {
 	if !isRoutineObjectType(objectType) {
 		return driversshared.QuoteIdentifier(objectName)
+	}
+
+	if objectType == "AGGREGATE" && arguments == "" {
+		return driversshared.QuoteIdentifier(objectName) + "(*)"
 	}
 
 	return driversshared.QuoteIdentifier(objectName) + "(" + arguments + ")"
