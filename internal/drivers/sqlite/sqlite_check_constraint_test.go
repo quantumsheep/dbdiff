@@ -80,8 +80,8 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_people_temp",
-					ColumnNames:       []string{"name"},
-					SelectExpressions: []string{`"name"`},
+					ColumnNames:       []string{"rowid", "name"},
+					SelectExpressions: []string{`"rowid"`, `"name"`},
 					FromTableName:     "people",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "people"},
@@ -158,8 +158,8 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_items_temp",
-					ColumnNames:       []string{"id"},
-					SelectExpressions: []string{`"id"`},
+					ColumnNames:       []string{"rowid", "id"},
+					SelectExpressions: []string{`"rowid"`, `"id"`},
 					FromTableName:     "items",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "items"},
@@ -245,8 +245,8 @@ func TestSQLiteCheckConstraint(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_people_temp",
-					ColumnNames:       []string{"age"},
-					SelectExpressions: []string{`"age"`},
+					ColumnNames:       []string{"rowid", "age"},
+					SelectExpressions: []string{`"rowid"`, `"age"`},
 					FromTableName:     "people",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "people"},

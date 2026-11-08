@@ -239,8 +239,8 @@ func TestSQLiteForeignKey(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_items_temp",
-					ColumnNames:       []string{"owner"},
-					SelectExpressions: []string{`"owner"`},
+					ColumnNames:       []string{"rowid", "owner"},
+					SelectExpressions: []string{`"rowid"`, `"owner"`},
 					FromTableName:     "items",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "items"},

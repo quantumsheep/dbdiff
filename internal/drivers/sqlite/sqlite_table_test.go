@@ -96,8 +96,8 @@ func TestSQLiteTable(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_events_temp",
-					ColumnNames:       []string{"id", "label"},
-					SelectExpressions: []string{`"id"`, `"label"`},
+					ColumnNames:       []string{"rowid", "id", "label"},
+					SelectExpressions: []string{`"rowid"`, `"id"`, `"label"`},
 					FromTableName:     "events",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "events"},
@@ -176,8 +176,8 @@ func TestSQLiteTable(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_people_temp",
-					ColumnNames:       []string{"age", "name"},
-					SelectExpressions: []string{`"age"`, `"name"`},
+					ColumnNames:       []string{"rowid", "age", "name"},
+					SelectExpressions: []string{`"rowid"`, `"age"`, `"name"`},
 					FromTableName:     "people",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "people"},
@@ -193,6 +193,102 @@ func TestSQLiteTable(t *testing.T) {
 		require.Equal(t, []map[string]any{
 			{"age": int64(36), "name": "Ada"},
 		}, rows)
+	})
+
+	t.Run("RecreationKeepsTheRowIDs", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE people (name TEXT, age INTEGER);
+			INSERT INTO people (name, age) VALUES ('Ada', 36), ('Bob', 40), ('Cy', 50);
+			DELETE FROM people WHERE name = 'Bob';
+		`)
+		driver.ExecOnDesired(`CREATE TABLE people (age INTEGER, name TEXT);`)
+		driver.RequireDiffApplies(slices.Concat(
+			recreationPrologue(),
+			recreated("people",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_people_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name: "age",
+							Type: "INTEGER",
+						},
+						{
+							Name: "name",
+							Type: "TEXT",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_people_temp",
+					ColumnNames:       []string{"rowid", "age", "name"},
+					SelectExpressions: []string{`"rowid"`, `"age"`, `"name"`},
+					FromTableName:     "people",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "people"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_people_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
+				},
+			),
+			recreationEpilogue("people"),
+		))
+
+		var rowIDs string
+
+		err := driver.currentDatabase().QueryRowContext(t.Context(), `SELECT group_concat(rowid || ':' || name, ',') FROM (SELECT rowid, name FROM people ORDER BY rowid);`).Scan(&rowIDs)
+		require.NoError(t, err)
+		require.Equal(t, "1:Ada,3:Cy", rowIDs)
+	})
+
+	t.Run("RecreationKeepsTheRowIDsWhenAColumnTakesTheNameRowID", func(t *testing.T) {
+		driver := NewTestSQLiteDriver(t)
+
+		driver.ExecOnCurrent(`
+			CREATE TABLE people (rowid TEXT, name TEXT);
+			INSERT INTO people (rowid, name) VALUES ('a', 'Ada'), ('b', 'Bob'), ('c', 'Cy');
+			DELETE FROM people WHERE name = 'Bob';
+		`)
+		driver.ExecOnDesired(`CREATE TABLE people (name TEXT, rowid TEXT);`)
+		driver.RequireDiffApplies(slices.Concat(
+			recreationPrologue(),
+			recreated("people",
+				&SQLiteCreateTableInstruction{
+					ForeignKeys: []*SQLiteForeignKey{},
+					Name:        "_people_temp",
+					Columns: []*SQLiteColumn{
+						{
+							Name: "name",
+							Type: "TEXT",
+						},
+						{
+							Name: "rowid",
+							Type: "TEXT",
+						},
+					},
+				},
+				&driversshared.SQLInsertSelectInstruction{
+					TableName:         "_people_temp",
+					ColumnNames:       []string{"_rowid_", "name", "rowid"},
+					SelectExpressions: []string{`"_rowid_"`, `"name"`, `"rowid"`},
+					FromTableName:     "people",
+				},
+				&driversshared.SQLDropTableInstruction{Name: "people"},
+				&SQLiteAlterTableInstruction{
+					Name:   "_people_temp",
+					Action: &driversshared.SQLRenameTableAction{NewName: "people"},
+				},
+			),
+			recreationEpilogue("people"),
+		))
+
+		var rowIDs string
+
+		err := driver.currentDatabase().QueryRowContext(t.Context(), `SELECT group_concat(_rowid_ || ':' || name, ',') FROM (SELECT _rowid_, name FROM people ORDER BY _rowid_);`).Scan(&rowIDs)
+		require.NoError(t, err)
+		require.Equal(t, "1:Ada,3:Cy", rowIDs)
 	})
 
 	t.Run("AddColumnBeforeAnExistingColumnRecreatesTheTable", func(t *testing.T) {
@@ -226,8 +322,8 @@ func TestSQLiteTable(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_people_temp",
-					ColumnNames:       []string{"name", "email", "age"},
-					SelectExpressions: []string{`"name"`, "NULL", `"age"`},
+					ColumnNames:       []string{"rowid", "name", "email", "age"},
+					SelectExpressions: []string{`"rowid"`, `"name"`, "NULL", `"age"`},
 					FromTableName:     "people",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "people"},
@@ -556,8 +652,8 @@ func TestSQLiteTable(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_memberships_temp",
-					ColumnNames:       []string{"team", "member", "level"},
-					SelectExpressions: []string{`"team"`, `"member"`, `"level"`},
+					ColumnNames:       []string{"rowid", "team", "member", "level"},
+					SelectExpressions: []string{`"rowid"`, `"team"`, `"member"`, `"level"`},
 					FromTableName:     "memberships",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "memberships"},
@@ -620,8 +716,8 @@ func TestSQLiteTable(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_memberships_temp",
-					ColumnNames:       []string{"team", "member"},
-					SelectExpressions: []string{`"team"`, `"member"`},
+					ColumnNames:       []string{"rowid", "team", "member"},
+					SelectExpressions: []string{`"rowid"`, `"team"`, `"member"`},
 					FromTableName:     "memberships",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "memberships"},
@@ -691,8 +787,8 @@ func TestSQLiteTable(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_memberships_temp",
-					ColumnNames:       []string{"team", "member", "role"},
-					SelectExpressions: []string{`"team"`, `"member"`, `"role"`},
+					ColumnNames:       []string{"rowid", "team", "member", "role"},
+					SelectExpressions: []string{`"rowid"`, `"team"`, `"member"`, `"role"`},
 					FromTableName:     "memberships",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "memberships"},
@@ -751,8 +847,8 @@ func TestSQLiteTable(t *testing.T) {
 				},
 				&driversshared.SQLInsertSelectInstruction{
 					TableName:         "_users_temp",
-					ColumnNames:       []string{"email", "age"},
-					SelectExpressions: []string{`"email"`, `"age"`},
+					ColumnNames:       []string{"rowid", "email", "age"},
+					SelectExpressions: []string{`"rowid"`, `"email"`, `"age"`},
 					FromTableName:     "users",
 				},
 				&driversshared.SQLDropTableInstruction{Name: "users"},

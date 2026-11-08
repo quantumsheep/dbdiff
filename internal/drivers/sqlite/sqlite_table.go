@@ -462,6 +462,32 @@ func temporaryTableName(tableName string, reservedNames map[string]bool) string 
 	return name
 }
 
+// Without an INTEGER PRIMARY KEY column, the copy gives new rowid values to the rows. An FTS
+// index or an application can store a rowid. A column can take the name rowid, so the copy
+// uses the first rowid name that no column takes.
+func copiedRowIDName(desired *SQLiteTable, current *SQLiteTable) (string, bool) {
+	if desired.WithoutRowID || current.WithoutRowID || hasRowIDAlias(desired) {
+		return "", false
+	}
+
+	for _, name := range []string{"rowid", "_rowid_", "oid"} {
+		takenByAColumn := lo.SomeBy(slices.Concat(desired.Columns, current.Columns), func(column *SQLiteColumn) bool {
+			return identifierKey(column.Name) == name
+		})
+		if !takenByAColumn {
+			return name, true
+		}
+	}
+
+	return "", false
+}
+
+func hasRowIDAlias(table *SQLiteTable) bool {
+	return lo.SomeBy(table.Columns, func(column *SQLiteColumn) bool {
+		return column.PrimaryKey && strings.EqualFold(column.Type, "INTEGER")
+	})
+}
+
 // A column definition reads DEFAULT "x" as the text x, but a SELECT statement reads "x" as
 // the column x. Therefore, the copy writes the text as a string literal.
 func defaultExpression(defaultText string) string {
@@ -521,6 +547,12 @@ func (t *SQLiteTable) recreationInstructions(
 		} else {
 			selectColumns = append(selectColumns, driversshared.SQLNullLiteral)
 		}
+	}
+
+	rowIDName, copiesRowID := copiedRowIDName(t, current)
+	if copiesRowID {
+		insertColumns = slices.Insert(insertColumns, 0, rowIDName)
+		selectColumns = slices.Insert(selectColumns, 0, driversshared.QuoteIdentifier(rowIDName))
 	}
 
 	recreation := []driversshared.Instruction{
