@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -987,16 +988,18 @@ func (d *MySQLDriver) GetTablePartitionClause(ctx context.Context, db *sql.DB, t
 	return parsePartitionClause(definition), nil
 }
 
-// The clause ends the text of SHOW CREATE TABLE, so the last occurrence skips a comment
-// or a default value that holds the same words. An old server wraps the clause in the
-// conditional comment /*!50100 ... */.
+// SHOW CREATE TABLE starts the clause on its own line, and escapes each newline of a value.
+// The SUBPARTITION BY line does not match.
+// An old server wraps the clause in the conditional comment /*!50100 ... */.
+var partitionClauseStart = regexp.MustCompile(`(?m)^(?:/\*!\d+)? *PARTITION BY`)
+
 func parsePartitionClause(definition string) string {
-	position := strings.LastIndex(definition, "PARTITION BY")
-	if position < 0 {
+	location := partitionClauseStart.FindStringIndex(definition)
+	if location == nil {
 		return ""
 	}
 
-	clause := strings.TrimSpace(definition[position:])
+	clause := definition[location[1]-len("PARTITION BY"):]
 
-	return strings.TrimSpace(strings.TrimSuffix(clause, "*/"))
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(clause), "*/"))
 }

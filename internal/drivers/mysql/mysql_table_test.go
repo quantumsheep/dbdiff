@@ -259,6 +259,62 @@ func TestMySQLTable(t *testing.T) {
 		})
 	})
 
+	t.Run("CreateSubpartitionedTable", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE metrics (id int NOT NULL, d int NOT NULL, note varchar(50) DEFAULT 'PARTITION BY x', PRIMARY KEY (id, d)) PARTITION BY RANGE (d) SUBPARTITION BY HASH (id) SUBPARTITIONS 2 (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateTableInstruction{
+				Name: "metrics",
+				Columns: []*MySQLColumn{
+					{
+						Name:    "id",
+						Type:    "int",
+						NotNull: true,
+					},
+					{
+						Name:    "d",
+						Type:    "int",
+						NotNull: true,
+					},
+					{
+						Name: "note",
+						Type: "varchar(50)",
+						Default: sql.NullString{
+							String: "PARTITION BY x",
+							Valid:  true,
+						},
+					},
+				},
+				PrimaryKey: []string{"id", "d"},
+				Partition:  "PARTITION BY RANGE (`d`)\nSUBPARTITION BY HASH (`id`)\nSUBPARTITIONS 2\n(PARTITION p0 VALUES LESS THAN (10) ENGINE = InnoDB,\n PARTITION p1 VALUES LESS THAN MAXVALUE ENGINE = InnoDB)",
+			},
+		})
+	})
+
+	t.Run("ChangeTheRangesOfASubpartitionedTable", func(t *testing.T) {
+		driver := NewTestMySQLDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE metrics (id int NOT NULL, d int NOT NULL, note varchar(50) DEFAULT 'PARTITION BY x', PRIMARY KEY (id, d)) PARTITION BY RANGE (d) SUBPARTITION BY HASH (id) SUBPARTITIONS 2 (PARTITION p0 VALUES LESS THAN (20), PARTITION p1 VALUES LESS THAN MAXVALUE);")
+		driver.ExecOnCurrent("CREATE TABLE metrics (id int NOT NULL, d int NOT NULL, note varchar(50) DEFAULT 'PARTITION BY x', PRIMARY KEY (id, d)) PARTITION BY RANGE (d) SUBPARTITION BY HASH (id) SUBPARTITIONS 2 (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE);")
+		driver.ExecOnCurrent("INSERT INTO metrics (id, d) VALUES (1, 5), (2, 15);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLAlterTableInstruction{
+				Name: "metrics",
+				Action: &MySQLPartitionAction{
+					Clause: "PARTITION BY RANGE (`d`)\nSUBPARTITION BY HASH (`id`)\nSUBPARTITIONS 2\n(PARTITION p0 VALUES LESS THAN (20) ENGINE = InnoDB,\n PARTITION p1 VALUES LESS THAN MAXVALUE ENGINE = InnoDB)",
+				},
+			},
+		})
+
+		require.Equal(t, []map[string]any{
+			{"id": int64(1), "d": int64(5), "note": "PARTITION BY x"},
+			{"id": int64(2), "d": int64(15), "note": "PARTITION BY x"},
+		}, driver.FetchAllFromCurrent("metrics", "ORDER BY id"))
+	})
+
 	t.Run("AddPartitioning", func(t *testing.T) {
 		driver := NewTestMySQLDriver(t)
 
@@ -314,6 +370,40 @@ func TestMariaDBTable(t *testing.T) {
 				},
 				PrimaryKey: []string{"id"},
 				Partition:  "PARTITION BY HASH (`id`)\nPARTITIONS 4",
+			},
+		})
+	})
+	t.Run("SubpartitionedTable", func(t *testing.T) {
+		driver := NewTestMariaDBDriver(t)
+
+		driver.ExecOnDesired("CREATE TABLE metrics (id int NOT NULL, d int NOT NULL, note varchar(50) DEFAULT 'PARTITION BY x', PRIMARY KEY (id, d)) PARTITION BY RANGE (d) SUBPARTITION BY HASH (id) SUBPARTITIONS 2 (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE);")
+
+		driver.RequireDiffApplies([]driversshared.Instruction{
+			&MySQLCreateTableInstruction{
+				Name: "metrics",
+				Columns: []*MySQLColumn{
+					{
+						Name:    "id",
+						Type:    "int(11)",
+						NotNull: true,
+					},
+					{
+						Name:    "d",
+						Type:    "int(11)",
+						NotNull: true,
+					},
+					{
+						Name: "note",
+						Type: "varchar(50)",
+						Default: sql.NullString{
+							String: "'PARTITION BY x'",
+							Valid:  true,
+						},
+						DefaultIsExpression: true,
+					},
+				},
+				PrimaryKey: []string{"id", "d"},
+				Partition:  "PARTITION BY RANGE (`d`)\nSUBPARTITION BY HASH (`id`)\nSUBPARTITIONS 2\n(PARTITION `p0` VALUES LESS THAN (10) ENGINE = InnoDB,\n PARTITION `p1` VALUES LESS THAN MAXVALUE ENGINE = InnoDB)",
 			},
 		})
 	})
