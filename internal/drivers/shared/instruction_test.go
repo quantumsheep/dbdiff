@@ -214,6 +214,12 @@ func TestInstructions(t *testing.T) {
 		require.Equal(t, "-- first DROP TABLE users;", instruction.String())
 	})
 
+	t.Run("CommentWithAControlCharacter", func(t *testing.T) {
+		instruction := &SQLCommentInstruction{Text: "Drop the table \"a\rDROP TABLE users;\v\f\u0085\t\""}
+
+		require.Equal(t, "-- Drop the table \"a DROP TABLE users;    \"", instruction.String())
+	})
+
 	t.Run("DropColumnAction", func(t *testing.T) {
 		action := &SQLDropColumnAction{ColumnName: "email"}
 

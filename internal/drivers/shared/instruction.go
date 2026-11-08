@@ -3,6 +3,7 @@ package driversshared
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/samber/lo"
 )
@@ -230,9 +231,16 @@ type SQLCommentInstruction struct {
 }
 
 func (i *SQLCommentInstruction) String() string {
-	// If the text holds a newline, the comment ends there and the rest of the line runs as
-	// SQL. One space replaces every newline.
-	return "-- " + strings.ReplaceAll(i.Text, "\n", " ")
+	// If the text holds a line break, the comment ends there and the rest of the line runs as
+	// SQL. PostgreSQL also ends a comment at a carriage return. One space replaces every
+	// control character.
+	return "-- " + strings.Map(func(character rune) rune {
+		if unicode.IsControl(character) {
+			return ' '
+		}
+
+		return character
+	}, i.Text)
 }
 
 // A comment of the output takes no comment of its own.
