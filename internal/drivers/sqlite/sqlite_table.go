@@ -643,7 +643,7 @@ func (d *SQLiteDriver) GetTables(ctx context.Context, db *sql.DB) ([]*SQLiteTabl
 
 		table, err := d.GetTable(ctx, db, tableName)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read the table %q: %w", tableName, err)
 		}
 
 		tables = append(tables, table)

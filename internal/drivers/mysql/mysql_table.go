@@ -903,7 +903,7 @@ func (d *MySQLDriver) GetTables(ctx context.Context, db *sql.DB) ([]*MySQLTable,
 
 		table, err := d.GetTable(ctx, db, row.Name, row.Engine, row.Collation, partitioned)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read the table %q: %w", row.Name, err)
 		}
 
 		tables = append(tables, table)

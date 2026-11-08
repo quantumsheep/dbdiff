@@ -93,7 +93,7 @@ func TestPostgresTable(t *testing.T) {
 		})
 
 		_, err := driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
-		require.EqualError(t, err, `the table "child" has a parent table in another schema. dbdiff compares one schema `+
+		require.EqualError(t, err, `failed to compare the tables: the table "child" has a parent table in another schema. dbdiff compares one schema `+
 			`per run, so it cannot create the table or change its parents`)
 	})
 
@@ -116,7 +116,7 @@ func TestPostgresTable(t *testing.T) {
 		})
 
 		_, err := driver.Diff(t.Context(), harness.current, harness.desired, driversshared.DiffOptions{})
-		require.EqualError(t, err, `the table "events_low" has a parent table in another schema. dbdiff compares one `+
+		require.EqualError(t, err, `failed to compare the tables: the table "events_low" has a parent table in another schema. dbdiff compares one `+
 			`schema per run, so it cannot create the table or change its parents`)
 	})
 
@@ -1976,7 +1976,7 @@ func TestPostgresTable(t *testing.T) {
 
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
 		require.EqualError(t, err,
-			`the table "measurements_low" changes from a table to a partition, and dbdiff cannot diff this change`)
+			`failed to compare the tables: the table "measurements_low" changes from a table to a partition, and dbdiff cannot diff this change`)
 	})
 
 	t.Run("TableNameThatNeedsQuotes", func(t *testing.T) {

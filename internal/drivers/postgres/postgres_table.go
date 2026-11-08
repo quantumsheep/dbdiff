@@ -1959,7 +1959,7 @@ func (d *PostgresDriver) GetTables(ctx context.Context, db *sql.DB) ([]*Postgres
 	for _, table := range tables {
 		err = d.getTableDetails(ctx, db, table)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read the table %q: %w", table.Name, err)
 		}
 	}
 

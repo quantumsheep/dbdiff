@@ -442,7 +442,7 @@ func TestPostgresFunction(t *testing.T) {
 		`)
 
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
-		require.EqualError(t, err, `the constraint small_check uses the function "answer". `+
+		require.EqualError(t, err, `failed to compare the functions: the constraint small_check uses the function "answer". `+
 			`dbdiff must drop and create this function again. `+
 			`dbdiff cannot drop and create this object again. `+
 			`Drop this object and run dbdiff again. After you apply the diff, create the object again`)
@@ -461,7 +461,7 @@ func TestPostgresFunction(t *testing.T) {
 		`)
 
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
-		require.EqualError(t, err, `the default value for column value of table answers uses the function "answer". `+
+		require.EqualError(t, err, `failed to compare the functions: the default value for column value of table answers uses the function "answer". `+
 			`dbdiff must drop and create this function again. `+
 			`dbdiff cannot drop and create this object again. `+
 			`Drop this object and run dbdiff again. After you apply the diff, create the object again`)
@@ -478,7 +478,7 @@ func TestPostgresFunction(t *testing.T) {
 		driver.ExecOnDesired(`CREATE FUNCTION answer() RETURNS bigint LANGUAGE sql AS 'SELECT 42';` + schema)
 
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
-		require.EqualError(t, err, `the constraint small on table child_answers uses the function "answer". `+
+		require.EqualError(t, err, `failed to compare the functions: the constraint small on table child_answers uses the function "answer". `+
 			`dbdiff must drop and create this function again. `+
 			`dbdiff cannot drop and create this object again. `+
 			`Drop this object and run dbdiff again. After you apply the diff, create the object again`)

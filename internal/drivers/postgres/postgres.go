@@ -136,32 +136,86 @@ func (d *PostgresDriver) Diff(
 	}
 
 	// Every section comes after the sections that its objects use. Keep this order.
-	sections := []func(ctx context.Context) (*SectionDiff, error){
-		d.DiffExtensions,
-		d.DiffEnumTypes,
-		d.DiffDomains,
-		d.DiffCompositeTypes,
-		d.DiffSequences,
-		d.DiffFunctions,
-		d.DiffCasts,
-		d.DiffAggregates,
-		d.DiffOperators,
-		d.DiffTables,
-		d.DiffTableRowTypeFunctions,
-		d.DiffSequenceOwners,
-		d.DiffStatistics,
-		d.DiffViewsAndMaterializedViews,
-		d.DiffViewRowTypeFunctions,
-		d.DiffPoliciesAndRules,
-		d.DiffPrivileges,
+	sections := []struct {
+		name string
+		diff func(ctx context.Context) (*SectionDiff, error)
+	}{
+		{
+			name: "extensions",
+			diff: d.DiffExtensions,
+		},
+		{
+			name: "enum types",
+			diff: d.DiffEnumTypes,
+		},
+		{
+			name: "domains",
+			diff: d.DiffDomains,
+		},
+		{
+			name: "composite types",
+			diff: d.DiffCompositeTypes,
+		},
+		{
+			name: "sequences",
+			diff: d.DiffSequences,
+		},
+		{
+			name: "functions",
+			diff: d.DiffFunctions,
+		},
+		{
+			name: "casts",
+			diff: d.DiffCasts,
+		},
+		{
+			name: "aggregates",
+			diff: d.DiffAggregates,
+		},
+		{
+			name: "operators",
+			diff: d.DiffOperators,
+		},
+		{
+			name: "tables",
+			diff: d.DiffTables,
+		},
+		{
+			name: "functions that use a table row type",
+			diff: d.DiffTableRowTypeFunctions,
+		},
+		{
+			name: "sequence owners",
+			diff: d.DiffSequenceOwners,
+		},
+		{
+			name: "extended statistics",
+			diff: d.DiffStatistics,
+		},
+		{
+			name: "views and the materialized views",
+			diff: d.DiffViewsAndMaterializedViews,
+		},
+		{
+			name: "functions that use a view row type",
+			diff: d.DiffViewRowTypeFunctions,
+		},
+		{
+			name: "policies and the rules",
+			diff: d.DiffPoliciesAndRules,
+		},
+		{
+			name: "privileges",
+			diff: d.DiffPrivileges,
+		},
 	}
 
 	sectionDiffs := make([]*SectionDiff, 0, len(sections))
 
 	for _, section := range sections {
-		sectionDiff, err := section(ctx)
+		sectionDiff, err := section.diff(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to compare the %s: %w", section.name, err)
 		}
 
 		sectionDiffs = append(sectionDiffs, sectionDiff)

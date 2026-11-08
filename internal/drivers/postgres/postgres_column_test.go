@@ -1090,7 +1090,7 @@ func TestPostgresColumn(t *testing.T) {
 
 		_, err := driver.Diff(t.Context(), driver.current, driver.desired, driversshared.DiffOptions{})
 		require.EqualError(t, err, fmt.Sprintf(
-			`the view %s.doubled_measures uses the column "doubled" of the table "measures". `+
+			`failed to compare the tables: the view %s.doubled_measures uses the column "doubled" of the table "measures". `+
 				`dbdiff must drop and add this column. dbdiff cannot drop and create this object again. `+
 				`Drop this object and run dbdiff again. After you apply the diff, create the object again`,
 			otherSchema))
