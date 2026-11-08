@@ -462,13 +462,23 @@ func temporaryTableName(tableName string, reservedNames map[string]bool) string 
 	return name
 }
 
+// A column definition reads DEFAULT "x" as the text x, but a SELECT statement reads "x" as
+// the column x. Therefore, the copy writes the text as a string literal.
+func defaultExpression(defaultText string) string {
+	if strings.HasPrefix(defaultText, `"`) && endOfQuotedTextOrComment(defaultText, 0) == len(defaultText) {
+		return driversshared.QuoteLiteral(unquoteIdentifier(defaultText))
+	}
+
+	return defaultText
+}
+
 // A NULL value fails the NOT NULL constraint of the copy. The default gives the value that
 // ADD COLUMN gives to a NOT NULL column.
 func copyExpression(newColumn *SQLiteColumn, currentColumn *SQLiteColumn) string {
 	expression := driversshared.QuoteIdentifier(currentColumn.Name)
 
 	if newColumn.NotNull && !currentColumn.NotNull && newColumn.Default.Valid {
-		return fmt.Sprintf("COALESCE(%s, %s)", expression, newColumn.Default.String)
+		return fmt.Sprintf("COALESCE(%s, %s)", expression, defaultExpression(newColumn.Default.String))
 	}
 
 	return expression
@@ -507,7 +517,7 @@ func (t *SQLiteTable) recreationInstructions(
 		}
 
 		if newColumn.Default.Valid {
-			selectColumns = append(selectColumns, newColumn.Default.String)
+			selectColumns = append(selectColumns, defaultExpression(newColumn.Default.String))
 		} else {
 			selectColumns = append(selectColumns, driversshared.SQLNullLiteral)
 		}
