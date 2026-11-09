@@ -1,13 +1,16 @@
 package driversshared
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 const (
 	NoTransactionDirective      = "-- dbdiff:no-transaction"
 	AtlasNoTransactionDirective = "-- atlas:txmode none"
 )
 
-// Only a directive line starts the split. Never read the SQL text to decide.
+// FileUsesTransaction reports whether a migration file runs in one transaction.
 func FileUsesTransaction(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -20,122 +23,122 @@ func FileUsesTransaction(content string) bool {
 	return true
 }
 
-// PostgreSQL runs the statements of one call in an implicit transaction block, and it
-// refuses CREATE INDEX CONCURRENTLY there. A file that holds the directive takes one call
-// for each statement for that reason, and every other file runs in one call.
-//
-// A semicolon splits nothing inside parentheses, because the actions of CREATE RULE sit
-// there. It splits nothing inside BEGIN ... END, because the body of a trigger, of a
-// MySQL routine, and of BEGIN ATOMIC holds whole statements. A CASE expression ends with
-// END too, so the block counter reads CASE as an opener. A bare BEGIN opens a block only
-// in a statement that owns a body or inside a block, because BEGIN alone starts a
-// transaction.
-//
-// MySQL reads a backslash in a string as an escape character, and PostgreSQL and SQLite do
-// not. The engine gives that rule with backslashEscapes.
+// SplitSQLStatements splits a SQL file into its statements.
 func SplitSQLStatements(content string, backslashEscapes bool) []string {
 	var statements []string
+	var state statementState
 
 	start := 0
 	index := 0
 
-	parenthesisDepth := 0
-	blockDepth := 0
-	statementOwnsBody := false
-
 	for index < len(content) {
-		rest := content[index:]
+		end := endOfIgnoredText(content, index, backslashEscapes)
 
 		switch {
-		case strings.HasPrefix(rest, "--"):
-			index = EndOfLineComment(content, index)
-		case strings.HasPrefix(rest, "/*"):
-			index = endOfBlockComment(content, index)
-		case content[index] == '\'' || content[index] == '"':
-			if backslashEscapes {
-				index = endOfQuotedText(content, index, true)
-			} else {
-				index = EndOfQuotedText(content, index)
-			}
-		case content[index] == '`':
-			index = EndOfQuotedText(content, index)
-		case content[index] == '$':
-			index = endOfDollarQuotedText(content, index)
-		case content[index] == '(':
-			parenthesisDepth++
-			index++
-		case content[index] == ')':
-			parenthesisDepth--
-			index++
-		case isSQLWordStart(content[index]):
-			word, end := readSQLWord(content, index)
-
-			switch {
-			case isBodyOwnerKeyword(word) && blockDepth == 0:
-				statementOwnsBody = true
-			case word == "begin" && (blockDepth > 0 || statementOwnsBody || nextSQLWord(content, end) == "atomic"):
-				blockDepth++
-			case word == "case" && blockDepth > 0:
-				blockDepth++
-			case word == "end" && blockDepth > 0:
-				var closesBlock bool
-
-				end, closesBlock = readBlockEnd(content, end)
-				if closesBlock {
-					blockDepth--
-				}
-			}
-
+		case end > index:
 			index = end
-		case content[index] == ';' && parenthesisDepth == 0 && blockDepth == 0:
+		case content[index] == ';' && state.endsAtSemicolon():
 			statements = appendStatement(statements, content[start:index])
 			index++
 			start = index
-			statementOwnsBody = false
+			state = statementState{}
 		default:
-			index++
+			index = state.read(content, index)
 		}
 	}
 
 	return appendStatement(statements, content[start:])
 }
 
-// The block counter does not read IF, LOOP, WHILE, and REPEAT as openers, so their END
-// closes no block. The word after END is consumed, because the CASE of END CASE must not
-// open a block.
-func readBlockEnd(content string, index int) (int, bool) {
-	switch nextSQLWord(content, index) {
-	case "if", "loop", "while", "repeat":
-		return endOfNextSQLWord(content, index), false
-	case "case":
-		return endOfNextSQLWord(content, index), true
-	default:
-		return index, true
+// endOfIgnoredText returns the end of the comment or quoted text at index, or index.
+func endOfIgnoredText(content string, index int, backslashEscapes bool) int {
+	rest := content[index:]
+
+	switch {
+	case strings.HasPrefix(rest, "--"):
+		return EndOfLineComment(content, index)
+	case strings.HasPrefix(rest, "/*"):
+		return endOfBlockComment(content, index)
+	case backslashEscapes && (rest[0] == '\'' || rest[0] == '"'):
+		return endOfQuotedText(content, index, true)
+	case rest[0] == '\'' || rest[0] == '"' || rest[0] == '`':
+		return EndOfQuotedText(content, index)
+	case rest[0] == '$':
+		return endOfDollarQuotedText(content, index)
 	}
+
+	return index
 }
 
-func endOfNextSQLWord(content string, index int) int {
-	start := len(content) - len(strings.TrimLeft(content[index:], " \t\n\r"))
+// statementState tracks where the splitter is in the current statement.
+type statementState struct {
+	parenthesisDepth int
+	blockDepth       int
+	ownsBody         bool
+}
 
-	_, end := readSQLWord(content, start)
+// endsAtSemicolon reports whether a semicolon ends the statement here.
+func (s *statementState) endsAtSemicolon() bool {
+	return s.parenthesisDepth == 0 && s.blockDepth == 0
+}
+
+// read updates the state with the character or word at index and returns the next index.
+func (s *statementState) read(content string, index int) int {
+	switch {
+	case content[index] == '(':
+		s.parenthesisDepth++
+	case content[index] == ')':
+		s.parenthesisDepth--
+	case isSQLWordStart(content[index]):
+		return s.readWord(content, index)
+	}
+
+	return index + 1
+}
+
+// readWord updates the block state with the word at index and returns the next index.
+func (s *statementState) readWord(content string, index int) int {
+	word, end := readSQLWord(content, index)
+	nextWord, nextEnd := nextSQLWord(content, end)
+
+	switch {
+	case isBodyOwnerKeyword(word) && s.blockDepth == 0:
+		s.ownsBody = true
+	case word == "begin" && (s.blockDepth > 0 || s.ownsBody || nextWord == "atomic"):
+		s.blockDepth++
+	case word == "case" && s.blockDepth > 0:
+		s.blockDepth++
+	case word == "end" && s.blockDepth > 0 && slices.Contains([]string{"if", "loop", "while", "repeat"}, nextWord):
+		return nextEnd
+	case word == "end" && s.blockDepth > 0:
+		s.blockDepth--
+
+		if nextWord == "case" {
+			return nextEnd
+		}
+	}
 
 	return end
 }
 
+// isBodyOwnerKeyword reports whether the word starts an object that holds a body.
 func isBodyOwnerKeyword(word string) bool {
 	return word == "trigger" || word == "procedure" || word == "function" || word == "event"
 }
 
+// isSQLWordStart reports whether the letter can start a word.
 func isSQLWordStart(letter byte) bool {
 	return letter == '_' ||
 		(letter >= 'a' && letter <= 'z') ||
 		(letter >= 'A' && letter <= 'Z')
 }
 
+// isSQLWordLetter reports whether the letter can continue a word.
 func isSQLWordLetter(letter byte) bool {
 	return isSQLWordStart(letter) || (letter >= '0' && letter <= '9')
 }
 
+// readSQLWord returns the lowercase word at index and its end.
 func readSQLWord(content string, index int) (string, int) {
 	end := index
 
@@ -146,17 +149,17 @@ func readSQLWord(content string, index int) (string, int) {
 	return strings.ToLower(content[index:end]), end
 }
 
-func nextSQLWord(content string, index int) string {
-	rest := strings.TrimLeft(content[index:], " \t\n\r")
-	if rest == "" || !isSQLWordStart(rest[0]) {
-		return ""
+// nextSQLWord returns the lowercase word after the spaces at index and its end.
+func nextSQLWord(content string, index int) (string, int) {
+	start := len(content) - len(strings.TrimLeft(content[index:], " \t\n\r"))
+	if start == len(content) || !isSQLWordStart(content[start]) {
+		return "", index
 	}
 
-	word, _ := readSQLWord(rest, 0)
-
-	return word
+	return readSQLWord(content, start)
 }
 
+// appendStatement adds the trimmed statement if it is not empty.
 func appendStatement(statements []string, statement string) []string {
 	statement = strings.TrimSpace(statement)
 	if statement == "" {
@@ -166,6 +169,7 @@ func appendStatement(statements []string, statement string) []string {
 	return append(statements, statement)
 }
 
+// EndOfLineComment returns the end of the line comment at index.
 func EndOfLineComment(content string, index int) int {
 	end := strings.IndexByte(content[index:], '\n')
 	if end < 0 {
@@ -175,7 +179,7 @@ func EndOfLineComment(content string, index int) int {
 	return index + end + 1
 }
 
-// PostgreSQL nests a block comment, so this function counts the pairs.
+// endOfBlockComment returns the end of the block comment at index.
 func endOfBlockComment(content string, index int) int {
 	depth := 0
 
@@ -204,14 +208,14 @@ func endOfBlockComment(content string, index int) int {
 	return len(content)
 }
 
-// PostgreSQL reads a backslash as an escape in a string of the form E'...' only. A string of
-// another form holds the backslash as a character of the text.
+// EndOfQuotedText returns the end of the quoted text at index.
 func EndOfQuotedText(content string, index int) int {
 	escapes := content[index] == '\'' && index > 0 && (content[index-1] == 'E' || content[index-1] == 'e')
 
 	return endOfQuotedText(content, index, escapes)
 }
 
+// endOfQuotedText returns the end of the quoted text at index.
 func endOfQuotedText(content string, index int, escapes bool) int {
 	quote := content[index]
 
@@ -230,7 +234,6 @@ func endOfQuotedText(content string, index int, escapes bool) int {
 			continue
 		}
 
-		// Two quote characters are one character of the text.
 		if index+1 < len(content) && content[index+1] == quote {
 			index += 2
 
@@ -243,10 +246,11 @@ func endOfQuotedText(content string, index int, escapes bool) int {
 	return len(content)
 }
 
+// endOfDollarQuotedText returns the end of the dollar-quoted text at index, or index.
 func endOfDollarQuotedText(content string, index int) int {
 	tag := dollarQuoteTag(content, index)
 	if tag == "" {
-		return index + 1
+		return index
 	}
 
 	end := strings.Index(content[index+len(tag):], tag)
@@ -257,7 +261,7 @@ func endOfDollarQuotedText(content string, index int) int {
 	return index + len(tag) + end + len(tag)
 }
 
-// A tag is $$ or $name$. A dollar that no tag follows names a parameter, for example $1.
+// dollarQuoteTag returns the dollar-quote tag at index, or an empty string.
 func dollarQuoteTag(content string, index int) string {
 	for offset := index + 1; offset < len(content); offset++ {
 		letter := content[offset]
